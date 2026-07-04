@@ -37,24 +37,22 @@ export function SearchPage() {
         <button type="submit">Search</button>
       </form>
       <StatusBox loading={loading} error={error} empty={data?.length === 0} />
+      {data && <FeedbackWidget endpoint="search" query={ratedQuery} />}
       {data && data.length > 0 && (
-        <>
-          <DataTable
-            rows={data}
-            keyFn={(r, i) => r.node_key || String(i)}
-            columns={[
-              { header: "Name", render: (r) => r.name },
-              {
-                header: "Labels",
-                render: (r) => <LabelBadges labels={r.labels} />,
-              },
-              { header: "Repo", render: (r) => r.repo },
-              { header: "Path", render: (r) => r.path },
-              { header: "Line", render: (r) => r.line },
-            ]}
-          />
-          <FeedbackWidget endpoint="search" query={ratedQuery} />
-        </>
+        <DataTable
+          rows={data}
+          keyFn={(r, i) => r.node_key || String(i)}
+          columns={[
+            { header: "Name", render: (r) => r.name },
+            {
+              header: "Labels",
+              render: (r) => <LabelBadges labels={r.labels} />,
+            },
+            { header: "Repo", render: (r) => r.repo },
+            { header: "Path", render: (r) => r.path },
+            { header: "Line", render: (r) => r.line },
+          ]}
+        />
       )}
     </section>
   );

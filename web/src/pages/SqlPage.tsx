@@ -3,17 +3,23 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges, joinList } from "../components/DataTable";
+import { FeedbackWidget } from "../components/FeedbackWidget";
 import type { SQLObjectInfo } from "../types";
 
 export function SqlPage() {
   const [schema, setSchema] = useState("");
   const [name, setName] = useState("");
+  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<SQLObjectInfo[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (name.trim())
+    if (name.trim()) {
+      setRatedQuery(
+        schema.trim() ? `${schema.trim()}.${name.trim()}` : name.trim(),
+      );
       run(() => api.findSQLObject(schema.trim() || undefined, name.trim()));
+    }
   };
 
   return (
@@ -39,6 +45,7 @@ export function SqlPage() {
         <button type="submit">Look up</button>
       </form>
       <StatusBox loading={loading} error={error} empty={data?.length === 0} />
+      {data && <FeedbackWidget endpoint="sql" query={ratedQuery} />}
       {data && data.length > 0 && (
         <DataTable
           rows={data}

@@ -2,17 +2,21 @@ import { useState, type FormEvent } from "react";
 import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
+import { FeedbackWidget } from "../components/FeedbackWidget";
 import type { PathNode } from "../types";
 
 export function PathPage() {
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
+  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<PathNode[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (source.trim() && target.trim())
+    if (source.trim() && target.trim()) {
+      setRatedQuery(`${source.trim()} -> ${target.trim()}`);
       run(() => api.shortestPath(source.trim(), target.trim()));
+    }
   };
 
   return (
@@ -36,6 +40,7 @@ export function PathPage() {
         <button type="submit">Trace</button>
       </form>
       <StatusBox loading={loading} error={error} empty={data?.length === 0} />
+      {data && <FeedbackWidget endpoint="path" query={ratedQuery} />}
       {data && data.length > 0 && (
         <ol className="path-trail">
           {data.map((node, i) => (

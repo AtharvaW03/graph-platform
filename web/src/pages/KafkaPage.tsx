@@ -3,15 +3,20 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { joinList } from "../components/DataTable";
+import { FeedbackWidget } from "../components/FeedbackWidget";
 import type { KafkaTopicInfo } from "../types";
 
 export function KafkaPage() {
   const [topic, setTopic] = useState("");
+  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<KafkaTopicInfo>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (topic.trim()) run(() => api.findKafkaTopic(topic.trim()));
+    if (topic.trim()) {
+      setRatedQuery(topic.trim());
+      run(() => api.findKafkaTopic(topic.trim()));
+    }
   };
 
   return (
@@ -31,6 +36,7 @@ export function KafkaPage() {
         <button type="submit">Look up</button>
       </form>
       <StatusBox loading={loading} error={error} />
+      {data && <FeedbackWidget endpoint="kafka" query={ratedQuery} />}
       {data && (
         <dl className="kv">
           <dt>Topic</dt>
