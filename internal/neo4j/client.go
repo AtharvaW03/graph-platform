@@ -179,7 +179,7 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit string, nodes []g
 			"norm_name":      n.NormLabel,
 			"path":           n.SourceFile,
 			"line":           n.SourceLocation,
-			"language":       n.MetaString("language"),
+			"language":       orNil(graphify.InferLanguage(n)),
 			"file_type":      n.FileType,
 			"community":      n.Community,
 			"community_name": n.CommunityName,

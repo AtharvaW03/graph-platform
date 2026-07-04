@@ -89,3 +89,30 @@ func TestIsShared(t *testing.T) {
 		}
 	}
 }
+
+func TestInferLanguage(t *testing.T) {
+	cases := []struct {
+		node Node
+		want string
+	}{
+		// explicit metadata wins
+		{Node{Metadata: map[string]any{"language": "bash"}, SourceFile: "run.go"}, "bash"},
+		// extension fallback - the fix for Go repos showing only bash
+		{Node{SourceFile: "internal/api/server.go"}, "go"},
+		{Node{SourceFile: "src/Main.kt"}, "kotlin"},
+		{Node{SourceFile: "app/Views/OrderView.swift"}, "swift"},
+		{Node{SourceFile: "web/src/App.tsx"}, "typescript"},
+		{Node{SourceFile: "pipeline/etl_job.py"}, "python"},
+		{Node{SourceFile: "db/procs/calc_pnl.SQL"}, "sql"}, // case-insensitive
+		// non-code and unknown files stay unlabeled
+		{Node{SourceFile: "config/app.yaml"}, ""},
+		{Node{SourceFile: "README.md"}, ""},
+		{Node{SourceFile: "Makefile"}, ""},
+		{Node{SourceFile: ""}, ""},
+	}
+	for _, c := range cases {
+		if got := InferLanguage(c.node); got != c.want {
+			t.Errorf("InferLanguage(%q) = %q, want %q", c.node.SourceFile, got, c.want)
+		}
+	}
+}

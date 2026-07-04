@@ -5,10 +5,11 @@ import { api } from "../api";
 // relevant in >= 80% of sessions"). Rendered directly under the query form,
 // ABOVE any results, so it's visible without scrolling past a large table.
 //
-// One submission per rated query: optionally type a note first, then click a
-// thumb - a single POST carries both. Resets whenever the rated query
-// changes. Empty result sets are rateable too (a thumbs-down on "found
-// nothing" is exactly the signal the metric needs).
+// Flow: click a thumb to select a rating (highlighted), optionally add a
+// note, then Send submits both in one POST. Nothing is recorded until Send
+// is clicked. The bar resets whenever the rated query changes; empty result
+// sets are rateable too (a thumbs-down on "found nothing" is exactly the
+// signal the metric needs).
 export function FeedbackWidget({
   endpoint,
   query,
@@ -16,23 +17,26 @@ export function FeedbackWidget({
   endpoint: string;
   query: string;
 }) {
+  const [choice, setChoice] = useState<boolean | null>(null);
   const [note, setNote] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent" | "failed">(
     "idle",
   );
 
   useEffect(() => {
-    setState("idle");
+    setChoice(null);
     setNote("");
+    setState("idle");
   }, [endpoint, query]);
 
-  const send = async (helpful: boolean) => {
+  const send = async () => {
+    if (choice === null) return;
     setState("sending");
     try {
       await api.sendFeedback({
         endpoint,
         query,
-        helpful,
+        helpful: choice,
         note: note.trim() || undefined,
       });
       setState("sent");
@@ -49,18 +53,22 @@ export function FeedbackWidget({
       <span>Helpful?</span>
       <button
         type="button"
-        className="feedback-thumb"
-        onClick={() => send(true)}
-        disabled={state === "sending"}
+        className={
+          choice === true ? "feedback-thumb selected" : "feedback-thumb"
+        }
+        onClick={() => setChoice(true)}
+        aria-pressed={choice === true}
         aria-label="Results were helpful"
       >
         👍
       </button>
       <button
         type="button"
-        className="feedback-thumb"
-        onClick={() => send(false)}
-        disabled={state === "sending"}
+        className={
+          choice === false ? "feedback-thumb selected" : "feedback-thumb"
+        }
+        onClick={() => setChoice(false)}
+        aria-pressed={choice === false}
         aria-label="Results were not helpful"
       >
         👎
@@ -68,9 +76,18 @@ export function FeedbackWidget({
       <input
         value={note}
         onChange={(e) => setNote(e.target.value)}
-        placeholder="optional note, then click a thumb"
+        placeholder="optional note"
         maxLength={2000}
       />
+      <button
+        type="button"
+        className="feedback-send"
+        onClick={send}
+        disabled={choice === null || state === "sending"}
+        title={choice === null ? "pick a thumb first" : "send feedback"}
+      >
+        Send
+      </button>
       {state === "failed" && (
         <span className="feedback-error">couldn't record, try again</span>
       )}
