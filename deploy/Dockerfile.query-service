@@ -1,6 +1,10 @@
 # Build stage
 FROM golang:1.26 AS build
 WORKDIR /src
+# Trust corporate CAs (if any) so go mod download works behind
+# TLS-intercepting proxies. Empty deploy/certs/ is a no-op.
+COPY deploy/certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
