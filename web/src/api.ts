@@ -15,8 +15,13 @@ import type {
 // In dev, requests go to /api and Vite's proxy (vite.config.ts) forwards them
 // to the query-service, which sidesteps CORS entirely. In a production build,
 // set VITE_API_BASE to the query-service's real origin.
+//
+// Deliberately NO auth token here: anything in a VITE_* variable is baked
+// into the shipped JS bundle, so a token configured that way is readable by
+// every browser that can load this page — it would silently turn the
+// org-wide code index public. Deploy the UI behind a reverse proxy that
+// injects the Authorization header server-side (or terminates SSO) instead.
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
-const AUTH_TOKEN = import.meta.env.VITE_QUERY_AUTH_TOKEN as string | undefined;
 
 export class ApiError extends Error {
   status: number;
@@ -36,12 +41,7 @@ async function get<T>(
       if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
     }
   }
-  const headers: Record<string, string> = {};
-  if (AUTH_TOKEN) headers.Authorization = `Bearer ${AUTH_TOKEN}`;
-
-  const res = await fetch(url.toString().replace(window.location.origin, ""), {
-    headers,
-  });
+  const res = await fetch(url.toString().replace(window.location.origin, ""));
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new ApiError(res.status, body || res.statusText);

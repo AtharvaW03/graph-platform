@@ -91,7 +91,9 @@ curl -H "Authorization: Bearer dev-token" "http://localhost:8080/overview/my-rep
 | `NEO4J_URI` | indexer, query-service | `neo4j://127.0.0.1:7687` | Neo4j endpoint |
 | `NEO4J_USER` | indexer, query-service | `neo4j` | Neo4j user |
 | `QUERY_PORT` | query-service | `8080` | listen port |
+| `QUERY_BIND` | query-service | `127.0.0.1` without auth, all interfaces with | listen address |
 | `QUERY_AUTH_TOKEN` | query-service, mcp-server | *(empty = no auth)* | static bearer token |
+| `QUERY_CORS_ORIGIN` | query-service | *(empty = CORS disabled)* | single trusted origin for a cross-origin web UI |
 | `QUERY_SERVICE_URL` | mcp-server | `http://localhost:8080` | query-service base URL |
 | `QUERY_TIMEOUT` | mcp-server | `30s` | per-request timeout |
 
@@ -152,9 +154,21 @@ HEAD hasn't moved (e.g. after an extractor fix or a graph wipe).
 | indexer summary shows `[MISMATCH: N in graph]` | node_key collisions: imported count ≠ Neo4j count; investigate before trusting results |
 | stale results after extractor changes | re-run with `--force`; old shared nodes are reaped only when orphaned |
 
+### Web UI authentication
+
+The web UI never embeds the bearer token — a `VITE_*` variable is baked into
+the shipped JS bundle, readable by anyone who can load the page. Serve the UI
+same-origin behind a reverse proxy that injects `Authorization` server-side
+(recommended), or set `QUERY_CORS_ORIGIN` on query-service and terminate auth
+at the proxy in front of the UI.
+
 ### Operational invariants
 
 - **One indexer per workdir.** Enforced by flock on unix; convention on Windows.
+- **One indexer per Neo4j database.** The flock only covers one host's workdir.
+  Two indexers on different hosts can race: the orphaned-shared-node sweep of
+  one can delete a shared node the other has imported but not yet linked,
+  silently dropping edges until the next re-index.
 - `workdir/` is disposable *except* `state.json` (and even that self-heals —
   deleting it just forces a full re-index).
 - The importer is idempotent: re-importing the same commit is a no-op upsert.

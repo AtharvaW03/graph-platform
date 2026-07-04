@@ -17,7 +17,6 @@
 package kafka
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io/fs"
@@ -174,36 +173,30 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 			return nil
 		}
 
-		f, ferr := os.Open(path)
-		if ferr != nil {
-			frag.Warn(fmt.Sprintf("%s: %v", rel, ferr))
+		// Scan the whole file (already size-capped above), not line-by-line:
+		// idiomatic struct literals split the pattern across lines
+		// (ProducerMessage{\n    Topic: "x"}), and the [^}]* classes in the
+		// patterns span newlines, so whole-content matching catches them.
+		body, rerr := os.ReadFile(path)
+		if rerr != nil {
+			frag.Warn(fmt.Sprintf("%s: %v", rel, rerr))
 			return nil
 		}
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		lineNum := 0
-		for scanner.Scan() {
-			lineNum++
-			line := scanner.Text()
-			for _, re := range ps.produces {
-				for _, m := range re.FindAllStringSubmatch(line, -1) {
-					if len(m) >= 2 && m[1] != "" {
-						register(produced, m[1], rel, lineNum)
-					}
-				}
-			}
-			for _, re := range ps.consumes {
-				for _, m := range re.FindAllStringSubmatch(line, -1) {
-					if len(m) >= 2 && m[1] != "" {
-						register(consumed, m[1], rel, lineNum)
-					}
+		content := string(body)
+		for _, re := range ps.produces {
+			for _, m := range re.FindAllStringSubmatchIndex(content, -1) {
+				if topic := captured(content, m); topic != "" {
+					register(produced, topic, rel, lineAt(content, m[0]))
 				}
 			}
 		}
-		if serr := scanner.Err(); serr != nil {
-			frag.Warn(fmt.Sprintf("%s: scan: %v", rel, serr))
+		for _, re := range ps.consumes {
+			for _, m := range re.FindAllStringSubmatchIndex(content, -1) {
+				if topic := captured(content, m); topic != "" {
+					register(consumed, topic, rel, lineAt(content, m[0]))
+				}
+			}
 		}
-		_ = f.Close()
 		return nil
 	}
 
@@ -352,6 +345,20 @@ func topicValues(val string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+// captured returns the first capture group of a FindAllStringSubmatchIndex
+// match, or "" when the group did not participate in the match.
+func captured(s string, m []int) string {
+	if len(m) >= 4 && m[2] >= 0 {
+		return s[m[2]:m[3]]
+	}
+	return ""
+}
+
+// lineAt returns the 1-based line number of byte offset off in s.
+func lineAt(s string, off int) int {
+	return 1 + strings.Count(s[:off], "\n")
 }
 
 type occurrence struct {

@@ -7,6 +7,15 @@ import (
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
+// Result-set caps for the extractor-backed queries. These queries aggregate
+// per-row collections (reads/writes/sources/targets), so an unbounded row
+// count multiplies memory on both Neo4j and this service.
+const (
+	depLimit     = 1000
+	sqlLimit     = 200
+	glueJobLimit = 500
+)
+
 // FindDependencies returns every package (and cross-repo target) the given
 // repository declares a dependency on. Pass scope="" to include every scope
 // (runtime, dev, indirect, peer, optional); pass a specific scope to filter.
@@ -31,8 +40,9 @@ RETURN p.name                          AS name,
        coalesce(d.context, '')          AS scope,
        type(d) = 'DEPENDS_ON_REPO'      AS cross
 ORDER BY ecosystem, name
+LIMIT $limit
 `
-	return s.runDepQuery(ctx, cypher, map[string]any{"repo": repo, "scope": scope}, repo)
+	return s.runDepQuery(ctx, cypher, map[string]any{"repo": repo, "scope": scope, "limit": depLimit}, repo)
 }
 
 // FindDependents returns every repository whose manifest declares a
@@ -56,8 +66,9 @@ RETURN r.name                          AS name,
        coalesce(d.context, '')          AS scope,
        type(d) = 'DEPENDS_ON_REPO'      AS cross
 ORDER BY name
+LIMIT $limit
 `
-	return s.runDepQuery(ctx, cypher, map[string]any{"dep": dep}, "")
+	return s.runDepQuery(ctx, cypher, map[string]any{"dep": dep, "limit": depLimit}, "")
 }
 
 func (s *Service) runDepQuery(ctx context.Context, cypher string, params map[string]any, repoBound string) ([]DependencyEdge, error) {
@@ -234,9 +245,10 @@ RETURN o.name                              AS name,
        collect(DISTINCT dep.name)           AS depends_on,
        coalesce(head(collect(DISTINCT tt.name)), '') AS triggers_on
 ORDER BY name
+LIMIT $limit
 `
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"schema": schema, "name": name, "full": full})
+		res, err := tx.Run(ctx, cypher, map[string]any{"schema": schema, "name": name, "full": full, "limit": sqlLimit})
 		if err != nil {
 			return nil, err
 		}
@@ -298,9 +310,10 @@ RETURN j.name                AS name,
        sources                AS sources,
        targets                AS targets
 ORDER BY repo, name
+LIMIT $limit
 `
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"source": source, "target": target})
+		res, err := tx.Run(ctx, cypher, map[string]any{"source": source, "target": target, "limit": glueJobLimit})
 		if err != nil {
 			return nil, err
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"graph-platform/internal/neo4j"
 
@@ -15,6 +16,18 @@ const (
 	maxBlastDepth       = 10
 	shortestPathHopsMax = 15
 	searchLimit         = 100
+
+	// symbolLimit caps result sets on the symbol/caller/callee/blast-radius
+	// queries. Without a LIMIT, a hub symbol (a logger, a base class) can
+	// return tens of thousands of rows that Collect() buffers in memory on
+	// both Neo4j and this service.
+	symbolLimit = 500
+
+	// txTimeout bounds every read transaction server-side. It is the backstop
+	// against runaway traversals (blast-radius path enumeration in particular):
+	// Neo4j kills the query when the timeout elapses instead of letting one
+	// request pin the database indefinitely.
+	txTimeout = 30 * time.Second
 )
 
 type Service struct {
@@ -28,7 +41,7 @@ func NewService(db *neo4j.Client) *Service {
 func (s *Service) read(ctx context.Context, fn func(tx driver.ManagedTransaction) (any, error)) (any, error) {
 	sess := s.db.Driver.NewSession(ctx, driver.SessionConfig{AccessMode: driver.AccessModeRead})
 	defer sess.Close(ctx)
-	return sess.ExecuteRead(ctx, fn)
+	return sess.ExecuteRead(ctx, fn, driver.WithTxTimeout(txTimeout))
 }
 
 // Search returns nodes whose name or norm_name contains q (case-insensitive),
@@ -107,10 +120,11 @@ RETURN n.name           AS name,
        labels(n)        AS labels,
        n.community      AS community
 ORDER BY n.repo, n.path, n.line
+LIMIT $limit
 `
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": symbol})
+		res, err := tx.Run(ctx, cypher, map[string]any{"s": symbol, "limit": symbolLimit})
 		if err != nil {
 			return nil, err
 		}
@@ -157,6 +171,7 @@ RETURN caller.name AS caller,
        callee.repo AS callee_repo,
        callee.path AS callee_path
 ORDER BY caller.repo, caller.path, caller.line
+LIMIT $limit
 `
 	return s.runCallEdgeQuery(ctx, cypher, symbol)
 }
@@ -182,13 +197,14 @@ RETURN caller.name AS caller,
        callee.name AS callee,
        callee.repo AS callee_repo,
        callee.path AS callee_path
+LIMIT $limit
 `
 	return s.runCallEdgeQuery(ctx, cypher, symbol)
 }
 
 func (s *Service) runCallEdgeQuery(ctx context.Context, cypher, symbol string) ([]CallEdge, error) {
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": symbol})
+		res, err := tx.Run(ctx, cypher, map[string]any{"s": symbol, "limit": symbolLimit})
 		if err != nil {
 			return nil, err
 		}
@@ -235,6 +251,9 @@ func (s *Service) BlastRadius(ctx context.Context, symbol string, depth int) ([]
 
 	// The variable-length path depth cannot be parameterized in Cypher.
 	// depth is bounded by the clamp above, so string-formatting it is safe.
+	// This is exhaustive path enumeration, not BFS — on dense graphs deep
+	// traversals are combinatorial. The LIMIT bounds the result set and the
+	// transaction timeout in read() bounds the enumeration itself.
 	cypher := fmt.Sprintf(`
 WITH toLower($s) AS slow
 MATCH (start:Entity)
@@ -248,10 +267,11 @@ RETURN impacted.name  AS name,
        labels(impacted) AS labels,
        distance
 ORDER BY distance, name
+LIMIT $limit
 `, depth)
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": symbol})
+		res, err := tx.Run(ctx, cypher, map[string]any{"s": symbol, "limit": symbolLimit})
 		if err != nil {
 			return nil, err
 		}
