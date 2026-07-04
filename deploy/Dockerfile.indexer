@@ -1,6 +1,10 @@
 # Build stage
 FROM golang:1.26 AS build
 WORKDIR /src
+# Trust corporate CAs (if any) so go mod download works behind
+# TLS-intercepting proxies. Empty deploy/certs/ is a no-op.
+COPY deploy/certs/ /usr/local/share/ca-certificates/
+RUN update-ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
@@ -12,10 +16,21 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/indexer ./cmd/indexer
 # container needs no AI credentials and no code ever leaves it except to
 # fetch from GitHub.
 FROM python:3.12-slim
+
+# Corporate-network support: any *.crt dropped in deploy/certs/ joins the
+# container's trust store, so pip and the indexer's git clones work behind
+# TLS-intercepting proxies. See deploy/certs/README.md. The env vars point
+# python/pip/git at the merged system bundle.
+COPY deploy/certs/ /usr/local/share/ca-certificates/
+ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir graphifyy
+    && update-ca-certificates \
+    && pip install --no-cache-dir --timeout 60 --retries 5 graphifyy
 
 COPY --from=build /out/indexer /usr/local/bin/indexer
 COPY deploy/indexer-entrypoint.sh /usr/local/bin/indexer-entrypoint.sh

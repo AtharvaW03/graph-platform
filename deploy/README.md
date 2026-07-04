@@ -22,6 +22,30 @@ docker compose up -d --build
 The portal is at `http://<host>/` (or `:$WEB_PORT`). Watch the first index
 cycle with `docker compose logs -f indexer`.
 
+## Corporate networks (TLS interception)
+
+If the build fails with `CERTIFICATE_VERIFY_FAILED: unable to get local
+issuer certificate` during `pip install` or `go mod download`, your network
+re-signs HTTPS with a corporate root CA the containers don't trust. Export
+it into `deploy/certs/` and rebuild — see
+[`deploy/certs/README.md`](certs/README.md) for the one-liner per OS.
+
+## Indexing local clones instead of GitHub
+
+For a quick test with repos that already live on the host, keep `file://`
+URLs in `repos.yaml` and mount the parent directory into the indexer at the
+SAME path, read-only:
+
+```yaml
+    volumes:
+      - indexer-workdir:/workdir
+      - ./config:/app/config:ro
+      - /Users/you/code:/Users/you/code:ro   # matches the file:// URLs
+```
+
+Without the mount, `file://` paths resolve inside the container, not on
+your host, and every clone fails.
+
 ## Git auth for private repos
 
 Pick one:
