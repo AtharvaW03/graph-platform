@@ -38,7 +38,7 @@ const stateVersion = 1
 // if it does not exist. If the file exists but is malformed JSON it is
 // quarantined to <path>.corrupt-<timestamp> and a fresh empty store is
 // returned, with a warning logged via stderr. This is the only way a
-// long-running daemon recovers from a corrupted state file — fataling here
+// long-running daemon recovers from a corrupted state file - fataling here
 // would wedge the indexer permanently against a single bad write.
 //
 // A versioned file that is NEWER than stateVersion is treated as a hard
@@ -82,7 +82,7 @@ func (s *JSONStateStore) Get(name string) (RepoState, bool) {
 
 // Set updates the in-memory map and atomically flushes to disk. On flush
 // failure the in-memory map is rolled back to its previous contents so
-// memory and disk stay consistent — the next Set will be a clean retry.
+// memory and disk stay consistent - the next Set will be a clean retry.
 func (s *JSONStateStore) Set(state RepoState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

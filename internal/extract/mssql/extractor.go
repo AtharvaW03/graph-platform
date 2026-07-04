@@ -1,8 +1,8 @@
 // Package mssql extracts Microsoft SQL Server schema objects from a repo's
 // .sql files: schemas, tables, views, stored procedures, triggers, and
 // functions (scalar + table-valued). Each object becomes a typed node and
-// the relationships between them — view DEPENDS_ON table, procedure
-// READS_TABLE / WRITES_TABLE / triggers TRIGGERS_ON table — are inferred
+// the relationships between them - view DEPENDS_ON table, procedure
+// READS_TABLE / WRITES_TABLE / triggers TRIGGERS_ON table - are inferred
 // from the bodies of CREATE/ALTER statements.
 //
 // The extractor is regex-based; it does NOT parse T-SQL grammar. It is
@@ -185,7 +185,7 @@ func splitObjects(text, file string) []objectStmt {
 		})
 	}
 
-	// Sort hits by start index ascending — establishes statement boundaries.
+	// Sort hits by start index ascending - establishes statement boundaries.
 	sort.Slice(hits, func(i, j int) bool { return hits[i].idx < hits[j].idx })
 	for i, h := range hits {
 		bodyStart := h.end
@@ -275,7 +275,7 @@ func emit(frag *extract.Fragment, repoName string, s objectStmt) {
 }
 
 // deleteFromRe locates the FROM keyword inside DELETE FROM statements so the
-// reads scan (bodySelectRe, which matches every FROM) can skip them — a proc
+// reads scan (bodySelectRe, which matches every FROM) can skip them - a proc
 // that only deletes from a table must not also get a reads_table edge for it.
 var deleteFromRe = regexp.MustCompile(`(?is)\bDELETE\s+(FROM)\b`)
 

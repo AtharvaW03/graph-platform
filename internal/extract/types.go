@@ -1,6 +1,6 @@
 // Package extract defines the platform's extractor framework. Extractors
 // scan a freshly-synced repository checkout and emit Graphify-compatible
-// extraction fragments — the same {nodes, edges} dictionary shape that
+// extraction fragments - the same {nodes, edges} dictionary shape that
 // graphify's own `extract()` functions produce.
 //
 // The orchestrator runs every Extractor for a repo, merges all returned
@@ -189,10 +189,10 @@ func (f *Fragment) Empty() bool {
 // Extractor is the framework's only contract. Each implementation reads files
 // under repoPath (a freshly synced clone) and returns a Fragment containing
 // the entities it discovered for the given repo. Extractors:
-//   - operate independently — no shared state between extractors
+//   - operate independently - no shared state between extractors
 //   - emit Graphify-compatible nodes and edges
 //   - validate their own output before returning
-//   - report errors independently — returning an error never aborts other
+//   - report errors independently - returning an error never aborts other
 //     extractors for the same repo
 //   - are pure with respect to disk: they read but never write
 type Extractor interface {
@@ -203,7 +203,7 @@ type Extractor interface {
 // Validate enforces the minimal schema invariants build_graph relies on:
 // non-empty node IDs and labels, non-empty edge endpoints and relations, and
 // a recognized confidence tier. Edges referencing node IDs absent from this
-// fragment are deliberately NOT rejected — they may resolve against nodes
+// fragment are deliberately NOT rejected - they may resolve against nodes
 // another fragment or graphify itself emits; anything still dangling is
 // counted and skipped at import time.
 func (f *Fragment) Validate() error {

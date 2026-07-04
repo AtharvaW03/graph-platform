@@ -7,7 +7,7 @@
 # scratch.
 #
 # `graphify` controls how the AST extractor is invoked. The default is
-# `graphify update <repo_path>` — graphify's incremental, AST-only
+# `graphify update <repo_path>` - graphify's incremental, AST-only
 # workflow (per docs/graphify/architecture.md). It writes inside the repo at
 # `<repo_path>/graphify-out/graph.json`, so there is no --out flag and no
 # {out_dir} placeholder. The only supported placeholder in args is

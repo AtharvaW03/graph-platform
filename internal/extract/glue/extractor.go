@@ -1,5 +1,5 @@
 // Package glue extracts AWS Glue job definitions from a repository. Glue jobs
-// can be declared in several places — Terraform (aws_glue_job), CloudFormation
+// can be declared in several places - Terraform (aws_glue_job), CloudFormation
 // (AWS::Glue::Job), CDK code, or directly created with boto3 calls. This
 // extractor handles the three declarative shapes (Terraform HCL, CloudFormation
 // YAML/JSON) plus a heuristic Python scan for `glueContext.create_dynamic_frame`
@@ -242,7 +242,7 @@ func walkCFResources(doc map[string]any, file string) []discoveredJob {
 		return out
 	}
 	// Two passes: jobs first, then triggers. Resources is a Go map with
-	// random iteration order — a trigger visited before its job would bind
+	// random iteration order - a trigger visited before its job would bind
 	// its schedule to nothing.
 	for logicalID, raw := range resources {
 		res, ok := raw.(map[string]any)
@@ -299,10 +299,10 @@ var (
 
 func parseGlueScript(body, file string) []discoveredJob {
 	if !glueJobInitRe.MatchString(body) && !glueJobNameRe.MatchString(body) {
-		// Bare boto3 call or unrelated module — skip rather than guess.
+		// Bare boto3 call or unrelated module - skip rather than guess.
 		return nil
 	}
-	// We don't have the job name in the script itself in general — use the
+	// We don't have the job name in the script itself in general - use the
 	// script filename as a best-effort label. mergeScriptJobs folds this
 	// entry into a TF/CFN-declared job when one references the same script.
 	name := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))

@@ -18,7 +18,7 @@ export function KafkaPage() {
     <section>
       <h1>Kafka Topic</h1>
       <p className="hint">
-        Exact topic name lookup — returns the repositories that produce to and
+        Exact topic name lookup - returns the repositories that produce to and
         consume from it.
       </p>
       <form onSubmit={onSubmit} className="query-form">

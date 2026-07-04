@@ -34,7 +34,7 @@ type Config struct {
 }
 
 // ExtractorsConfig toggles each platform extractor on/off. All default to
-// enabled — operators can disable any one by setting it to false.
+// enabled - operators can disable any one by setting it to false.
 type ExtractorsConfig struct {
 	Deps     *bool `yaml:"deps"`
 	HTTPAPI  *bool `yaml:"http_api"`
@@ -47,7 +47,7 @@ type ExtractorsConfig struct {
 }
 
 // OrgConfig captures organization-wide conventions used by extractors. The
-// most important is Prefixes — when a dependency's name starts with one of
+// most important is Prefixes - when a dependency's name starts with one of
 // these, the deps extractor emits a cross-repository edge so questions like
 // "which repos depend on auth-service?" become one-hop traversals.
 type OrgConfig struct {

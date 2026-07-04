@@ -45,7 +45,7 @@ const (
 //     stamped with anything other than Commit, removing data from prior
 //     commits that no longer exists in the source tree.
 //
-// When Commit is empty, neither stamping nor sweeping happens — this is the
+// When Commit is empty, neither stamping nor sweeping happens - this is the
 // legacy mode used by the importer CLI on a static graph.json.
 //
 // Progress, if non-nil, is invoked at the start of each stage with a stage
@@ -80,7 +80,7 @@ type Summary struct {
 	EdgesSwept        int
 	// NodesInGraph is the :Entity count Neo4j actually holds for this repo
 	// after the import completes (post-sweep). Compared against NodesTotal it
-	// reveals silent data loss — e.g. before the StableKey.n.ID fix, a repo
+	// reveals silent data loss - e.g. before the StableKey.n.ID fix, a repo
 	// with 68,058 input nodes ended up with 63,131 in Neo4j; the summary
 	// used to report only NodesTotal, hiding the 4,927-node gap.
 	NodesInGraph int

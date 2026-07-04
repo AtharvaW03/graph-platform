@@ -8,6 +8,7 @@ import { RoutesPage } from "./pages/RoutesPage";
 import { KafkaPage } from "./pages/KafkaPage";
 import { SqlPage } from "./pages/SqlPage";
 import { GluePage } from "./pages/GluePage";
+import { HotspotsPage } from "./pages/HotspotsPage";
 
 const nav = [
   { to: "/overview", label: "Repository Overview" },
@@ -19,6 +20,7 @@ const nav = [
   { to: "/kafka", label: "Kafka Topics" },
   { to: "/sql", label: "SQL Objects" },
   { to: "/glue", label: "Glue Jobs" },
+  { to: "/hotspots", label: "Hotspots" },
 ];
 
 export default function App() {
@@ -50,6 +52,7 @@ export default function App() {
           <Route path="/kafka" element={<KafkaPage />} />
           <Route path="/sql" element={<SqlPage />} />
           <Route path="/glue" element={<GluePage />} />
+          <Route path="/hotspots" element={<HotspotsPage />} />
         </Routes>
       </main>
     </div>

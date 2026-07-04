@@ -2,9 +2,9 @@
 // keeps them cloned and in sync, runs Graphify on changed repos, and feeds
 // the produced graph.json into the existing Neo4j importer.
 //
-// The package is designed so future enhancements — GitHub webhooks, SQS or
+// The package is designed so future enhancements - GitHub webhooks, SQS or
 // other job queues, distributed workers, retry policies, parallel indexing,
-// and additional extractors — can be added by swapping out the JobSource,
+// and additional extractors - can be added by swapping out the JobSource,
 // Syncer, Graphifier, or StateStore implementations without touching the
 // orchestrator or pipeline.
 package index
@@ -80,7 +80,7 @@ type RepoResult struct {
 	// NodesInGraph is Neo4j's actual :Entity count for the repo after import.
 	// Compared to Nodes it exposes silent data loss (e.g. node_key collisions).
 	NodesInGraph int
-	// Mismatch is true when NodesInGraph != Nodes with commit stamping on —
+	// Mismatch is true when NodesInGraph != Nodes with commit stamping on -
 	// a signal that the importer's input and Neo4j's post-import state diverged.
 	Mismatch bool
 	// ExtractorStats records per-extractor node/edge counts so operators can
@@ -147,7 +147,7 @@ type Syncer interface {
 // callers do not need to know the extractor's output layout.
 //
 // The default implementation invokes `graphify update <repo_path>`, which is
-// graphify's incremental, AST-only-by-default workflow — it does NOT pass an
+// graphify's incremental, AST-only-by-default workflow - it does NOT pass an
 // --out flag because `update` writes inside the repo (at
 // <repo_path>/graphify-out/graph.json by default). The output_file knob on
 // GraphifyConfig stays relative to repoPath.

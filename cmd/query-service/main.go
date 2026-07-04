@@ -50,7 +50,7 @@ func main() {
 	if bind == "" {
 		if token == "" {
 			bind = "127.0.0.1"
-			log.Printf("WARNING: QUERY_AUTH_TOKEN not set — serving without authentication, bound to 127.0.0.1 only (set QUERY_BIND to override)")
+			log.Printf("WARNING: QUERY_AUTH_TOKEN not set - serving without authentication, bound to 127.0.0.1 only (set QUERY_BIND to override)")
 		} else {
 			log.Printf("auth enabled, listening on all interfaces")
 		}

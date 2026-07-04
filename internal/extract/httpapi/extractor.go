@@ -12,11 +12,11 @@
 //     h)) with nested Group(constants.XxxRoute) prefixes, so a pre-pass
 //     collects path-looking string constants across the repo and a post-pass
 //     resolves identifier args and group-prefix chains. Group prefixes are
-//     only chained within a single file — a group passed across a function
+//     only chained within a single file - a group passed across a function
 //     boundary loses its parent prefix (the route still surfaces, with a
 //     partial path).
 //
-// The extractor is intentionally heuristic — full-grammar parsing of every
+// The extractor is intentionally heuristic - full-grammar parsing of every
 // supported framework would balloon the codebase. Confidence on every
 // emitted edge is INFERRED, reflecting the heuristic nature.
 package httpapi
@@ -100,11 +100,11 @@ type goPendingRoute struct {
 var (
 	// `AdminRoute = "/admin"` inside const blocks, plus `var X = "..."` and
 	// `const X = "..."` single declarations. Deliberately does NOT match `:=`
-	// locals — route constants live at package level.
+	// locals - route constants live at package level.
 	goConstStrRe = regexp.MustCompile(`^\s*(?:var\s+|const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:string\s*)?=\s*"([^"]+)"`)
-	// `v := recv.Group(arg, ...)` — arg may be an identifier or a literal.
+	// `v := recv.Group(arg, ...)` - arg may be an identifier or a literal.
 	goGroupDefRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*:?=\s*([A-Za-z_]\w*)\.Group\s*\(\s*([A-Za-z_][\w.]*|"[^"]*")`)
-	// `recv.POST(pkg.Identifier, handler)` — uppercase verbs only, identifier
+	// `recv.POST(pkg.Identifier, handler)` - uppercase verbs only, identifier
 	// arg only; literal args are matchGin's job and lowercase .Get() is config
 	// getter noise (see matchChi's comment).
 	goIdentRouteRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|Any)\s*\(\s*([A-Za-z_][\w.]*)\s*(?:,\s*([A-Za-z0-9_.]+))?`)
@@ -222,7 +222,7 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		if serr := scanner.Err(); serr != nil {
 			frag.Warn(fmt.Sprintf("%s: scan: %v", rel, serr))
 		}
-		// An annotation still pending at EOF annotated nothing we saw —
+		// An annotation still pending at EOF annotated nothing we saw -
 		// emit it as a route rather than dropping it silently.
 		if pendingJVM != nil {
 			emitPendingAsRoute(frag, repoNodeID, repoName, rel, pendingJVM, classPrefix)
@@ -284,8 +284,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	return frag, nil
 }
 
-// pendingMapping is an @RequestMapping annotation whose role — class-level
-// path prefix vs method-level route — is not yet known. Spring reuses the
+// pendingMapping is an @RequestMapping annotation whose role - class-level
+// path prefix vs method-level route - is not yet known. Spring reuses the
 // same annotation for both; only the declaration that follows disambiguates.
 type pendingMapping struct {
 	path   string

@@ -104,7 +104,7 @@ func TestTerraformJobWithScheduleAndScriptMerge(t *testing.T) {
 	}
 
 	if nodeByID(frag, "repo::data-repo") == nil {
-		t.Error("repo hub node missing — CONTAINS edges dangle when deps extractor is disabled")
+		t.Error("repo hub node missing - CONTAINS edges dangle when deps extractor is disabled")
 	}
 }
 

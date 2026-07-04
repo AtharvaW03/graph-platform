@@ -20,8 +20,8 @@ const (
 // repository declares a dependency on. Pass scope="" to include every scope
 // (runtime, dev, indirect, peer, optional); pass a specific scope to filter.
 //
-// The source anchor is the deps extractor's per-repo hub Entity — an
-// (:Entity:Package {graphify_id: "repo::<name>"}) node — NOT the importer's
+// The source anchor is the deps extractor's per-repo hub Entity - an
+// (:Entity:Package {graphify_id: "repo::<name>"}) node - NOT the importer's
 // (:Repository {name}) node. The extractors emit their edges from the hub
 // they create themselves; the (:Repository) node is only connected to
 // entities via generic (:Repository)-[:CONTAINS]->(:Entity) edges from
@@ -50,7 +50,7 @@ LIMIT $limit
 // or "lodash") or, when the deps extractor inferred a cross-repo edge, the
 // short name of the depended-upon repository ("auth-service").
 //
-// r is the deps extractor's per-repo hub Entity — see FindDependencies for
+// r is the deps extractor's per-repo hub Entity - see FindDependencies for
 // why we don't match on (:Repository) here.
 func (s *Service) FindDependents(ctx context.Context, dep string) ([]DependencyEdge, error) {
 	if dep == "" {
@@ -108,10 +108,10 @@ func (s *Service) runDepQuery(ctx context.Context, cypher string, params map[str
 // HttpRoute nodes carry the method + HTTP path in their `name` property
 // (formatted "METHOD /path" by the extractor); the node's `path` property is
 // the source FILE path, not the HTTP path. Method and path are parsed from
-// `rt.name` — which works for data imported before metadata promotion — and
+// `rt.name` - which works for data imported before metadata promotion - and
 // the handler falls back to the promoted `handler` property when present.
 //
-// The query doesn't join through (:Repository) — each HttpRoute carries a
+// The query doesn't join through (:Repository) - each HttpRoute carries a
 // `repo` property set by importNodeBatch (routes are repo-owned, not shared),
 // so scoping by repo is a direct property filter with no join.
 func (s *Service) FindRoutes(ctx context.Context, method, pathContains, repo string) ([]HTTPRoute, error) {
@@ -178,7 +178,7 @@ func (s *Service) FindKafkaTopic(ctx context.Context, topic string) (*KafkaTopic
 	// the extractor is later extended to emit finer-grained producers.
 	//
 	// Aggregation groups by t.name (not by node) so producers and consumers
-	// are collected across every node carrying the topic's name — the current
+	// are collected across every node carrying the topic's name - the current
 	// unified shared node plus any legacy per-repo duplicates from imports
 	// that predate cross-repo node unification.
 	const cypher = `

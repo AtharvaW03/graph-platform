@@ -12,7 +12,7 @@ import (
 )
 
 // Orchestrator drives the per-repo pipeline for a configured set of
-// repositories. It owns no domain knowledge — every step is delegated to a
+// repositories. It owns no domain knowledge - every step is delegated to a
 // pluggable component (Source, Syncer, Graphifier, Importer, Store,
 // optional Scheduler and HealthChecker). Future concurrency (parallel
 // indexing) or transport (SQS, webhooks) changes happen by swapping one of
@@ -29,12 +29,12 @@ type Orchestrator struct {
 
 	// Extractors, if non-nil, runs the configured platform extractors after
 	// graphify and merges their fragments into the unified graph.json before
-	// the importer reads it. Extractor failures never block import — they
+	// the importer reads it. Extractor failures never block import - they
 	// surface as per-extractor errors on the RepoResult.
 	Extractors *extract.Runner
 
 	// HealthChecker, if set, is pinged before each cycle in continuous mode.
-	// A failed ping is logged but does not abort — the cycle proceeds and
+	// A failed ping is logged but does not abort - the cycle proceeds and
 	// individual stage failures will be recorded per-repo.
 	HealthChecker HealthChecker
 }
@@ -60,7 +60,7 @@ type Options struct {
 }
 
 // RunOnce indexes every selected repository sequentially. One repo failing
-// never stops the others — failures are recorded on the result and state is
+// never stops the others - failures are recorded on the result and state is
 // flushed before moving on. ctx cancellation aborts the current repo and
 // stops the loop after. RunOnce never panics; any panic in collaborators is
 // recovered, logged, and recorded on the run.
@@ -97,7 +97,7 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 // RunForever loops RunOnce on the configured Scheduler until ctx is canceled.
 // Cycles never overlap: the next pass only starts after the current pass
 // returns AND the Scheduler signals. A panic inside the loop is recovered
-// and the next cycle proceeds — the daemon never dies on a recoverable bug.
+// and the next cycle proceeds - the daemon never dies on a recoverable bug.
 func (o *Orchestrator) RunForever(ctx context.Context, opts Options, sched Scheduler) error {
 	if sched == nil {
 		return fmt.Errorf("scheduler is required for continuous mode")
@@ -135,7 +135,7 @@ func (o *Orchestrator) runCycleSafely(ctx context.Context, opts Options) {
 // IndexOne runs the full sync→change-detect→graphify→import pipeline for one
 // repository, persists state, and returns the result. It is the single-repo
 // entry point that webhook handlers, queue consumers, or future parallel
-// workers should call — RunOnce composes it for the configured set.
+// workers should call - RunOnce composes it for the configured set.
 //
 // IndexOne never panics: panics in any stage are recovered into a
 // StagePanic-tagged StatusFailed result. State persistence failures are
@@ -171,7 +171,7 @@ func (o *Orchestrator) IndexOne(ctx context.Context, repo Repository, force bool
 
 func (o *Orchestrator) persistResult(name string, r RepoResult) {
 	if r.Canceled {
-		// A canceled run is not the repo's fault — leave state untouched
+		// A canceled run is not the repo's fault - leave state untouched
 		// so consecutive_fails and last_error are not polluted by SIGINT.
 		return
 	}
@@ -272,7 +272,7 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	result.NodesInGraph = sum.NodesInGraph
 	result.Mismatch = sum.NodesMismatch()
 	if result.Mismatch {
-		o.Log.Printf("[%s] WARNING: node-count mismatch — imported %d, Neo4j holds %d (delta %d). Investigate node_key collisions.",
+		o.Log.Printf("[%s] WARNING: node-count mismatch - imported %d, Neo4j holds %d (delta %d). Investigate node_key collisions.",
 			repo.Name, sum.NodesTotal, sum.NodesInGraph, sum.NodesTotal-sum.NodesInGraph)
 	}
 	result.Duration = o.now().Sub(start)

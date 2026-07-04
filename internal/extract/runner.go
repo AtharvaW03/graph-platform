@@ -8,7 +8,7 @@ import (
 )
 
 // Runner executes a collection of Extractors for one repository. Extractors
-// run concurrently because they are pure file readers — there is no shared
+// run concurrently because they are pure file readers - there is no shared
 // state. The runner enforces panic recovery per-extractor so one buggy
 // plugin can't take down a whole repo's enrichment pass.
 type Runner struct {

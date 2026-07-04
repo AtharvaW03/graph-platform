@@ -6,7 +6,7 @@ import (
 )
 
 // Each matcher is responsible for ONE framework family. They are deliberately
-// narrow regexes — the framework's own canonical method names. False positives
+// narrow regexes - the framework's own canonical method names. False positives
 // (e.g. a variable named `app.get` in unrelated code) are rare and confidence
 // is INFERRED so consumers know these are heuristic.
 
@@ -23,8 +23,8 @@ func matchGin(line string, lineNum int) []route { return runRegex(ginEchoChiRe, 
 // matchGin does NOT cover (it's case-sensitive on the method). Run alongside
 // matchGin so a file using both call styles is fully scanned.
 //
-// `.Get("...")` is an extremely common shape in non-router Go code —
-// viper.Get("server.port"), cache.Get("key"), headers.Get("Accept") — so
+// `.Get("...")` is an extremely common shape in non-router Go code -
+// viper.Get("server.port"), cache.Get("key"), headers.Get("Accept") - so
 // only paths starting with "/" are accepted. chi route patterns always
 // start with "/"; config keys and cache keys essentially never do.
 func matchChi(line string, lineNum int) []route {
@@ -74,7 +74,7 @@ func matchFlaskFastAPI(line string, lineNum int) []route {
 	}
 	method := "GET"
 	if m[2] != "" {
-		// Flask methods list: ['GET','POST'] — take the first as the canonical.
+		// Flask methods list: ['GET','POST'] - take the first as the canonical.
 		method = strings.ToUpper(strings.Trim(strings.SplitN(m[2], ",", 2)[0], "' \""))
 	} else if mm := fastAPIInferMethod.FindStringSubmatch(line); mm != nil {
 		method = strings.ToUpper(mm[1])
@@ -113,8 +113,8 @@ func matchExpress(line string, lineNum int) []route {
 // --- Java/Kotlin: Spring annotations ---
 //
 // Only the method-specific @GetMapping/@PostMapping/... shortcuts are matched
-// here. Bare @RequestMapping is ambiguous — Spring uses it both as a
-// class-level path prefix and as a method-level route — so the extractor's
+// here. Bare @RequestMapping is ambiguous - Spring uses it both as a
+// class-level path prefix and as a method-level route - so the extractor's
 // scan loop handles it with declaration lookahead (see resolveRequestMapping
 // in extractor.go) instead of a stateless per-line matcher.
 

@@ -33,7 +33,7 @@ type HotspotNode struct {
 	Labels []string `json:"labels"`
 	// FanIn is the number of incoming dependency edges from other entities.
 	FanIn int `json:"fan_in"`
-	// DependentRepos counts the distinct repositories those edges come from —
+	// DependentRepos counts the distinct repositories those edges come from -
 	// a cross-repo hotspot (>1) is riskier than a popular local helper.
 	DependentRepos int `json:"dependent_repos"`
 }

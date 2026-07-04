@@ -9,7 +9,7 @@ import (
 )
 
 // readFileLimited reads up to maxBytes from path. Returns an error if the
-// file exceeds the limit — manifests are tiny in practice; a multi-megabyte
+// file exceeds the limit - manifests are tiny in practice; a multi-megabyte
 // manifest is almost certainly a generated lockfile that we don't want to
 // load into memory.
 func readFileLimited(path string, maxBytes int64) (string, error) {

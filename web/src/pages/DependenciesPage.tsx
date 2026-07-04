@@ -86,9 +86,9 @@ export function DependenciesPage() {
               header: "Labels",
               render: (r) => <LabelBadges labels={r.labels} />,
             },
-            { header: "Ecosystem", render: (r) => r.ecosystem || "—" },
-            { header: "Version", render: (r) => r.version || "—" },
-            { header: "Scope", render: (r) => r.scope || "—" },
+            { header: "Ecosystem", render: (r) => r.ecosystem || "-" },
+            { header: "Version", render: (r) => r.version || "-" },
+            { header: "Scope", render: (r) => r.scope || "-" },
             { header: "Cross-repo", render: (r) => (r.cross_repo ? "✓" : "") },
           ]}
         />

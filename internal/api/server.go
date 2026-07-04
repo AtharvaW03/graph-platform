@@ -15,7 +15,7 @@ import (
 )
 
 // WithAuth wraps h with static bearer-token authentication. An empty token
-// disables auth entirely (open mode for local development — the caller should
+// disables auth entirely (open mode for local development - the caller should
 // log loudly when that happens). /health stays unauthenticated so load
 // balancers and uptime probes work without credentials.
 //
@@ -58,8 +58,8 @@ func WithRequestTimeout(h http.Handler, d time.Duration) http.Handler {
 }
 
 // WithCORS wraps h with a minimal CORS policy for a single trusted origin.
-// origin == "" disables CORS entirely (same-origin deployments — the
-// recommended setup — never need it). The Authorization header forces a
+// origin == "" disables CORS entirely (same-origin deployments - the
+// recommended setup - never need it). The Authorization header forces a
 // preflight, so OPTIONS is answered here; only GET is exposed because the
 // API is read-only.
 func WithCORS(h http.Handler, origin string) http.Handler {

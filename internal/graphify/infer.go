@@ -76,7 +76,7 @@ func InferLabel(n Node) string {
 
 // relationMap maps Graphify-format relation strings (the verbs extractors
 // emit) to Neo4j relationship types (UPPER_SNAKE_CASE). New relations added
-// here must also pass through ImportLinks' allowlist via this map — there is
+// here must also pass through ImportLinks' allowlist via this map - there is
 // no separate allowlist to extend.
 var relationMap = map[string]string{
 	// graphify built-in code relations
@@ -113,14 +113,14 @@ var relationMap = map[string]string{
 }
 
 // MapRelation maps a Graphify relation string to a Neo4j relationship type.
-// Returns ("", false) for unknown relations — callers should skip those edges.
+// Returns ("", false) for unknown relations - callers should skip those edges.
 func MapRelation(relation string) (string, bool) {
 	r, ok := relationMap[relation]
 	return r, ok
 }
 
 // sharedIDPrefixes are the platform node-ID prefixes that denote org-global
-// entities — one Neo4j node shared by every repo that references it. A Kafka
+// entities - one Neo4j node shared by every repo that references it. A Kafka
 // topic, a package, a SQL object, or a repository hub is the same real-world
 // thing no matter which repo's scan discovered it; keeping one node per
 // entity is what makes cross-repo questions ("who consumes trade_executed?",
@@ -151,14 +151,14 @@ func IsShared(n Node) bool {
 // glue::job::<repo>::...), while org-global entities deliberately share one
 // ID across repos (topic::<name>, pkg::<eco>::<name>, sql::...,
 // repo::<name>) so the same topic or package discovered in two repos merges
-// into ONE node. Hashing these with the repo — as the AST branch below does —
+// into ONE node. Hashing these with the repo - as the AST branch below does -
 // would split every shared entity into per-repo copies, leaving cross-repo
 // edges pointing at phantom duplicates and breaking shortest-path /
 // blast-radius traversal across repository boundaries.
 //
 // Graphify AST nodes hash repo + source_file + label + ID. The hash includes
 // Node.ID (graphify's per-repo-stable id) because (source_file, label) alone
-// is NOT unique in real code — a single Go source file typically defines many
+// is NOT unique in real code - a single Go source file typically defines many
 // types that each implement the same method (e.g. 52 distinct types in
 // vendor/.../redis/v9/command.go each declaring .String()). Graphify emits
 // those as distinct nodes with distinct ids; omitting the id here collapses

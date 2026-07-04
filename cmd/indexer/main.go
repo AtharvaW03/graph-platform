@@ -49,7 +49,7 @@ func main() {
 	}
 
 	// Acquire local resources first (lock, state) so config and disk errors
-	// surface immediately. Neo4j connect — the only network dependency —
+	// surface immediately. Neo4j connect - the only network dependency -
 	// comes after, so a remote outage doesn't mask a typo'd config.
 	lock, err := index.LockWorkDir(absWorkDir)
 	if err != nil {

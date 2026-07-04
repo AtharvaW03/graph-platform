@@ -77,7 +77,7 @@ func setup() {
 		t.Errorf("consumes = %v", got.consumes)
 	}
 	if !got.hasHub {
-		t.Error("repo hub node missing — edges dangle when deps extractor is disabled")
+		t.Error("repo hub node missing - edges dangle when deps extractor is disabled")
 	}
 }
 
