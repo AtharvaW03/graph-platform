@@ -5,12 +5,8 @@ graphify-out/
 # Local override of the committed repos.yaml
 config/repos.local.yaml
 
-# Deployment secrets
+# Local env files (never commit tokens/passwords)
 .env
-
-# Corporate CA certs are per-network, not repo content
-deploy/certs/*.crt
-deploy/certs/*.pem
 
 # Built binaries when `go build` is run without -o
 /indexer

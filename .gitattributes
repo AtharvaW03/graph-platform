@@ -1,5 +1,0 @@
-# Files that run inside Linux containers must keep LF even when checked out
-# on Windows — a CRLF shebang breaks the shell.
-*.sh text eol=lf
-deploy/Caddyfile text eol=lf
-deploy/Dockerfile.* text eol=lf
