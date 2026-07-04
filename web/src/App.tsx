@@ -9,6 +9,8 @@ import { KafkaPage } from "./pages/KafkaPage";
 import { SqlPage } from "./pages/SqlPage";
 import { GluePage } from "./pages/GluePage";
 import { HotspotsPage } from "./pages/HotspotsPage";
+import { RepoScopeProvider } from "./context/RepoScope";
+import { ScopeBar } from "./components/ScopeBar";
 
 const nav = [
   { to: "/overview", label: "Repository Overview" },
@@ -25,23 +27,25 @@ const nav = [
 
 export default function App() {
   return (
-    <div className="layout">
-      <nav className="sidebar">
-        <div className="brand">graph-platform</div>
-        {nav.map((n) => (
-          <NavLink
-            key={n.to}
-            to={n.to}
-            className={({ isActive }) =>
-              isActive ? "nav-link active" : "nav-link"
-            }
-          >
-            {n.label}
-          </NavLink>
-        ))}
-      </nav>
-      <main className="content">
-        <Routes>
+    <RepoScopeProvider>
+      <div className="layout">
+        <nav className="sidebar">
+          <div className="brand">graph-platform</div>
+          {nav.map((n) => (
+            <NavLink
+              key={n.to}
+              to={n.to}
+              className={({ isActive }) =>
+                isActive ? "nav-link active" : "nav-link"
+              }
+            >
+              {n.label}
+            </NavLink>
+          ))}
+        </nav>
+        <main className="content">
+          <ScopeBar />
+          <Routes>
           <Route path="/" element={<Navigate to="/overview" replace />} />
           <Route path="/overview" element={<OverviewPage />} />
           <Route path="/search" element={<SearchPage />} />
@@ -51,10 +55,11 @@ export default function App() {
           <Route path="/routes" element={<RoutesPage />} />
           <Route path="/kafka" element={<KafkaPage />} />
           <Route path="/sql" element={<SqlPage />} />
-          <Route path="/glue" element={<GluePage />} />
-          <Route path="/hotspots" element={<HotspotsPage />} />
-        </Routes>
-      </main>
-    </div>
+            <Route path="/glue" element={<GluePage />} />
+            <Route path="/hotspots" element={<HotspotsPage />} />
+          </Routes>
+        </main>
+      </div>
+    </RepoScopeProvider>
   );
 }

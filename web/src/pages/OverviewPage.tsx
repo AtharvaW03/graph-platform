@@ -4,18 +4,20 @@ import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { joinList } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
+import { useRepoScope } from "../context/RepoScope";
 import type { RepositoryOverview } from "../types";
 
 export function OverviewPage() {
   const [repo, setRepo] = useState("");
   const [ratedQuery, setRatedQuery] = useState("");
+  const { available } = useRepoScope();
   const { data, error, loading, run } = useAsync<RepositoryOverview>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (repo.trim()) {
-      setRatedQuery(repo.trim());
-      run(() => api.repositoryOverview(repo.trim()));
+    if (repo) {
+      setRatedQuery(repo);
+      run(() => api.repositoryOverview(repo));
     }
   };
 
@@ -27,12 +29,14 @@ export function OverviewPage() {
         APIs, dependencies.
       </p>
       <form onSubmit={onSubmit} className="query-form">
-        <input
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          placeholder="repo name"
-          autoFocus
-        />
+        <select value={repo} onChange={(e) => setRepo(e.target.value)} autoFocus>
+          <option value="">select a repository…</option>
+          {available.map((r) => (
+            <option key={r.name} value={r.name}>
+              {r.name}
+            </option>
+          ))}
+        </select>
         <button type="submit">Load</button>
       </form>
       <StatusBox loading={loading} error={error} />

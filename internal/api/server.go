@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -95,6 +96,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	// existing routes
 	mux.HandleFunc("GET /health", s.health)
+	mux.HandleFunc("GET /repos", s.listRepos)
 	mux.HandleFunc("GET /search", s.search)
 	mux.HandleFunc("GET /symbol/{name}", s.findSymbol)
 	mux.HandleFunc("GET /callers/{symbol}", s.findCallers)
@@ -126,13 +128,46 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// parseRepos reads the optional repository scope from a request: `repos` is
+// comma-separated; a legacy single `repo` value is merged in so existing
+// clients (the MCP server sends repo=) keep working unchanged.
+func parseRepos(q url.Values) []string {
+	raw := q.Get("repos")
+	if v := q.Get("repo"); v != "" {
+		if raw != "" {
+			raw += ","
+		}
+		raw += v
+	}
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (s *Server) listRepos(w http.ResponseWriter, r *http.Request) {
+	out, err := s.svc.ListRepositories(r.Context())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
 		writeErr(w, http.StatusBadRequest, "missing query parameter q")
 		return
 	}
-	results, err := s.svc.Search(r.Context(), q)
+	results, err := s.svc.Search(r.Context(), q, parseRepos(r.URL.Query()))
 	if err != nil {
 		serverError(w, err)
 		return
@@ -142,7 +177,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) findSymbol(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	results, err := s.svc.FindSymbol(r.Context(), name)
+	results, err := s.svc.FindSymbol(r.Context(), name, parseRepos(r.URL.Query()))
 	if err != nil {
 		serverError(w, err)
 		return
@@ -152,7 +187,7 @@ func (s *Server) findSymbol(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) findCallers(w http.ResponseWriter, r *http.Request) {
 	sym := r.PathValue("symbol")
-	edges, err := s.svc.FindCallers(r.Context(), sym)
+	edges, err := s.svc.FindCallers(r.Context(), sym, parseRepos(r.URL.Query()))
 	if err != nil {
 		serverError(w, err)
 		return
@@ -162,7 +197,7 @@ func (s *Server) findCallers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) findCallees(w http.ResponseWriter, r *http.Request) {
 	sym := r.PathValue("symbol")
-	edges, err := s.svc.FindCallees(r.Context(), sym)
+	edges, err := s.svc.FindCallees(r.Context(), sym, parseRepos(r.URL.Query()))
 	if err != nil {
 		serverError(w, err)
 		return
@@ -181,7 +216,7 @@ func (s *Server) blastRadius(w http.ResponseWriter, r *http.Request) {
 		}
 		depth = parsed
 	}
-	nodes, err := s.svc.BlastRadius(r.Context(), sym, depth)
+	nodes, err := s.svc.BlastRadius(r.Context(), sym, depth, parseRepos(r.URL.Query()))
 	if err != nil {
 		serverError(w, err)
 		return
@@ -196,7 +231,7 @@ func (s *Server) shortestPath(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "missing src or dst")
 		return
 	}
-	path, err := s.svc.ShortestPath(r.Context(), src, dst)
+	path, err := s.svc.ShortestPath(r.Context(), src, dst, parseRepos(r.URL.Query()))
 	if err != nil {
 		serverError(w, err)
 		return
@@ -241,7 +276,7 @@ func (s *Server) findDependents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) findRoutes(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	out, err := s.svc.FindRoutes(r.Context(), q.Get("method"), q.Get("path"), q.Get("repo"))
+	out, err := s.svc.FindRoutes(r.Context(), q.Get("method"), q.Get("path"), parseRepos(q))
 	if err != nil {
 		serverError(w, err)
 		return
@@ -294,7 +329,7 @@ func (s *Server) findHotspots(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
-	out, err := s.svc.FindHotspots(r.Context(), q.Get("repo"), limit)
+	out, err := s.svc.FindHotspots(r.Context(), parseRepos(q), limit)
 	if err != nil {
 		serverError(w, err)
 		return

@@ -1,6 +1,11 @@
 // Mirrors internal/query/types.go - keep field names in sync with the Go
 // JSON tags, since this is a straight pass-through of the query-service API.
 
+export interface RepoInfo {
+  name: string;
+  nodes: number;
+}
+
 export interface HotspotNode {
   name: string;
   repo: string;

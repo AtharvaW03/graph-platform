@@ -3,9 +3,34 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
 	"testing"
 	"time"
 )
+
+func TestParseRepos(t *testing.T) {
+	cases := []struct {
+		query string
+		want  []string
+	}{
+		{"", nil},
+		{"repos=amx-core", []string{"amx-core"}},
+		{"repos=a,b,c", []string{"a", "b", "c"}},
+		{"repos=a,%20b%20,", []string{"a", "b"}},           // trims and drops empties
+		{"repo=legacy", []string{"legacy"}},                // legacy single-repo param
+		{"repos=a,b&repo=legacy", []string{"a", "b", "legacy"}}, // both merge
+	}
+	for _, c := range cases {
+		q, err := url.ParseQuery(c.query)
+		if err != nil {
+			t.Fatalf("bad test query %q: %v", c.query, err)
+		}
+		if got := parseRepos(q); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("parseRepos(%q) = %v, want %v", c.query, got, c.want)
+		}
+	}
+}
 
 func okHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

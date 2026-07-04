@@ -3,19 +3,21 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { FeedbackWidget } from "../components/FeedbackWidget";
+import { useRepoScope } from "../context/RepoScope";
 import type { PathNode } from "../types";
 
 export function PathPage() {
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
   const [ratedQuery, setRatedQuery] = useState("");
+  const { selected } = useRepoScope();
   const { data, error, loading, run } = useAsync<PathNode[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (source.trim() && target.trim()) {
       setRatedQuery(`${source.trim()} -> ${target.trim()}`);
-      run(() => api.shortestPath(source.trim(), target.trim()));
+      run(() => api.shortestPath(source.trim(), target.trim(), selected));
     }
   };
 

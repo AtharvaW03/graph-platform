@@ -7,11 +7,18 @@ import type {
   ImpactNode,
   KafkaTopicInfo,
   PathNode,
+  RepoInfo,
   RepositoryOverview,
   SQLObjectInfo,
   SearchResult,
   SymbolResult,
 } from "./types";
+
+// scopeParam serializes the global repo scope for the `repos=` query
+// parameter; undefined (param omitted) when the scope is empty.
+function scopeParam(repos?: string[]): string | undefined {
+  return repos && repos.length > 0 ? repos.join(",") : undefined;
+}
 
 // In dev, requests go to /api and Vite's proxy (vite.config.ts) forwards them
 // to the query-service, which sidesteps CORS entirely. In a production build,
@@ -70,17 +77,28 @@ export interface FeedbackInput {
 }
 
 export const api = {
-  search: (q: string) => get<SearchResult[]>("/search", { q }),
-  findSymbol: (name: string) =>
-    get<SymbolResult[]>(`/symbol/${encodeURIComponent(name)}`),
-  findCallers: (symbol: string) =>
-    get<CallEdge[]>(`/callers/${encodeURIComponent(symbol)}`),
-  findCallees: (symbol: string) =>
-    get<CallEdge[]>(`/callees/${encodeURIComponent(symbol)}`),
-  blastRadius: (symbol: string, depth?: number) =>
-    get<ImpactNode[]>(`/blast-radius/${encodeURIComponent(symbol)}`, { depth }),
-  shortestPath: (src: string, dst: string) =>
-    get<PathNode[]>("/path", { src, dst }),
+  listRepos: () => get<RepoInfo[]>("/repos"),
+  search: (q: string, repos?: string[]) =>
+    get<SearchResult[]>("/search", { q, repos: scopeParam(repos) }),
+  findSymbol: (name: string, repos?: string[]) =>
+    get<SymbolResult[]>(`/symbol/${encodeURIComponent(name)}`, {
+      repos: scopeParam(repos),
+    }),
+  findCallers: (symbol: string, repos?: string[]) =>
+    get<CallEdge[]>(`/callers/${encodeURIComponent(symbol)}`, {
+      repos: scopeParam(repos),
+    }),
+  findCallees: (symbol: string, repos?: string[]) =>
+    get<CallEdge[]>(`/callees/${encodeURIComponent(symbol)}`, {
+      repos: scopeParam(repos),
+    }),
+  blastRadius: (symbol: string, depth?: number, repos?: string[]) =>
+    get<ImpactNode[]>(`/blast-radius/${encodeURIComponent(symbol)}`, {
+      depth,
+      repos: scopeParam(repos),
+    }),
+  shortestPath: (src: string, dst: string, repos?: string[]) =>
+    get<PathNode[]>("/path", { src, dst, repos: scopeParam(repos) }),
   repositoryOverview: (repo: string) =>
     get<RepositoryOverview>(`/overview/${encodeURIComponent(repo)}`),
   findDependencies: (repo: string, scope?: string) =>
@@ -89,15 +107,15 @@ export const api = {
     }),
   findDependents: (dep: string) =>
     get<DependencyEdge[]>(`/dependents/${encodeURIComponent(dep)}`),
-  findRoutes: (method?: string, path?: string, repo?: string) =>
-    get<HTTPRoute[]>("/routes", { method, path, repo }),
+  findRoutes: (method?: string, path?: string, repos?: string[]) =>
+    get<HTTPRoute[]>("/routes", { method, path, repos: scopeParam(repos) }),
   findKafkaTopic: (topic: string) =>
     get<KafkaTopicInfo>(`/kafka/topic/${encodeURIComponent(topic)}`),
   findSQLObject: (schema: string | undefined, name: string) =>
     get<SQLObjectInfo[]>("/sql/object", { schema, name }),
   findGlueJobs: (source?: string, target?: string) =>
     get<GlueJobInfo[]>("/glue/jobs", { source, target }),
-  findHotspots: (repo?: string, limit?: number) =>
-    get<HotspotNode[]>("/hotspots", { repo, limit }),
+  findHotspots: (repos?: string[], limit?: number) =>
+    get<HotspotNode[]>("/hotspots", { repos: scopeParam(repos), limit }),
   sendFeedback: (f: FeedbackInput) => post("/feedback", f),
 };

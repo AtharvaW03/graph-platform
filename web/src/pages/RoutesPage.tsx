@@ -4,26 +4,26 @@ import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
+import { useRepoScope } from "../context/RepoScope";
 import type { HTTPRoute } from "../types";
 
 export function RoutesPage() {
   const [method, setMethod] = useState("");
   const [path, setPath] = useState("");
-  const [repo, setRepo] = useState("");
   const [ratedQuery, setRatedQuery] = useState("");
+  const { selected } = useRepoScope();
   const { data, error, loading, run } = useAsync<HTTPRoute[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     setRatedQuery(
-      [method.trim(), path.trim(), repo.trim()].filter(Boolean).join(" ") ||
-        "all routes",
+      [method.trim(), path.trim()].filter(Boolean).join(" ") || "all routes",
     );
     run(() =>
       api.findRoutes(
         method.trim() || undefined,
         path.trim() || undefined,
-        repo.trim() || undefined,
+        selected,
       ),
     );
   };
@@ -32,8 +32,8 @@ export function RoutesPage() {
     <section>
       <h1>HTTP Routes</h1>
       <p className="hint">
-        Search the HTTP API inventory across all repositories. Leave fields
-        blank to match any.
+        Search the HTTP API inventory. Leave fields blank to match any; narrow
+        to specific repositories with the repo scope above.
       </p>
       <form onSubmit={onSubmit} className="query-form">
         <input
@@ -46,11 +46,6 @@ export function RoutesPage() {
           onChange={(e) => setPath(e.target.value)}
           placeholder="path substring"
           autoFocus
-        />
-        <input
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          placeholder="repo (optional)"
         />
         <button type="submit">Search</button>
       </form>

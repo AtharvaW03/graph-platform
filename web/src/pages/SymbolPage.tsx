@@ -4,6 +4,7 @@ import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
+import { useRepoScope } from "../context/RepoScope";
 import type { CallEdge, ImpactNode, SymbolResult } from "../types";
 
 type Mode = "occurrences" | "callers" | "callees" | "blast-radius";
@@ -20,6 +21,7 @@ export function SymbolPage() {
   const [depth, setDepth] = useState(3);
   const [mode, setMode] = useState<Mode>("occurrences");
   const [ratedQuery, setRatedQuery] = useState("");
+  const { selected } = useRepoScope();
 
   const occ = useAsync<SymbolResult[]>();
   const callers = useAsync<CallEdge[]>();
@@ -30,13 +32,13 @@ export function SymbolPage() {
     setRatedQuery(`${m}: ${sym}`);
     switch (m) {
       case "occurrences":
-        return occ.run(() => api.findSymbol(sym));
+        return occ.run(() => api.findSymbol(sym, selected));
       case "callers":
-        return callers.run(() => api.findCallers(sym));
+        return callers.run(() => api.findCallers(sym, selected));
       case "callees":
-        return callees.run(() => api.findCallees(sym));
+        return callees.run(() => api.findCallees(sym, selected));
       case "blast-radius":
-        return blast.run(() => api.blastRadius(sym, depth));
+        return blast.run(() => api.blastRadius(sym, depth, selected));
     }
   };
 

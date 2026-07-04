@@ -102,8 +102,13 @@ curl -H "Authorization: Bearer dev-token" "http://localhost:8080/overview/my-rep
 All JSON. With `QUERY_AUTH_TOKEN` set, every endpoint except `/health`
 requires `Authorization: Bearer <token>`. All read-only except `/feedback`.
 
+Symbol-level endpoints (`/search`, `/symbol`, `/callers`, `/callees`,
+`/blast-radius`, `/path`, `/routes`, `/hotspots`) accept an optional
+`repos=` filter (comma-separated repository names; empty = all).
+
 | Endpoint | Answers |
 |---|---|
+| `GET /repos` | indexed repositories with node counts |
 | `GET /search?q=` | fuzzy symbol search, ranked exact > prefix > contains |
 | `GET /symbol/{name}` | every definition of a symbol, all repos |
 | `GET /callers/{symbol}` · `/callees/{symbol}` | direct call edges |
