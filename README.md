@@ -118,12 +118,28 @@ requires `Authorization: Bearer <token>`. All read-only except `/feedback`.
 | `GET /hotspots?repo=&limit=` | entities ranked by incoming dependency fan-in |
 | `POST /feedback` · `GET /feedback/stats?days=` | relevance ratings + the quality-metric rollup |
 
-## Deployment
+## Running the full stack
 
-`docker compose up -d --build` brings up the full pilot stack — web portal
-(token injected server-side by a Caddy proxy), query API, Neo4j, and a
-continuous indexer. See [`deploy/README.md`](deploy/README.md) for setup,
-git credentials, MCP access, and the path to AWS.
+Four processes, run manually (see Quickstart above for env vars):
+
+```bash
+# 1. Neo4j — Docker one-liner or Neo4j Desktop
+docker run -d --name neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/<pw> neo4j:5
+
+# 2. Indexer, continuous
+go run ./cmd/indexer --all --interval 1h
+
+# 3. Query API
+go run ./cmd/query-service
+
+# 4. Web UI (dev server proxies /api -> :8080; export QUERY_AUTH_TOKEN too
+#    if the query-service runs with one — the proxy injects it server-side)
+cd web && npm install && npm run dev     # http://localhost:5173
+```
+
+For a shared/pilot box, run the same processes under a supervisor (systemd,
+launchd, pm2) and put the web UI behind any reverse proxy that forwards
+`/api` with the Authorization header.
 
 ## Runbook
 
@@ -176,10 +192,11 @@ HEAD hasn't moved (e.g. after an extractor fix or a graph wipe).
 ### Web UI authentication
 
 The web UI never embeds the bearer token — a `VITE_*` variable is baked into
-the shipped JS bundle, readable by anyone who can load the page. Serve the UI
-same-origin behind a reverse proxy that injects `Authorization` server-side
-(recommended), or set `QUERY_CORS_ORIGIN` on query-service and terminate auth
-at the proxy in front of the UI.
+the shipped JS bundle, readable by anyone who can load the page. Instead the
+proxy in front of the UI injects `Authorization` server-side: in dev that's
+the Vite proxy (export `QUERY_AUTH_TOKEN` before `npm run dev`); for a shared
+deployment use any reverse proxy that forwards `/api` with the header. As a
+fallback for a cross-origin API, set `QUERY_CORS_ORIGIN` on query-service.
 
 ### Operational invariants
 
