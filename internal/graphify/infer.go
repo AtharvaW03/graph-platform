@@ -172,3 +172,57 @@ func StableKey(repo string, n Node) string {
 	h.Write([]byte(repo + "::" + n.SourceFile + "::" + n.Label + "::" + n.ID))
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// extToLanguage maps source-file extensions to programming-language names.
+// Deliberately code-only: config and doc formats (yaml, json, md, ...) are
+// not languages and would pollute the overview's Languages panel.
+var extToLanguage = map[string]string{
+	".go":     "go",
+	".kt":     "kotlin",
+	".kts":    "kotlin",
+	".java":   "java",
+	".swift":  "swift",
+	".py":     "python",
+	".ts":     "typescript",
+	".tsx":    "typescript",
+	".js":     "javascript",
+	".jsx":    "javascript",
+	".mjs":    "javascript",
+	".cjs":    "javascript",
+	".svelte": "svelte",
+	".scala":  "scala",
+	".rs":     "rust",
+	".c":      "c",
+	".h":      "c",
+	".cpp":    "cpp",
+	".cc":     "cpp",
+	".hpp":    "cpp",
+	".cs":     "csharp",
+	".rb":     "ruby",
+	".php":    "php",
+	".sql":    "sql",
+	".sh":     "bash",
+	".bash":   "bash",
+	".ps1":    "powershell",
+	".dart":   "dart",
+	".groovy": "groovy",
+	".proto":  "protobuf",
+	".tf":     "terraform",
+}
+
+// InferLanguage resolves a node's programming language. Graphify only emits
+// metadata.language for its bash extraction; AST nodes from every other
+// language carry none, which used to make the overview's Languages panel
+// show "bash" as the sole language of a Go repository. When the metadata is
+// absent, fall back to the source file's extension; "" means unknown or not
+// a code file, and the overview skips it.
+func InferLanguage(n Node) string {
+	if l := n.MetaString("language"); l != "" {
+		return l
+	}
+	sf := strings.ToLower(n.SourceFile)
+	if i := strings.LastIndex(sf, "."); i >= 0 {
+		return extToLanguage[sf[i:]]
+	}
+	return ""
+}
