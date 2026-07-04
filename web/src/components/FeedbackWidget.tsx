@@ -1,15 +1,26 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 
-// Compact feedback bar behind the platform's quality metric ("results rated
-// relevant in >= 80% of sessions"). Rendered directly under the query form,
-// ABOVE any results, so it's visible without scrolling past a large table.
+// One rating per browser session is enough for the quality metric (the
+// brief measures "sessions rated relevant", not queries), so after the
+// first submission the bar collapses to a small "Rate these results" link
+// for the rest of the session instead of nagging on every query.
+const SESSION_KEY = "feedback-sent";
+
+function sentThisSession(): boolean {
+  try {
+    return sessionStorage.getItem(SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+// Compact feedback bar rendered directly under the query form, ABOVE any
+// results, so it's visible without scrolling past a large table.
 //
 // Flow: click a thumb to select a rating (highlighted), optionally add a
 // note, then Send submits both in one POST. Nothing is recorded until Send
-// is clicked. The bar resets whenever the rated query changes; empty result
-// sets are rateable too (a thumbs-down on "found nothing" is exactly the
-// signal the metric needs).
+// is clicked. The bar resets whenever the rated query changes.
 export function FeedbackWidget({
   endpoint,
   query,
@@ -22,11 +33,13 @@ export function FeedbackWidget({
   const [state, setState] = useState<"idle" | "sending" | "sent" | "failed">(
     "idle",
   );
+  const [collapsed, setCollapsed] = useState(sentThisSession);
 
   useEffect(() => {
     setChoice(null);
     setNote("");
     setState("idle");
+    setCollapsed(sentThisSession());
   }, [endpoint, query]);
 
   const send = async () => {
@@ -40,6 +53,11 @@ export function FeedbackWidget({
         note: note.trim() || undefined,
       });
       setState("sent");
+      try {
+        sessionStorage.setItem(SESSION_KEY, "1");
+      } catch {
+        // private-mode storage failures just mean the bar shows again
+      }
     } catch {
       setState("failed");
     }
@@ -48,6 +66,19 @@ export function FeedbackWidget({
   if (state === "sent") {
     return <div className="feedback-bar">Thanks - feedback recorded.</div>;
   }
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        className="feedback-collapsed"
+        onClick={() => setCollapsed(false)}
+      >
+        Rate these results
+      </button>
+    );
+  }
+
   return (
     <div className="feedback-bar">
       <span>Helpful?</span>
@@ -77,6 +108,7 @@ export function FeedbackWidget({
         value={note}
         onChange={(e) => setNote(e.target.value)}
         placeholder="optional note"
+        aria-label="Feedback note"
         maxLength={2000}
       />
       <button

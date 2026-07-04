@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 export interface Column<T> {
   header: string;
@@ -16,8 +16,39 @@ interface Props<T> {
 
 type Dir = "asc" | "desc";
 
+// pageSize balances scanability against pager churn; result sets are
+// server-capped at 100-1000 rows, so at most ~20 pages.
+const pageSize = 50;
+
 function isPrimitive(v: ReactNode): v is string | number {
   return typeof v === "string" || typeof v === "number";
+}
+
+// pageWindow returns the Google-style page-number strip: first and last
+// always visible, a window around the current page, gaps as "...".
+function pageWindow(current: number, total: number): (number | "...")[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const wanted = new Set<number>([
+    1,
+    total,
+    current - 1,
+    current,
+    current + 1,
+  ]);
+  const pages = [...wanted]
+    .filter((p) => p >= 1 && p <= total)
+    .sort((a, b) => a - b);
+  const out: (number | "...")[] = [];
+  let prev = 0;
+  for (const p of pages) {
+    if (p - prev === 2) out.push(prev + 1);
+    else if (p - prev > 2) out.push("...");
+    out.push(p);
+    prev = p;
+  }
+  return out;
 }
 
 // A small, explicit table: each page defines its own columns (header + render
@@ -26,10 +57,17 @@ function isPrimitive(v: ReactNode): v is string | number {
 //
 // Columns whose render() yields a plain string/number are click-sortable;
 // component columns (badges) are not. A row-count line above the table makes
-// result size and truncation visible without scrolling.
+// result size and truncation visible without scrolling, and result sets
+// longer than pageSize get a pager below the table.
 export function DataTable<T>({ columns, rows, keyFn, note }: Props<T>) {
   const [sortCol, setSortCol] = useState<number | null>(null);
   const [dir, setDir] = useState<Dir>("asc");
+  const [page, setPage] = useState(1);
+
+  // New result set: back to page 1 (a stale page index would show nothing).
+  useEffect(() => {
+    setPage(1);
+  }, [rows]);
 
   const sortable = (ci: number): boolean =>
     rows.length > 0 && isPrimitive(columns[ci].render(rows[0]));
@@ -41,6 +79,7 @@ export function DataTable<T>({ columns, rows, keyFn, note }: Props<T>) {
       setSortCol(ci);
       setDir("asc");
     }
+    setPage(1);
   };
 
   const sorted = useMemo(() => {
@@ -61,10 +100,18 @@ export function DataTable<T>({ columns, rows, keyFn, note }: Props<T>) {
     });
   }, [rows, columns, sortCol, dir]);
 
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const start = (safePage - 1) * pageSize;
+  const visible = sorted.slice(start, start + pageSize);
+
   return (
     <>
       <p className="table-meta" role="status">
         {rows.length.toLocaleString()} result{rows.length === 1 ? "" : "s"}
+        {totalPages > 1
+          ? ` · showing ${start + 1}-${start + visible.length}`
+          : ""}
         {note ? ` · ${note}` : ""}
       </p>
       <table className="data-table">
@@ -99,8 +146,8 @@ export function DataTable<T>({ columns, rows, keyFn, note }: Props<T>) {
           </tr>
         </thead>
         <tbody>
-          {sorted.map((row, i) => (
-            <tr key={keyFn(row, i)}>
+          {visible.map((row, i) => (
+            <tr key={keyFn(row, start + i)}>
               {columns.map((c) => (
                 <td key={c.header}>{c.render(row)}</td>
               ))}
@@ -108,6 +155,40 @@ export function DataTable<T>({ columns, rows, keyFn, note }: Props<T>) {
           ))}
         </tbody>
       </table>
+      {totalPages > 1 && (
+        <nav className="pager" aria-label="Result pages">
+          <button
+            type="button"
+            onClick={() => setPage(safePage - 1)}
+            disabled={safePage === 1}
+          >
+            ‹ Prev
+          </button>
+          {pageWindow(safePage, totalPages).map((p, i) =>
+            p === "..." ? (
+              <span key={`gap-${i}`} className="pager-gap">
+                …
+              </span>
+            ) : (
+              <button
+                type="button"
+                key={p}
+                onClick={() => setPage(p)}
+                aria-current={p === safePage ? "page" : undefined}
+              >
+                {p}
+              </button>
+            ),
+          )}
+          <button
+            type="button"
+            onClick={() => setPage(safePage + 1)}
+            disabled={safePage === totalPages}
+          >
+            Next ›
+          </button>
+        </nav>
+      )}
     </>
   );
 }
