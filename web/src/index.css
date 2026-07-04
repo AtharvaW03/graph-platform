@@ -79,6 +79,29 @@ body {
     font-weight: 600;
 }
 
+.nav-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.nav-group {
+    margin: 0.9rem 0 0.15rem;
+    padding: 0 0.6rem;
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+/* Keyboard navigation: a visible focus ring everywhere, without doubling
+   up on mouse clicks (focus-visible only fires for keyboard focus). */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
 .content {
     flex: 1;
     padding: 2rem 2.5rem;
@@ -174,7 +197,7 @@ h2 {
 }
 
 .feedback-error {
-    color: #f85149;
+    color: var(--danger);
 }
 
 .query-form input,
@@ -188,7 +211,7 @@ h2 {
     color: var(--text);
 }
 
-/* Global repo scope bar (top of every page). */
+/* Repo scope picker: rendered by scopable pages between hint and form. */
 .scope-bar {
     display: flex;
     align-items: center;
@@ -291,8 +314,13 @@ h2 {
     font-weight: 600;
 }
 
-.query-form button:hover {
+.query-form button:hover:not(:disabled) {
     filter: brightness(1.08);
+}
+
+.query-form button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .tabs {
@@ -357,6 +385,32 @@ h2 {
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.02em;
+    /* Headers stay visible while scrolling long result sets. */
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 1;
+}
+
+/* Sortable column headers render as buttons for keyboard access but keep
+   the header's visual style. */
+.th-sort {
+    all: unset;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    text-transform: inherit;
+    letter-spacing: inherit;
+}
+
+.th-sort:hover {
+    color: var(--text);
+}
+
+.table-meta {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    margin: 0 0 0.4rem;
 }
 
 .badge {
@@ -482,4 +536,40 @@ code {
     padding: 0.1rem 0.35rem;
     border-radius: 4px;
     font-size: 0.85em;
+}
+
+/* Narrow screens: sidebar becomes a top bar with wrapping links so the
+   content keeps full width and nothing scrolls horizontally. */
+@media (max-width: 800px) {
+    .layout {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        width: auto;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+        padding: 0.5rem 0.75rem;
+    }
+
+    .nav-section {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .nav-group {
+        margin: 0;
+    }
+
+    .brand {
+        padding: 0.25rem 0.5rem;
+    }
+
+    .content {
+        padding: 1rem;
+    }
 }

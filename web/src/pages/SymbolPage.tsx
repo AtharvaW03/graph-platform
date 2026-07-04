@@ -4,6 +4,7 @@ import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
+import { ScopeBar } from "../components/ScopeBar";
 import { useRepoScope } from "../context/RepoScope";
 import type { CallEdge, ImpactNode, SymbolResult } from "../types";
 
@@ -63,11 +64,13 @@ export function SymbolPage() {
         Exact symbol name. Combines find_symbol, find_callers, find_callees, and
         blast_radius.
       </p>
+      <ScopeBar />
       <form onSubmit={onSubmit} className="query-form">
         <input
           value={symbol}
           onChange={(e) => setSymbol(e.target.value)}
           placeholder="e.g. ProcessOrder()"
+          aria-label="Symbol name"
           autoFocus
         />
         {mode === "blast-radius" && (
@@ -78,10 +81,13 @@ export function SymbolPage() {
             value={depth}
             onChange={(e) => setDepth(Number(e.target.value))}
             className="depth-input"
+            aria-label="Traversal depth"
             title="traversal depth"
           />
         )}
-        <button type="submit">Run</button>
+        <button type="submit" disabled={!symbol.trim() || active.loading}>
+          Run
+        </button>
       </form>
 
       <div className="tabs">
@@ -100,6 +106,11 @@ export function SymbolPage() {
         loading={active.loading}
         error={active.error}
         empty={Array.isArray(active.data) && active.data.length === 0}
+        emptyText={
+          selected.length > 0
+            ? "No results in the scoped repos - try clearing the repo scope. Function names usually end with (), e.g. ProcessOrder()."
+            : "No results - exact match only. Function names usually end with (), e.g. ProcessOrder()."
+        }
       />
       {active.data && <FeedbackWidget endpoint="symbol" query={ratedQuery} />}
 

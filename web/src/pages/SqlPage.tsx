@@ -35,14 +35,18 @@ export function SqlPage() {
           value={schema}
           onChange={(e) => setSchema(e.target.value)}
           placeholder="schema (optional)"
+          aria-label="Schema filter"
         />
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="object name"
+          aria-label="SQL object name"
           autoFocus
         />
-        <button type="submit">Look up</button>
+        <button type="submit" disabled={!name.trim() || loading}>
+          Look up
+        </button>
       </form>
       <StatusBox loading={loading} error={error} empty={data?.length === 0} />
       {data && <FeedbackWidget endpoint="sql" query={ratedQuery} />}
