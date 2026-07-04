@@ -1,0 +1,14 @@
+# Build stage
+FROM golang:1.26 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 go build -trimpath -o /out/query-service ./cmd/query-service
+
+# Runtime: static binary, no shell, minimal attack surface
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/query-service /usr/local/bin/query-service
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/query-service"]

@@ -149,3 +149,14 @@ func (c *QueryClient) FindGlueJobs(ctx context.Context, source, target string) (
 	}
 	return c.get(ctx, "/glue/jobs", q)
 }
+
+func (c *QueryClient) FindHotspots(ctx context.Context, repo string, limit int) (json.RawMessage, error) {
+	q := url.Values{}
+	if repo != "" {
+		q.Set("repo", repo)
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	return c.get(ctx, "/hotspots", q)
+}

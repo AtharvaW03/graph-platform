@@ -5,6 +5,9 @@ graphify-out/
 # Local override of the committed repos.yaml
 config/repos.local.yaml
 
+# Deployment secrets
+.env
+
 # Built binaries when `go build` is run without -o
 /indexer
 /importer

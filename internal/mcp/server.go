@@ -99,6 +99,11 @@ type FindGlueJobsInput struct {
 	Target string `json:"target,omitempty" jsonschema:"filter to jobs that WRITE to this Glue/SQL table (schema.table). Empty = any."`
 }
 
+type FindHotspotsInput struct {
+	Repo  string `json:"repo,omitempty" jsonschema:"limit ranking to one repository. Empty = org-wide."`
+	Limit int    `json:"limit,omitempty" jsonschema:"max results; default 25, capped at 100"`
+}
+
 // -------- registration --------
 
 func (s *Server) registerTools() {
@@ -183,6 +188,12 @@ func (s *Server) registerTools() {
 		Description: "Search AWS Glue jobs by source or destination table. Returns the job, its repository, script, schedule, and the full source/destination table lists.",
 		Annotations: readOnly,
 	}, s.handleFindGlueJobs)
+
+	sdk.AddTool(s.sdk, &sdk.Tool{
+		Name:        "find_hotspots",
+		Description: "Rank entities by incoming dependency fan-in (calls, references, dependencies, topic/table usage) — the code most other code depends on. High fan-in nodes are high-risk change sites; dependent_repos > 1 means the risk crosses repository boundaries. Optionally scope to one repo.",
+		Annotations: readOnly,
+	}, s.handleFindHotspots)
 }
 
 // -------- handlers --------
@@ -318,6 +329,14 @@ func (s *Server) handleFindSQLObject(ctx context.Context, _ *sdk.CallToolRequest
 
 func (s *Server) handleFindGlueJobs(ctx context.Context, _ *sdk.CallToolRequest, in FindGlueJobsInput) (*sdk.CallToolResult, any, error) {
 	body, err := s.client.FindGlueJobs(ctx, in.Source, in.Target)
+	if err != nil {
+		return errResult(err.Error()), nil, nil
+	}
+	return jsonResult(body), nil, nil
+}
+
+func (s *Server) handleFindHotspots(ctx context.Context, _ *sdk.CallToolRequest, in FindHotspotsInput) (*sdk.CallToolResult, any, error) {
+	body, err := s.client.FindHotspots(ctx, in.Repo, in.Limit)
 	if err != nil {
 		return errResult(err.Error()), nil, nil
 	}

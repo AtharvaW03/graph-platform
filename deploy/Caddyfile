@@ -1,0 +1,20 @@
+# Test/pilot portal: serves the built web UI and proxies /api to the
+# query-service, injecting the bearer token server-side so it never ships
+# to the browser. Maps 1:1 onto the future AWS shape (ALB + SSO in front,
+# this proxy's job moves to the ALB listener rules).
+:80 {
+	# API: strip the /api prefix and forward with auth.
+	handle_path /api/* {
+		reverse_proxy query-service:8080 {
+			header_up Authorization "Bearer {$QUERY_AUTH_TOKEN}"
+		}
+	}
+
+	# Everything else: the SPA. Unknown paths fall back to index.html so
+	# client-side routes deep-link correctly.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

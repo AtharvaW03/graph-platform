@@ -99,8 +99,8 @@ curl -H "Authorization: Bearer dev-token" "http://localhost:8080/overview/my-rep
 
 ### REST endpoints
 
-All read-only, all JSON. With `QUERY_AUTH_TOKEN` set, every endpoint except
-`/health` requires `Authorization: Bearer <token>`.
+All JSON. With `QUERY_AUTH_TOKEN` set, every endpoint except `/health`
+requires `Authorization: Bearer <token>`. All read-only except `/feedback`.
 
 | Endpoint | Answers |
 |---|---|
@@ -115,6 +115,15 @@ All read-only, all JSON. With `QUERY_AUTH_TOKEN` set, every endpoint except
 | `GET /kafka/topic/{name}` | producers/consumers of a topic, all repos |
 | `GET /sql/object?schema=&name=` | SQL object + reads/writes/dependencies |
 | `GET /glue/jobs?source=&target=` | Glue jobs by source/target table |
+| `GET /hotspots?repo=&limit=` | entities ranked by incoming dependency fan-in |
+| `POST /feedback` · `GET /feedback/stats?days=` | relevance ratings + the quality-metric rollup |
+
+## Deployment
+
+`docker compose up -d --build` brings up the full pilot stack — web portal
+(token injected server-side by a Caddy proxy), query API, Neo4j, and a
+continuous indexer. See [`deploy/README.md`](deploy/README.md) for setup,
+git credentials, MCP access, and the path to AWS.
 
 ## Runbook
 
@@ -132,6 +141,16 @@ All read-only, all JSON. With `QUERY_AUTH_TOKEN` set, every endpoint except
 Git auth is whatever the local `git` is configured for (SSH keys, credential
 helper). The indexer disables interactive prompts, so a missing credential
 fails fast instead of hanging.
+
+To generate the manifest for a whole GitHub org (every non-archived repo
+pushed in the last 90 days — the brief's "active repo" definition):
+
+```bash
+GITHUB_TOKEN=<read-only PAT> go run ./cmd/repogen --org angel-one > config/repos.yaml
+```
+
+Review the output before committing; `--days` and `--ssh` adjust the window
+and URL style.
 
 ### Rotating the auth token
 
