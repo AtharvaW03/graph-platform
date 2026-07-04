@@ -573,3 +573,61 @@ code {
         padding: 1rem;
     }
 }
+
+/* Pager below tables longer than one page. */
+.pager {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+    margin: 0.8rem 0;
+}
+
+.pager button {
+    padding: 0.25rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-panel);
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.pager button:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--text);
+}
+
+.pager button[aria-current="page"] {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.pager button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.pager-gap {
+    color: var(--text-dim);
+    padding: 0 0.2rem;
+}
+
+/* Collapsed feedback affordance after one rating this session. */
+.feedback-collapsed {
+    display: inline-block;
+    margin: 0 0 0.9rem;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.feedback-collapsed:hover {
+    color: var(--accent);
+}

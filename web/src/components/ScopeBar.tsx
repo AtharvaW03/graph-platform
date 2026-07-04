@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useRepoScope } from "../context/RepoScope";
 
 // ScopeBar is rendered ONLY by pages whose query is meaningfully scopable
@@ -11,6 +12,30 @@ import { useRepoScope } from "../context/RepoScope";
 // a scope chosen on Search still applies when the user lands on Hotspots.
 export function ScopeBar() {
   const { available, selected, setSelected } = useRepoScope();
+  const dropdownRef = useRef<HTMLDetailsElement>(null);
+
+  // <details> only closes via its own summary; a dropdown must also close
+  // on outside click and Escape. The menu itself stays open across checkbox
+  // clicks (multi-select needs that).
+  useEffect(() => {
+    const closeOnOutsideClick = (e: MouseEvent) => {
+      const d = dropdownRef.current;
+      if (d?.open && e.target instanceof Node && !d.contains(e.target)) {
+        d.open = false;
+      }
+    };
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && dropdownRef.current) {
+        dropdownRef.current.open = false;
+      }
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
 
   const toggle = (name: string) =>
     setSelected(
@@ -22,7 +47,7 @@ export function ScopeBar() {
   return (
     <div className="scope-bar">
       <span className="scope-label">Repo scope:</span>
-      <details className="scope-dropdown">
+      <details className="scope-dropdown" ref={dropdownRef}>
         <summary>
           {selected.length === 0
             ? "All repos"
