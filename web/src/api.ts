@@ -49,6 +49,25 @@ async function get<T>(
   return res.json() as Promise<T>;
 }
 
+async function post(path: string, body: unknown): Promise<void> {
+  const res = await fetch(API_BASE + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new ApiError(res.status, text || res.statusText);
+  }
+}
+
+export interface FeedbackInput {
+  endpoint: string;
+  query: string;
+  helpful: boolean;
+  note?: string;
+}
+
 export const api = {
   search: (q: string) => get<SearchResult[]>("/search", { q }),
   findSymbol: (name: string) =>
@@ -77,4 +96,5 @@ export const api = {
     get<SQLObjectInfo[]>("/sql/object", { schema, name }),
   findGlueJobs: (source?: string, target?: string) =>
     get<GlueJobInfo[]>("/glue/jobs", { source, target }),
+  sendFeedback: (f: FeedbackInput) => post("/feedback", f),
 };

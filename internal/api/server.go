@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"graph-platform/internal/query"
@@ -111,6 +112,13 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /kafka/topic/{name}", s.findKafkaTopic)
 	mux.HandleFunc("GET /sql/object", s.findSQLObject)
 	mux.HandleFunc("GET /glue/jobs", s.findGlueJobs)
+
+	// hotspot ranking (UC-7)
+	mux.HandleFunc("GET /hotspots", s.findHotspots)
+
+	// relevance feedback (the brief's quality metric)
+	mux.HandleFunc("POST /feedback", s.submitFeedback)
+	mux.HandleFunc("GET /feedback/stats", s.feedbackStats)
 	return mux
 }
 
@@ -268,6 +276,65 @@ func (s *Server) findSQLObject(w http.ResponseWriter, r *http.Request) {
 func (s *Server) findGlueJobs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	out, err := s.svc.FindGlueJobs(r.Context(), q.Get("source"), q.Get("target"))
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) findHotspots(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := 0
+	if l := q.Get("limit"); l != "" {
+		parsed, err := strconv.Atoi(l)
+		if err != nil || parsed <= 0 {
+			writeErr(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = parsed
+	}
+	out, err := s.svc.FindHotspots(r.Context(), q.Get("repo"), limit)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// submitFeedback records one thumbs up/down. The only write endpoint on an
+// otherwise read-only API; the body is size-capped and every field is
+// validated/truncated in the service layer.
+func (s *Server) submitFeedback(w http.ResponseWriter, r *http.Request) {
+	var f query.Feedback
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&f); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid feedback body: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(f.Endpoint) == "" {
+		writeErr(w, http.StatusBadRequest, "endpoint required")
+		return
+	}
+	if err := s.svc.SubmitFeedback(r.Context(), f); err != nil {
+		serverError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) feedbackStats(w http.ResponseWriter, r *http.Request) {
+	days := 30
+	if d := r.URL.Query().Get("days"); d != "" {
+		parsed, err := strconv.Atoi(d)
+		if err != nil || parsed <= 0 {
+			writeErr(w, http.StatusBadRequest, "days must be a positive integer")
+			return
+		}
+		days = parsed
+	}
+	out, err := s.svc.GetFeedbackStats(r.Context(), days)
 	if err != nil {
 		serverError(w, err)
 		return
