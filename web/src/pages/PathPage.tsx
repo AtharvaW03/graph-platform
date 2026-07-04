@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { FeedbackWidget } from "../components/FeedbackWidget";
+import { ScopeBar } from "../components/ScopeBar";
 import { useRepoScope } from "../context/RepoScope";
 import type { PathNode } from "../types";
 
@@ -27,21 +28,34 @@ export function PathPage() {
       <p className="hint">
         One shortest undirected path between two symbols, up to 15 hops.
       </p>
+      <ScopeBar />
       <form onSubmit={onSubmit} className="query-form">
         <input
           value={source}
           onChange={(e) => setSource(e.target.value)}
           placeholder="source symbol"
+          aria-label="Source symbol"
           autoFocus
         />
         <input
           value={target}
           onChange={(e) => setTarget(e.target.value)}
           placeholder="target symbol"
+          aria-label="Target symbol"
         />
-        <button type="submit">Trace</button>
+        <button
+          type="submit"
+          disabled={!source.trim() || !target.trim() || loading}
+        >
+          Trace
+        </button>
       </form>
-      <StatusBox loading={loading} error={error} empty={data?.length === 0} />
+      <StatusBox
+        loading={loading}
+        error={error}
+        empty={data?.length === 0}
+        emptyText="No path found within 15 hops - check both symbol names exist (Symbol Explorer helps), or clear the repo scope."
+      />
       {data && <FeedbackWidget endpoint="path" query={ratedQuery} />}
       {data && data.length > 0 && (
         <ol className="path-trail">

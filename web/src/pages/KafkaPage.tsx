@@ -31,9 +31,12 @@ export function KafkaPage() {
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           placeholder="e.g. order.created"
+          aria-label="Kafka topic name"
           autoFocus
         />
-        <button type="submit">Look up</button>
+        <button type="submit" disabled={!topic.trim() || loading}>
+          Look up
+        </button>
       </form>
       <StatusBox loading={loading} error={error} />
       {data && <FeedbackWidget endpoint="kafka" query={ratedQuery} />}

@@ -1,10 +1,14 @@
 import { useRepoScope } from "../context/RepoScope";
 
-// ScopeBar renders above every page: a dropdown of indexed repositories
-// (checkbox multi-select, no names to remember) plus chips for the current
-// selection. Empty selection = all repos. Scoping applies to symbol-level
-// pages (search, symbols, paths, routes, hotspots); inherently single-repo
-// or org-global pages say so themselves.
+// ScopeBar is rendered ONLY by pages whose query is meaningfully scopable
+// (search, symbol explorer, shortest path, HTTP routes, hotspots - all
+// queries over repo-owned entities across repos). Pages that pick their own
+// single repo (overview, dependencies) or query org-global entities (kafka,
+// sql, glue) must not render it - a control that does nothing on the
+// current page is worse than no control.
+//
+// The selection itself is shared and persisted (context + localStorage), so
+// a scope chosen on Search still applies when the user lands on Hotspots.
 export function ScopeBar() {
   const { available, selected, setSelected } = useRepoScope();
 

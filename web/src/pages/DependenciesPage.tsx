@@ -78,10 +78,18 @@ export function DependenciesPage() {
             value={dep}
             onChange={(e) => setDep(e.target.value)}
             placeholder="package or repo name"
+            aria-label="Package or repository name"
             autoFocus
           />
         )}
-        <button type="submit">Run</button>
+        <button
+          type="submit"
+          disabled={
+            loading || (mode === "dependencies" ? !repo : !dep.trim())
+          }
+        >
+          Run
+        </button>
       </form>
 
       <StatusBox loading={loading} error={error} empty={data?.length === 0} />

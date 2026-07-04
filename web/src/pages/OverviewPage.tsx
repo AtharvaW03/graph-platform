@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
@@ -9,16 +9,13 @@ import type { RepositoryOverview } from "../types";
 
 export function OverviewPage() {
   const [repo, setRepo] = useState("");
-  const [ratedQuery, setRatedQuery] = useState("");
   const { available } = useRepoScope();
   const { data, error, loading, run } = useAsync<RepositoryOverview>();
 
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (repo) {
-      setRatedQuery(repo);
-      run(() => api.repositoryOverview(repo));
-    }
+  // Selecting a repo IS the intent - load immediately, no extra button.
+  const onSelect = (name: string) => {
+    setRepo(name);
+    if (name) run(() => api.repositoryOverview(name));
   };
 
   return (
@@ -28,8 +25,13 @@ export function OverviewPage() {
         Primary onboarding entry point - architecture, entry points, modules,
         APIs, dependencies.
       </p>
-      <form onSubmit={onSubmit} className="query-form">
-        <select value={repo} onChange={(e) => setRepo(e.target.value)} autoFocus>
+      <div className="query-form">
+        <select
+          value={repo}
+          onChange={(e) => onSelect(e.target.value)}
+          aria-label="Repository"
+          autoFocus
+        >
           <option value="">select a repository…</option>
           {available.map((r) => (
             <option key={r.name} value={r.name}>
@@ -37,10 +39,14 @@ export function OverviewPage() {
             </option>
           ))}
         </select>
-        <button type="submit">Load</button>
-      </form>
+      </div>
+      {available.length === 0 && (
+        <p className="status">
+          No repositories indexed yet - run the indexer, then reload.
+        </p>
+      )}
       <StatusBox loading={loading} error={error} />
-      {data && <FeedbackWidget endpoint="overview" query={ratedQuery} />}
+      {data && <FeedbackWidget endpoint="overview" query={repo} />}
       {data && <OverviewBody ov={data} />}
     </section>
   );
