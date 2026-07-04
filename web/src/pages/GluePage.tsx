@@ -3,15 +3,21 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges, joinList } from "../components/DataTable";
+import { FeedbackWidget } from "../components/FeedbackWidget";
 import type { GlueJobInfo } from "../types";
 
 export function GluePage() {
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
+  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<GlueJobInfo[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
+    setRatedQuery(
+      [source.trim(), target.trim()].filter(Boolean).join(" -> ") ||
+        "all glue jobs",
+    );
     run(() =>
       api.findGlueJobs(source.trim() || undefined, target.trim() || undefined),
     );
@@ -38,6 +44,7 @@ export function GluePage() {
         <button type="submit">Search</button>
       </form>
       <StatusBox loading={loading} error={error} empty={data?.length === 0} />
+      {data && <FeedbackWidget endpoint="glue" query={ratedQuery} />}
       {data && data.length > 0 && (
         <DataTable
           rows={data}

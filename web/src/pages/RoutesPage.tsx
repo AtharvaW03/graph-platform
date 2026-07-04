@@ -3,16 +3,22 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
+import { FeedbackWidget } from "../components/FeedbackWidget";
 import type { HTTPRoute } from "../types";
 
 export function RoutesPage() {
   const [method, setMethod] = useState("");
   const [path, setPath] = useState("");
   const [repo, setRepo] = useState("");
+  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<HTTPRoute[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
+    setRatedQuery(
+      [method.trim(), path.trim(), repo.trim()].filter(Boolean).join(" ") ||
+        "all routes",
+    );
     run(() =>
       api.findRoutes(
         method.trim() || undefined,
@@ -49,6 +55,7 @@ export function RoutesPage() {
         <button type="submit">Search</button>
       </form>
       <StatusBox loading={loading} error={error} empty={data?.length === 0} />
+      {data && <FeedbackWidget endpoint="routes" query={ratedQuery} />}
       {data && data.length > 0 && (
         <DataTable
           rows={data}

@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
+import { FeedbackWidget } from "../components/FeedbackWidget";
 import type { CallEdge, ImpactNode, SymbolResult } from "../types";
 
 type Mode = "occurrences" | "callers" | "callees" | "blast-radius";
@@ -18,6 +19,7 @@ export function SymbolPage() {
   const [symbol, setSymbol] = useState("");
   const [depth, setDepth] = useState(3);
   const [mode, setMode] = useState<Mode>("occurrences");
+  const [ratedQuery, setRatedQuery] = useState("");
 
   const occ = useAsync<SymbolResult[]>();
   const callers = useAsync<CallEdge[]>();
@@ -25,6 +27,7 @@ export function SymbolPage() {
   const blast = useAsync<ImpactNode[]>();
 
   const runFor = (m: Mode, sym: string) => {
+    setRatedQuery(`${m}: ${sym}`);
     switch (m) {
       case "occurrences":
         return occ.run(() => api.findSymbol(sym));
@@ -96,6 +99,7 @@ export function SymbolPage() {
         error={active.error}
         empty={Array.isArray(active.data) && active.data.length === 0}
       />
+      {active.data && <FeedbackWidget endpoint="symbol" query={ratedQuery} />}
 
       {mode === "occurrences" && occ.data && occ.data.length > 0 && (
         <DataTable

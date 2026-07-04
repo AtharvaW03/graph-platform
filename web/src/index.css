@@ -110,6 +110,51 @@ h2 {
     margin-bottom: 1rem;
 }
 
+/* Feedback bar: sits under the query form, above results. */
+.feedback-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0 0 0.9rem;
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-panel);
+    color: var(--text-dim);
+    font-size: 0.82rem;
+}
+
+.feedback-bar .feedback-thumb {
+    padding: 0.15rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.feedback-bar .feedback-thumb:hover {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+}
+
+.feedback-bar input {
+    flex: 1;
+    min-width: 180px;
+    max-width: 360px;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.8rem;
+}
+
+.feedback-error {
+    color: #f85149;
+}
+
 .query-form input {
     flex: 1;
     min-width: 160px;

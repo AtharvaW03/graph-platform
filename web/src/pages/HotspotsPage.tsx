@@ -3,10 +3,12 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
+import { FeedbackWidget } from "../components/FeedbackWidget";
 import type { HotspotNode } from "../types";
 
 export function HotspotsPage() {
   const [repo, setRepo] = useState("");
+  const [ratedQuery, setRatedQuery] = useState("org-wide");
   const { data, error, loading, run } = useAsync<HotspotNode[]>();
 
   // Org-wide ranking is the default view, so load it immediately.
@@ -17,6 +19,7 @@ export function HotspotsPage() {
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
+    setRatedQuery(repo.trim() || "org-wide");
     run(() => api.findHotspots(repo.trim() || undefined));
   };
 
@@ -37,6 +40,7 @@ export function HotspotsPage() {
         <button type="submit">Rank</button>
       </form>
       <StatusBox loading={loading} error={error} empty={data?.length === 0} />
+      {data && <FeedbackWidget endpoint="hotspots" query={ratedQuery} />}
       {data && data.length > 0 && (
         <DataTable
           rows={data}

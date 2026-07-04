@@ -3,15 +3,20 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { joinList } from "../components/DataTable";
+import { FeedbackWidget } from "../components/FeedbackWidget";
 import type { RepositoryOverview } from "../types";
 
 export function OverviewPage() {
   const [repo, setRepo] = useState("");
+  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<RepositoryOverview>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (repo.trim()) run(() => api.repositoryOverview(repo.trim()));
+    if (repo.trim()) {
+      setRatedQuery(repo.trim());
+      run(() => api.repositoryOverview(repo.trim()));
+    }
   };
 
   return (
@@ -31,6 +36,7 @@ export function OverviewPage() {
         <button type="submit">Load</button>
       </form>
       <StatusBox loading={loading} error={error} />
+      {data && <FeedbackWidget endpoint="overview" query={ratedQuery} />}
       {data && <OverviewBody ov={data} />}
     </section>
   );

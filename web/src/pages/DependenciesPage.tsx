@@ -3,6 +3,7 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
+import { FeedbackWidget } from "../components/FeedbackWidget";
 import type { DependencyEdge } from "../types";
 
 type Mode = "dependencies" | "dependents";
@@ -12,13 +13,16 @@ export function DependenciesPage() {
   const [repo, setRepo] = useState("");
   const [scope, setScope] = useState("");
   const [dep, setDep] = useState("");
+  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<DependencyEdge[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (mode === "dependencies" && repo.trim()) {
+      setRatedQuery(`dependencies of ${repo.trim()}`);
       run(() => api.findDependencies(repo.trim(), scope.trim() || undefined));
     } else if (mode === "dependents" && dep.trim()) {
+      setRatedQuery(`dependents of ${dep.trim()}`);
       run(() => api.findDependents(dep.trim()));
     }
   };
@@ -73,6 +77,7 @@ export function DependenciesPage() {
       </form>
 
       <StatusBox loading={loading} error={error} empty={data?.length === 0} />
+      {data && <FeedbackWidget endpoint="dependencies" query={ratedQuery} />}
       {data && data.length > 0 && (
         <DataTable
           rows={data}
