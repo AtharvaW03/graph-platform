@@ -33,7 +33,7 @@ func PackageNodeID(d Dep) string {
 	return "pkg::" + d.Ecosystem + "::" + safeID(d.Name)
 }
 
-// safeID makes a string usable inside a fragment-node ID — no spaces, no
+// safeID makes a string usable inside a fragment-node ID - no spaces, no
 // path-traversal sequences, lowercased so manifest casing variations
 // (org/Repo vs org/repo) collapse to one node.
 func safeID(s string) string {

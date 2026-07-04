@@ -14,7 +14,7 @@ import (
 
 // GitSyncer is the default Syncer: it shells out to the local `git` binary.
 // Authentication is whatever the user's git is configured for (SSH keys,
-// credential helpers, etc.) — the indexer never touches credentials.
+// credential helpers, etc.) - the indexer never touches credentials.
 //
 // All subprocesses run with credential prompts disabled (GIT_TERMINAL_PROMPT=0,
 // BatchMode SSH) so a missing key surfaces as a fast error instead of hanging
@@ -77,7 +77,7 @@ func (g *GitSyncer) update(ctx context.Context, repo Repository, dest string) er
 	}
 	// Verify the existing clone points at the same remote URL. If a repo's URL
 	// changes (e.g. ownership transfer), refuse to silently re-sync against
-	// the wrong remote — surface it so the operator can remediate.
+	// the wrong remote - surface it so the operator can remediate.
 	out, err := g.run(ctx, dest, "git", "remote", "get-url", "origin")
 	if err != nil {
 		return fmt.Errorf("read remote: %w", err)
@@ -116,7 +116,7 @@ func (g *GitSyncer) run(ctx context.Context, workdir, name string, args ...strin
 	}
 	// GIT_TERMINAL_PROMPT=0 makes missing credentials fail fast instead of
 	// hanging on a prompt; BatchMode does the same for SSH. No ASKPASS
-	// override — hardcoding /bin/echo breaks on Windows and adds nothing
+	// override - hardcoding /bin/echo breaks on Windows and adds nothing
 	// once prompts are disabled.
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",

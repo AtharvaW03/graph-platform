@@ -34,7 +34,7 @@ func parseGoMod(_, contents string) ([]Dep, error) {
 }
 
 func appendGoModLine(deps []Dep, line string) []Dep {
-	// Detect the indirect marker BEFORE stripping trailing comments — the
+	// Detect the indirect marker BEFORE stripping trailing comments - the
 	// marker lives inside the comment ("// indirect").
 	scope := "runtime"
 	if strings.Contains(line, "// indirect") {
@@ -85,7 +85,7 @@ func parseRequirementsTxt(_, contents string) ([]Dep, error) {
 
 // parsePyProject handles pyproject.toml. We support both PEP 621
 // (`[project]` section's dependencies array) and Poetry
-// (`[tool.poetry.dependencies]`). We do not pull in a full TOML parser —
+// (`[tool.poetry.dependencies]`). We do not pull in a full TOML parser -
 // the manifest's relevant sections are simple enough to parse line-by-line.
 func parsePyProject(_, contents string) ([]Dep, error) {
 	var deps []Dep
@@ -103,7 +103,7 @@ func parsePyProject(_, contents string) ([]Dep, error) {
 		case "project":
 			// dependencies = ["fastapi>=0.110", "pydantic>=2"]
 			if strings.HasPrefix(line, "dependencies") && strings.Contains(line, "[") {
-				// Single-line list — pull names with regex below.
+				// Single-line list - pull names with regex below.
 			}
 			deps = append(deps, parsePyProjectArrayLine(line, "runtime")...)
 		case "project.optional-dependencies":

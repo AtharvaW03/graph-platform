@@ -158,6 +158,6 @@ func f() { r.Get("/x", h) }
 		}
 	}
 	if hub == nil {
-		t.Fatal("repo hub node missing — EXPOSES_ROUTE edges dangle when deps extractor is disabled")
+		t.Fatal("repo hub node missing - EXPOSES_ROUTE edges dangle when deps extractor is disabled")
 	}
 }

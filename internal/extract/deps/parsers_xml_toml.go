@@ -8,7 +8,7 @@ import (
 )
 
 // parsePomXML handles Maven's pom.xml. We use the stdlib's encoding/xml with
-// a permissive schema — Maven adds a lot of fields we don't care about.
+// a permissive schema - Maven adds a lot of fields we don't care about.
 func parsePomXML(_, contents string) ([]Dep, error) {
 	type dep struct {
 		GroupID    string `xml:"groupId"`
@@ -52,7 +52,7 @@ func parsePomXML(_, contents string) ([]Dep, error) {
 }
 
 // parseDotNetProj handles .csproj / .fsproj / .vbproj files. These are XML
-// with <PackageReference Include="..." Version="..."/> entries — sometimes
+// with <PackageReference Include="..." Version="..."/> entries - sometimes
 // the version is a child element, so we cover both shapes.
 func parseDotNetProj(_, contents string) ([]Dep, error) {
 	type packageRef struct {

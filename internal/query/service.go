@@ -251,7 +251,7 @@ func (s *Service) BlastRadius(ctx context.Context, symbol string, depth int) ([]
 
 	// The variable-length path depth cannot be parameterized in Cypher.
 	// depth is bounded by the clamp above, so string-formatting it is safe.
-	// This is exhaustive path enumeration, not BFS — on dense graphs deep
+	// This is exhaustive path enumeration, not BFS - on dense graphs deep
 	// traversals are combinatorial. The LIMIT bounds the result set and the
 	// transaction timeout in read() bounds the enumeration itself.
 	cypher := fmt.Sprintf(`

@@ -30,7 +30,7 @@ export function FeedbackWidget({
   };
 
   if (state === "sent") {
-    return <p className="hint feedback">Thanks — feedback recorded.</p>;
+    return <p className="hint feedback">Thanks - feedback recorded.</p>;
   }
   return (
     <p className="hint feedback">
@@ -51,7 +51,7 @@ export function FeedbackWidget({
       >
         👎
       </button>
-      {state === "failed" && " — couldn't record, try again"}
+      {state === "failed" && " - couldn't record, try again"}
     </p>
   );
 }

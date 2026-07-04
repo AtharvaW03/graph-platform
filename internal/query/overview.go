@@ -25,7 +25,7 @@ const (
 // existing FindRoutes / FindDependencies logic rather than re-scanning the
 // graph, so the whole thing is a handful of cheap round trips.
 //
-// Nothing here touches the source tree — every field is derived from Neo4j.
+// Nothing here touches the source tree - every field is derived from Neo4j.
 func (s *Service) RepositoryOverview(ctx context.Context, repo string) (*RepositoryOverview, error) {
 	if repo == "" {
 		return nil, fmt.Errorf("repo required")
@@ -113,7 +113,7 @@ func (s *Service) RepositoryOverview(ctx context.Context, repo string) (*Reposit
 }
 
 // normalize replaces nil slices with empty ones so the JSON payload always
-// presents list fields as [] rather than null — a small but real contract
+// presents list fields as [] rather than null - a small but real contract
 // improvement for a structured API.
 func (ov *RepositoryOverview) normalize() {
 	ov.Repository.Languages = orEmptyCounts(ov.Repository.Languages)
@@ -208,8 +208,8 @@ RETURN count(DISTINCT n) AS nodes, count(r) AS rels
 
 func (s *Service) overviewLabelCounts(ctx context.Context, repo string) ([]LabeledCount, error) {
 	// Scoped via Repository CONTAINS rather than the repo property so shared
-	// (org-global) entities the repo references — Kafka topics, packages,
-	// SQL objects — appear in the kind counts alongside repo-owned nodes.
+	// (org-global) entities the repo references - Kafka topics, packages,
+	// SQL objects - appear in the kind counts alongside repo-owned nodes.
 	const cypher = `
 MATCH (:Repository {name: $repo})-[:CONTAINS]->(n:Entity)
 UNWIND labels(n) AS l
@@ -308,7 +308,7 @@ LIMIT 100
 	if err != nil {
 		return nil, err
 	}
-	// Executable mains first, then servers, then bootstrap — the order a
+	// Executable mains first, then servers, then bootstrap - the order a
 	// newcomer would actually trace a process startup in.
 	sort.SliceStable(out, func(i, j int) bool {
 		return entryKindRank(out[i].Kind) < entryKindRank(out[j].Kind)
@@ -344,8 +344,8 @@ LIMIT $limit
 	return out, err
 }
 
-// overviewHubs returns the highest-degree nodes — the "god nodes" / core
-// abstractions — computed from the graph via a COUNT{} degree subquery.
+// overviewHubs returns the highest-degree nodes - the "god nodes" / core
+// abstractions - computed from the graph via a COUNT{} degree subquery.
 func (s *Service) overviewHubs(ctx context.Context, repo string) ([]ComponentInfo, error) {
 	const cypher = `
 MATCH (n:Entity {repo: $repo})
@@ -375,7 +375,7 @@ LIMIT $limit
 // and consumers, plus flattened distinct producer/consumer lists. Topics are
 // shared (org-global) nodes, so scoping goes via the Repository CONTAINS edge
 // rather than a repo property; the producer/consumer lists deliberately
-// include OTHER repos' hubs — the full topology is the useful answer.
+// include OTHER repos' hubs - the full topology is the useful answer.
 func (s *Service) overviewKafka(ctx context.Context, repo string) (KafkaSummary, error) {
 	const cypher = `
 MATCH (:Repository {name: $repo})-[:CONTAINS]->(t:KafkaTopic)
@@ -508,7 +508,7 @@ func summarizeDependencies(deps []DependencyEdge) DependencySummary {
 }
 
 // synthesizeSummary composes a one-line high-level description from the
-// aggregated metrics — a factual anchor the caller can expand on. It leans on
+// aggregated metrics - a factual anchor the caller can expand on. It leans on
 // node-kind counts rather than the language property, which the importer only
 // populates for a small subset of nodes and so would misdescribe the repo.
 func synthesizeSummary(ov *RepositoryOverview) string {
@@ -552,7 +552,7 @@ func topKindsPhrase(kinds []LabeledCount, n int) string {
 func buildReadingOrder(ov *RepositoryOverview) []ReadingStep {
 	var steps []ReadingStep
 
-	// 1. Entry points — where execution begins.
+	// 1. Entry points - where execution begins.
 	if items := entryPointItems(ov.EntryPoints); len(items) > 0 {
 		steps = append(steps, ReadingStep{
 			Category: "entry_points",
@@ -577,7 +577,7 @@ func buildReadingOrder(ov *RepositoryOverview) []ReadingStep {
 		}
 	}
 
-	// 2. Core packages — the largest domain modules.
+	// 2. Core packages - the largest domain modules.
 	if len(core) > 0 {
 		steps = append(steps, ReadingStep{
 			Category: "core_packages",
@@ -586,7 +586,7 @@ func buildReadingOrder(ov *RepositoryOverview) []ReadingStep {
 		})
 	}
 
-	// 3. Services — the external surface (HTTP, Kafka, SQL).
+	// 3. Services - the external surface (HTTP, Kafka, SQL).
 	if items := serviceItems(ov); len(items) > 0 {
 		steps = append(steps, ReadingStep{
 			Category: "services",
@@ -595,7 +595,7 @@ func buildReadingOrder(ov *RepositoryOverview) []ReadingStep {
 		})
 	}
 
-	// 4. Infrastructure — config, persistence, transport wiring.
+	// 4. Infrastructure - config, persistence, transport wiring.
 	if len(infra) > 0 {
 		steps = append(steps, ReadingStep{
 			Category: "infrastructure",
@@ -604,7 +604,7 @@ func buildReadingOrder(ov *RepositoryOverview) []ReadingStep {
 		})
 	}
 
-	// 5. Utilities — read last, mostly on demand.
+	// 5. Utilities - read last, mostly on demand.
 	if len(util) > 0 {
 		steps = append(steps, ReadingStep{
 			Category: "utilities",
@@ -706,7 +706,7 @@ func entryKindRank(kind string) int {
 	}
 }
 
-// routePrefix returns a stable grouping key for an HTTP path — its first two
+// routePrefix returns a stable grouping key for an HTTP path - its first two
 // segments (e.g. "/api/v1/users" -> "/api/v1"), or "/" for root.
 func routePrefix(path string) string {
 	trimmed := strings.TrimPrefix(path, "/")

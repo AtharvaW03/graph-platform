@@ -7,7 +7,7 @@ import (
 )
 
 // Scheduler decides when the next indexing cycle should start. The contract
-// is intentionally narrow — one Wait method — so future cron-based or
+// is intentionally narrow - one Wait method - so future cron-based or
 // channel-triggered (webhook fire-now) variants drop in without touching
 // the orchestrator. Wait MUST honor ctx cancellation.
 type Scheduler interface {

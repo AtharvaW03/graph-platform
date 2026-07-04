@@ -27,7 +27,7 @@ import (
 //   - the {repo_path} placeholder is substituted into Args; {out_dir} is no
 //     longer a valid placeholder (update has no --out flag)
 //   - the post-run output is located at <repoPath>/<OutputFile>
-//   - the pre-run output is NOT deleted — `update` consumes the prior
+//   - the pre-run output is NOT deleted - `update` consumes the prior
 //     graph.json to do incremental updates, so wiping it would force a full
 //     re-extract every cycle and kill incremental performance
 //   - the post-run file must exist and be non-empty for the run to be
@@ -53,7 +53,7 @@ func NewExecGraphifier(cfg GraphifyConfig, stderr io.Writer) *ExecGraphifier {
 
 // Generate runs the configured extractor command for the repo at repoPath
 // and returns the absolute path of the resulting graph.json. The output
-// path is OutputFile resolved relative to the absolute repoPath — graphify
+// path is OutputFile resolved relative to the absolute repoPath - graphify
 // `update` writes into the repo, so there is no separate out directory.
 //
 // Subprocess stdout and stderr are routed to the configured Stderr writer

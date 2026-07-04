@@ -1,10 +1,10 @@
-# code-intel — Org-Wide Code Intelligence Platform
+# code-intel - Org-Wide Code Intelligence Platform
 
 A self-serve code intelligence service: it keeps every configured repository
 cloned and indexed into a Neo4j knowledge graph, and answers questions like
 *"where is `processPayment` defined?"*, *"which repos depend on
 auth-service?"*, *"who consumes the `trade_executed` topic?"*, or *"which
-procs write to the trades table?"* — across repositories and languages.
+procs write to the trades table?"* - across repositories and languages.
 
 > The three documents under [`docs/graphify/`](docs/graphify/) describe
 > **graphify**, the external AST-extraction CLI this platform shells out to.
@@ -123,7 +123,7 @@ requires `Authorization: Bearer <token>`. All read-only except `/feedback`.
 Four processes, run manually (see Quickstart above for env vars):
 
 ```bash
-# 1. Neo4j — Docker one-liner or Neo4j Desktop
+# 1. Neo4j - Docker one-liner or Neo4j Desktop
 docker run -d --name neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/<pw> neo4j:5
 
 # 2. Indexer, continuous
@@ -133,7 +133,7 @@ go run ./cmd/indexer --all --interval 1h
 go run ./cmd/query-service
 
 # 4. Web UI (dev server proxies /api -> :8080; export QUERY_AUTH_TOKEN too
-#    if the query-service runs with one — the proxy injects it server-side)
+#    if the query-service runs with one - the proxy injects it server-side)
 cd web && npm install && npm run dev     # http://localhost:5173
 ```
 
@@ -159,7 +159,7 @@ helper). The indexer disables interactive prompts, so a missing credential
 fails fast instead of hanging.
 
 To generate the manifest for a whole GitHub org (every non-archived repo
-pushed in the last 90 days — the brief's "active repo" definition):
+pushed in the last 90 days - the brief's "active repo" definition):
 
 ```bash
 GITHUB_TOKEN=<read-only PAT> go run ./cmd/repogen --org angel-one > config/repos.yaml
@@ -191,7 +191,7 @@ HEAD hasn't moved (e.g. after an extractor fix or a graph wipe).
 
 ### Web UI authentication
 
-The web UI never embeds the bearer token — a `VITE_*` variable is baked into
+The web UI never embeds the bearer token - a `VITE_*` variable is baked into
 the shipped JS bundle, readable by anyone who can load the page. Instead the
 proxy in front of the UI injects `Authorization` server-side: in dev that's
 the Vite proxy (export `QUERY_AUTH_TOKEN` before `npm run dev`); for a shared
@@ -205,7 +205,7 @@ fallback for a cross-origin API, set `QUERY_CORS_ORIGIN` on query-service.
   Two indexers on different hosts can race: the orphaned-shared-node sweep of
   one can delete a shared node the other has imported but not yet linked,
   silently dropping edges until the next re-index.
-- `workdir/` is disposable *except* `state.json` (and even that self-heals —
+- `workdir/` is disposable *except* `state.json` (and even that self-heals -
   deleting it just forces a full re-index).
 - The importer is idempotent: re-importing the same commit is a no-op upsert.
 
@@ -222,5 +222,5 @@ Extractors are covered by table tests over fixture files (`internal/extract/*/
 ## Known limitations
 
 - Extractors are heuristic (regex-level). Edges they emit carry
-  `confidence: INFERRED` — treat them as leads, not proofs.
+  `confidence: INFERRED` - treat them as leads, not proofs.
 - Windows hosts don't get workdir locking.

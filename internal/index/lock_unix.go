@@ -16,7 +16,7 @@ import (
 // The returned *os.File MUST be kept open for the lifetime of the process;
 // closing the file releases the lock. On exit, the OS releases it for us.
 //
-// Non-unix builds fall back to a no-op via lock_other.go — single-host POSIX
+// Non-unix builds fall back to a no-op via lock_other.go - single-host POSIX
 // is the only environment with guaranteed flock semantics.
 func LockWorkDir(dir string) (*os.File, error) {
 	path := filepath.Join(dir, ".indexer.lock")

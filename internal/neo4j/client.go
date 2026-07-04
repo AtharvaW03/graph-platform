@@ -23,7 +23,7 @@ const batchSize = 500
 
 // labelAllowlist enumerates every Neo4j label the importer is allowed to set
 // on Entity nodes. Cypher does not permit parameterized labels, so labels are
-// interpolated into the query string — this allowlist is the security gate.
+// interpolated into the query string - this allowlist is the security gate.
 // New labels added here must also be returned by graphify.InferLabel via the
 // typeToLabel map (or one of the heuristic rules).
 var labelAllowlist = map[string]bool{
@@ -50,7 +50,7 @@ var labelAllowlist = map[string]bool{
 // properties at import. Everything else in a node's metadata dict is dropped:
 // Neo4j properties must be primitives or arrays thereof, and an open
 // pass-through would let one extractor bloat every node. Add a key here AND
-// have the query layer read it — a property nobody queries is dead weight.
+// have the query layer read it - a property nobody queries is dead weight.
 var metadataProps = []string{
 	"version", "scope", "manifest", // deps
 	"method", "handler", // httpapi
@@ -87,7 +87,7 @@ func (c *Client) VerifyConnectivity(ctx context.Context) error {
 }
 
 // EnsureConstraints creates the unique constraint on Entity.node_key, the repo
-// index, and the unique constraint on Repository.name — all idempotent.
+// index, and the unique constraint on Repository.name - all idempotent.
 func (c *Client) EnsureConstraints(ctx context.Context) error {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
 	defer session.Close(ctx)
@@ -108,7 +108,7 @@ func (c *Client) EnsureConstraints(ctx context.Context) error {
 // CountEntitiesForRepo returns the number of :Entity nodes currently in
 // Neo4j scoped to repo. Called by the importer after its pipeline completes
 // so Summary.NodesInGraph reflects Neo4j's actual state rather than the
-// caller's input count — a divergence between the two is a silent
+// caller's input count - a divergence between the two is a silent
 // data-loss signal (e.g. the StableKey collision bug fixed in v1.1).
 //
 // The count follows the repo's CONTAINS edges rather than matching on the
@@ -116,7 +116,7 @@ func (c *Client) EnsureConstraints(ctx context.Context) error {
 // design, so a property-scoped count would under-report by exactly the
 // number of shared nodes the repo's graph.json contains, flagging a
 // mismatch on every import that involves an extractor. Every imported node
-// — shared or not — gets a (:Repository)-[:CONTAINS]->(n) edge from
+// - shared or not - gets a (:Repository)-[:CONTAINS]->(n) edge from
 // importNodeBatch, and stale CONTAINS edges are removed by SweepStale, so
 // the post-import edge count equals the set of nodes this run wrote.
 func (c *Client) CountEntitiesForRepo(ctx context.Context, repo string) (int, error) {
@@ -263,13 +263,13 @@ func (c *Client) ImportLinks(ctx context.Context, repo, commit string, links []g
 
 // SweepStale removes Entity nodes and relationships for repo whose last_commit
 // does not match the current commit. It is the cleanup step that keeps the
-// graph in sync with the source tree on re-index — nodes/edges deleted in the
+// graph in sync with the source tree on re-index - nodes/edges deleted in the
 // new commit are removed instead of accumulating forever.
 //
 // Shared (org-global) nodes are handled specially: they carry no repo
 // property, so the repo-scoped node sweep never touches them. Instead, a
 // final orphan pass deletes any shared node that no longer has an edge to or
-// from any Entity — i.e. every repo that referenced it has dropped its edges.
+// from any Entity - i.e. every repo that referenced it has dropped its edges.
 //
 // commit must be non-empty; an empty commit would sweep everything for the
 // repo, which is almost certainly an operator error and so is refused.
@@ -313,7 +313,7 @@ RETURN count(r) AS deleted`, params, "sweep stale relationships")
 	}
 
 	// Step 2: sweep stale repo-owned nodes. DETACH DELETE also removes
-	// Repository containment edges, which is fine — they're re-created on the
+	// Repository containment edges, which is fine - they're re-created on the
 	// next import. Shared nodes never match: they have no repo property.
 	nodesDeleted, err := runCount(`
 MATCH (n:Entity {repo: $repo})
@@ -325,7 +325,7 @@ RETURN count(n) AS deleted`, params, "sweep stale nodes")
 		return 0, 0, err
 	}
 
-	// Step 3: reap orphaned shared nodes — no repo references them anymore.
+	// Step 3: reap orphaned shared nodes - no repo references them anymore.
 	// Repository CONTAINS edges don't count as references; only Entity edges
 	// (PRODUCES, DEPENDS_ON, IN_SCHEMA, ...) keep a shared node alive.
 	orphans, err := runCount(`
@@ -342,7 +342,7 @@ RETURN count(n) AS deleted`, map[string]any{}, "sweep orphaned shared nodes")
 
 // nodeProps are the row keys importNodeBatch copies onto the node. They are
 // package-internal constants (never user input), so interpolating them into
-// the Cypher SET map is safe. Row values may be nil — Cypher's `SET n += {}`
+// the Cypher SET map is safe. Row values may be nil - Cypher's `SET n += {}`
 // treats null as "remove the property", which is exactly what shared nodes
 // (repo: null) and absent metadata keys need.
 var nodeProps = append([]string{
@@ -396,8 +396,8 @@ SET c.repo = $repo%s`, label, strings.Join(setPairs, ",\n    "), commitClause, c
 //
 // MERGE keys on (source, type, target) only, so parallel edges collapse: two
 // distinct call sites between the same pair become ONE edge, and the last
-// row's weight/context wins. This is deliberate — the graph answers "does A
-// call B", not "how many times" — but callers should not read weight as a
+// row's weight/context wins. This is deliberate - the graph answers "does A
+// call B", not "how many times" - but callers should not read weight as a
 // call-site count.
 func (c *Client) importLinkBatch(ctx context.Context, rel, repo, commit string, batch []map[string]any) error {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})

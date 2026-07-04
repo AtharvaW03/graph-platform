@@ -46,8 +46,8 @@ export function PathPage() {
               <strong>{node.name}</strong>
               <span className="dim">
                 {" "}
-                ({node.labels.filter((l) => l !== "Entity").join(", ")}) —{" "}
-                {node.repo} — {node.path}
+                ({node.labels.filter((l) => l !== "Entity").join(", ")}) -{" "}
+                {node.repo} - {node.path}
               </span>
             </li>
           ))}

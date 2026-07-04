@@ -45,7 +45,7 @@ type RepositoryOverviewInput struct {
 }
 
 type SearchCodeInput struct {
-	Query string `json:"query" jsonschema:"search text — partial, case-insensitive match against symbol name and norm_name across all imported repositories"`
+	Query string `json:"query" jsonschema:"search text - partial, case-insensitive match against symbol name and norm_name across all imported repositories"`
 }
 
 type FindSymbolInput struct {
@@ -72,7 +72,7 @@ type ShortestPathInput struct {
 
 type FindDependenciesInput struct {
 	Repo  string `json:"repo" jsonschema:"the repository whose declared dependencies to list"`
-	Scope string `json:"scope,omitempty" jsonschema:"optional scope filter — runtime, dev, indirect, peer, optional, test, build"`
+	Scope string `json:"scope,omitempty" jsonschema:"optional scope filter - runtime, dev, indirect, peer, optional, test, build"`
 }
 
 type FindDependentsInput struct {
@@ -91,7 +91,7 @@ type FindKafkaTopicInput struct {
 
 type FindSQLObjectInput struct {
 	Schema string `json:"schema,omitempty" jsonschema:"optional schema scope (e.g. 'dbo'). Empty matches every schema."`
-	Name   string `json:"name" jsonschema:"object name to look up — schemas, tables, views, procedures, triggers, functions"`
+	Name   string `json:"name" jsonschema:"object name to look up - schemas, tables, views, procedures, triggers, functions"`
 }
 
 type FindGlueJobsInput struct {
@@ -111,7 +111,7 @@ func (s *Server) registerTools() {
 
 	sdk.AddTool(s.sdk, &sdk.Tool{
 		Name:        "repository_overview",
-		Description: "PRIMARY ONBOARDING ENTRY POINT for a repository. Returns a single structured architectural summary — metadata (node/relationship counts, languages), Graphify communities, entry points (mains/servers/bootstrap), major modules with sizes, HTTP APIs, Kafka topics/producers/consumers, SQL objects, dependencies, highest-degree hub components, and a suggested reading order. Call this ONCE before making many search_code/find_routes/find_dependencies/find_symbol calls; follow up with those targeted tools only for specifics.",
+		Description: "PRIMARY ONBOARDING ENTRY POINT for a repository. Returns a single structured architectural summary - metadata (node/relationship counts, languages), Graphify communities, entry points (mains/servers/bootstrap), major modules with sizes, HTTP APIs, Kafka topics/producers/consumers, SQL objects, dependencies, highest-degree hub components, and a suggested reading order. Call this ONCE before making many search_code/find_routes/find_dependencies/find_symbol calls; follow up with those targeted tools only for specifics.",
 		Annotations: readOnly,
 	}, s.handleRepositoryOverview)
 
@@ -161,7 +161,7 @@ func (s *Server) registerTools() {
 
 	sdk.AddTool(s.sdk, &sdk.Tool{
 		Name:        "find_dependents",
-		Description: "List every repository whose manifest declares a dependency on the supplied package or repository name. Use for blast-radius questions across repos — \"who depends on auth-service?\".",
+		Description: "List every repository whose manifest declares a dependency on the supplied package or repository name. Use for blast-radius questions across repos - \"who depends on auth-service?\".",
 		Annotations: readOnly,
 	}, s.handleFindDependents)
 
@@ -191,7 +191,7 @@ func (s *Server) registerTools() {
 
 	sdk.AddTool(s.sdk, &sdk.Tool{
 		Name:        "find_hotspots",
-		Description: "Rank entities by incoming dependency fan-in (calls, references, dependencies, topic/table usage) — the code most other code depends on. High fan-in nodes are high-risk change sites; dependent_repos > 1 means the risk crosses repository boundaries. Optionally scope to one repo.",
+		Description: "Rank entities by incoming dependency fan-in (calls, references, dependencies, topic/table usage) - the code most other code depends on. High fan-in nodes are high-risk change sites; dependent_repos > 1 means the risk crosses repository boundaries. Optionally scope to one repo.",
 		Annotations: readOnly,
 	}, s.handleFindHotspots)
 }

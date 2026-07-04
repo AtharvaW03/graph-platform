@@ -10,7 +10,7 @@ import react from "@vitejs/plugin-react";
 // If the query-service runs with QUERY_AUTH_TOKEN set, export the same
 // variable when starting `npm run dev` and the proxy injects the
 // Authorization header SERVER-SIDE (inside the Vite node process). The token
-// never enters the browser bundle — do not move it to a VITE_* variable.
+// never enters the browser bundle - do not move it to a VITE_* variable.
 export default defineConfig({
   plugins: [react()],
   server: {

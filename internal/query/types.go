@@ -113,7 +113,7 @@ type GlueJobInfo struct {
 // RepositoryOverview is the aggregated onboarding snapshot for one repository.
 // It is built entirely from the indexed graph in Neo4j (no source-file access)
 // by aggregating a handful of focused queries plus the existing routes and
-// dependencies query logic. The response is structured data, not prose — the
+// dependencies query logic. The response is structured data, not prose - the
 // caller is expected to turn it into natural-language onboarding.
 type RepositoryOverview struct {
 	Repository   RepoMetadata       `json:"repository"`

@@ -3,6 +3,7 @@ import type {
   DependencyEdge,
   GlueJobInfo,
   HTTPRoute,
+  HotspotNode,
   ImpactNode,
   KafkaTopicInfo,
   PathNode,
@@ -18,7 +19,7 @@ import type {
 //
 // Deliberately NO auth token here: anything in a VITE_* variable is baked
 // into the shipped JS bundle, so a token configured that way is readable by
-// every browser that can load this page — it would silently turn the
+// every browser that can load this page - it would silently turn the
 // org-wide code index public. Deploy the UI behind a reverse proxy that
 // injects the Authorization header server-side (or terminates SSO) instead.
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
@@ -96,5 +97,7 @@ export const api = {
     get<SQLObjectInfo[]>("/sql/object", { schema, name }),
   findGlueJobs: (source?: string, target?: string) =>
     get<GlueJobInfo[]>("/glue/jobs", { source, target }),
+  findHotspots: (repo?: string, limit?: number) =>
+    get<HotspotNode[]>("/hotspots", { repo, limit }),
   sendFeedback: (f: FeedbackInput) => post("/feedback", f),
 };

@@ -38,7 +38,7 @@ export function DataTable<T>({ columns, rows, keyFn }: Props<T>) {
 }
 
 export function joinList(xs?: string[]): string {
-  return xs && xs.length > 0 ? xs.join(", ") : "—";
+  return xs && xs.length > 0 ? xs.join(", ") : "-";
 }
 
 export function LabelBadges({ labels }: { labels: string[] }) {

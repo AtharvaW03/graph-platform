@@ -1,4 +1,4 @@
-# Indexer runtime state — clones, graphify outputs, state file
+# Indexer runtime state - clones, graphify outputs, state file
 workdir/
 graphify-out/
 

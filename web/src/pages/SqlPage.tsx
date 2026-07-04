@@ -20,7 +20,7 @@ export function SqlPage() {
     <section>
       <h1>SQL Object</h1>
       <p className="hint">
-        Schemas, tables, views, procedures, triggers, functions — plus what each
+        Schemas, tables, views, procedures, triggers, functions - plus what each
         reads, writes, and depends on. Leave schema blank to match across
         schemas.
       </p>
@@ -54,8 +54,8 @@ export function SqlPage() {
             { header: "Reads", render: (r) => joinList(r.reads) },
             { header: "Writes", render: (r) => joinList(r.writes) },
             { header: "Depends on", render: (r) => joinList(r.depends_on) },
-            { header: "Triggers on", render: (r) => r.triggers_on || "—" },
-            { header: "File", render: (r) => r.file || "—" },
+            { header: "Triggers on", render: (r) => r.triggers_on || "-" },
+            { header: "File", render: (r) => r.file || "-" },
           ]}
         />
       )}

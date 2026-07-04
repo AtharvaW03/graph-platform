@@ -57,7 +57,7 @@ export function RoutesPage() {
             { header: "Method", render: (r) => r.method },
             { header: "Path", render: (r) => r.path },
             { header: "Repo", render: (r) => r.repo },
-            { header: "Handler", render: (r) => r.handler || "—" },
+            { header: "Handler", render: (r) => r.handler || "-" },
             {
               header: "Labels",
               render: (r) => <LabelBadges labels={r.labels} />,

@@ -121,7 +121,7 @@ func TestRunWithGraphSequenceAndSummary(t *testing.T) {
 		t.Errorf("sweep counts: %+v", sum)
 	}
 	if sum.NodesMismatch() {
-		t.Errorf("2 in, 2 in graph — mismatch flagged: %+v", sum)
+		t.Errorf("2 in, 2 in graph - mismatch flagged: %+v", sum)
 	}
 }
 

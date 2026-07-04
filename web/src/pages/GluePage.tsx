@@ -49,10 +49,10 @@ export function GluePage() {
               header: "Labels",
               render: (r) => <LabelBadges labels={r.labels} />,
             },
-            { header: "Schedule", render: (r) => r.schedule || "—" },
+            { header: "Schedule", render: (r) => r.schedule || "-" },
             { header: "Sources", render: (r) => joinList(r.sources) },
             { header: "Targets", render: (r) => joinList(r.targets) },
-            { header: "Script", render: (r) => r.script || "—" },
+            { header: "Script", render: (r) => r.script || "-" },
           ]}
         />
       )}

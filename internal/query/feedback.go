@@ -8,7 +8,7 @@ import (
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
-// Feedback is one relevance rating from an engineer — the raw data behind
+// Feedback is one relevance rating from an engineer - the raw data behind
 // the brief's "≥80% of sessions rated relevant" quality metric. Stored as
 // (:Feedback) nodes in Neo4j: no extra storage system, and the stats query
 // is one aggregation away.
