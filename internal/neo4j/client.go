@@ -393,6 +393,12 @@ SET c.repo = $repo%s`, label, strings.Join(setPairs, ",\n    "), commitClause, c
 // rel is validated via MapRelation's allowlist map before reaching here.
 // repo stamps each edge for repo-scoped sweeps; commit, if non-empty, stamps
 // each edge so sweep can identify stale edges.
+//
+// MERGE keys on (source, type, target) only, so parallel edges collapse: two
+// distinct call sites between the same pair become ONE edge, and the last
+// row's weight/context wins. This is deliberate — the graph answers "does A
+// call B", not "how many times" — but callers should not read weight as a
+// call-site count.
 func (c *Client) importLinkBatch(ctx context.Context, rel, repo, commit string, batch []map[string]any) error {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
 	defer session.Close(ctx)

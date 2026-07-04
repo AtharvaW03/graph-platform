@@ -17,6 +17,12 @@ import (
 // Names like "../bad" or "/etc/passwd" or "foo bar" are rejected.
 var validRepoName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]*$`)
 
+// validBranch restricts Repository.Branch to plausible git ref names that are
+// safe to pass as a positional argument to `git fetch origin <branch>`. The
+// leading character excludes '-' so a configured branch can never be parsed
+// as a git option flag (argument injection through the config file).
+var validBranch = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._/-]*$`)
+
 // Config is the indexer's on-disk configuration. It declares the repository
 // manifest and tunables for the git, graphify, and orchestrator subsystems.
 type Config struct {
@@ -155,6 +161,9 @@ func (c *Config) Validate() error {
 		}
 		if r.Branch == "" {
 			return fmt.Errorf("repositories[%d] (%s): missing branch", i, r.Name)
+		}
+		if !validBranch.MatchString(r.Branch) {
+			return fmt.Errorf("repositories[%d] (%s): invalid branch %q (must match %s; no leading dash or spaces)", i, r.Name, r.Branch, validBranch.String())
 		}
 		if seen[r.Name] {
 			return fmt.Errorf("repositories: duplicate name %q", r.Name)

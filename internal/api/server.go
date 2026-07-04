@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"graph-platform/internal/query"
 )
@@ -34,6 +36,46 @@ func WithAuth(h http.Handler, token string) http.Handler {
 		if subtle.ConstantTimeCompare(got, expected) != 1 {
 			writeErr(w, http.StatusUnauthorized, "missing or invalid bearer token")
 			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+// WithRequestTimeout wraps h so every request context carries a deadline.
+// The deadline propagates through r.Context() into the Cypher transaction,
+// so a request that outlives it is canceled at the database rather than
+// holding a connection (and a Neo4j session) open indefinitely.
+func WithRequestTimeout(h http.Handler, d time.Duration) http.Handler {
+	if d <= 0 {
+		return h
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), d)
+		defer cancel()
+		h.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// WithCORS wraps h with a minimal CORS policy for a single trusted origin.
+// origin == "" disables CORS entirely (same-origin deployments — the
+// recommended setup — never need it). The Authorization header forces a
+// preflight, so OPTIONS is answered here; only GET is exposed because the
+// API is read-only.
+func WithCORS(h http.Handler, origin string) http.Handler {
+	if origin == "" {
+		return h
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") == origin {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Vary", "Origin")
+			if r.Method == http.MethodOptions {
+				w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization")
+				w.Header().Set("Access-Control-Max-Age", "600")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 		}
 		h.ServeHTTP(w, r)
 	})

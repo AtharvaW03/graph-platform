@@ -82,8 +82,11 @@ func MergeIntoGraphFile(srcPath, dstPath string, fragments []*Fragment) error {
 	envelope["nodes"] = existingNodes
 	envelope["links"] = existingLinks
 
-	// Marshal and atomically replace.
-	out, err := json.MarshalIndent(envelope, "", "  ")
+	// Marshal and atomically replace. No indentation: the merged graph is a
+	// machine-read intermediate (importer input), and indenting a large
+	// graph.json meaningfully inflates both the encode allocation and the
+	// on-disk size.
+	out, err := json.Marshal(envelope)
 	if err != nil {
 		return fmt.Errorf("encode merged graph: %w", err)
 	}

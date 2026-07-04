@@ -3,7 +3,7 @@ workdir/
 graphify-out/
 
 # Local override of the committed repos.yaml
-config/repos.yaml.local
+config/repos.local.yaml
 
 # Built binaries when `go build` is run without -o
 /indexer
