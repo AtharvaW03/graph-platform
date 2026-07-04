@@ -75,7 +75,7 @@ func (s *Service) RepositoryOverview(ctx context.Context, repo string) (*Reposit
 	}
 
 	// Reuse existing query logic for the HTTP and dependency inventories.
-	routes, err := s.FindRoutes(ctx, "", "", repo)
+	routes, err := s.FindRoutes(ctx, "", "", []string{repo})
 	if err != nil {
 		return nil, err
 	}

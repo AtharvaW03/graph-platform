@@ -113,8 +113,9 @@ func (s *Service) runDepQuery(ctx context.Context, cypher string, params map[str
 //
 // The query doesn't join through (:Repository) - each HttpRoute carries a
 // `repo` property set by importNodeBatch (routes are repo-owned, not shared),
-// so scoping by repo is a direct property filter with no join.
-func (s *Service) FindRoutes(ctx context.Context, method, pathContains, repo string) ([]HTTPRoute, error) {
+// so scoping by repo is a direct property filter with no join. repos empty
+// means every repository.
+func (s *Service) FindRoutes(ctx context.Context, method, pathContains string, repos []string) ([]HTTPRoute, error) {
 	const cypher = `
 MATCH (rt:HttpRoute)
 WITH rt,
@@ -123,7 +124,7 @@ WITH rt,
      CASE WHEN rt.name CONTAINS ' ' THEN substring(rt.name, size(split(rt.name,' ')[0]) + 1) ELSE coalesce(rt.name, '') END AS path_part
 WHERE ($method = '' OR toUpper(method_part) = toUpper($method))
   AND ($path = '' OR toLower(path_part) CONTAINS toLower($path))
-  AND ($repo = '' OR coalesce(rt.repo, '') = $repo)
+  AND (size($repos) = 0 OR rt.repo IN $repos)
 RETURN coalesce(rt.repo, '')     AS repo,
        method_part               AS method,
        path_part                 AS path,
@@ -136,7 +137,7 @@ LIMIT 500
 `
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
 		res, err := tx.Run(ctx, cypher, map[string]any{
-			"method": method, "path": pathContains, "repo": repo,
+			"method": method, "path": pathContains, "repos": orEmpty(repos),
 		})
 		if err != nil {
 			return nil, err

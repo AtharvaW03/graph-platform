@@ -1,26 +1,25 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
+import { useRepoScope } from "../context/RepoScope";
 import type { HotspotNode } from "../types";
 
+// No auto-load on open: the org-wide ranking aggregates every dependency
+// edge in the graph, so it only runs when explicitly requested. The server
+// additionally caches the org-wide result for a few minutes, so repeated
+// requests are cheap.
 export function HotspotsPage() {
-  const [repo, setRepo] = useState("");
-  const [ratedQuery, setRatedQuery] = useState("org-wide");
+  const [ratedQuery, setRatedQuery] = useState("");
+  const { selected } = useRepoScope();
   const { data, error, loading, run } = useAsync<HotspotNode[]>();
-
-  // Org-wide ranking is the default view, so load it immediately.
-  useEffect(() => {
-    run(() => api.findHotspots());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    setRatedQuery(repo.trim() || "org-wide");
-    run(() => api.findHotspots(repo.trim() || undefined));
+    setRatedQuery(selected.length > 0 ? selected.join(",") : "org-wide");
+    run(() => api.findHotspots(selected));
   };
 
   return (
@@ -30,14 +29,15 @@ export function HotspotsPage() {
         Code ranked by incoming dependency fan-in: what the most other code
         depends on. High fan-in nodes are high-risk change sites; a dependent
         repos count above 1 means the risk crosses repository boundaries.
+        Scope with the repo selector above, or leave it on "All repos" for the
+        org-wide ranking.
       </p>
       <form onSubmit={onSubmit} className="query-form">
-        <input
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          placeholder="repo name (empty = org-wide)"
-        />
-        <button type="submit">Rank</button>
+        <button type="submit">
+          {selected.length > 0
+            ? `Rank ${selected.length} scoped repo${selected.length > 1 ? "s" : ""}`
+            : "Rank org-wide"}
+        </button>
       </form>
       <StatusBox loading={loading} error={error} empty={data?.length === 0} />
       {data && <FeedbackWidget endpoint="hotspots" query={ratedQuery} />}

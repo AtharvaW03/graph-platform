@@ -4,11 +4,13 @@ import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
+import { useRepoScope } from "../context/RepoScope";
 import type { SearchResult } from "../types";
 
 export function SearchPage() {
   const [q, setQ] = useState("");
   const [ratedQuery, setRatedQuery] = useState("");
+  const { selected } = useRepoScope();
   const { data, error, loading, run } = useAsync<SearchResult[]>();
 
   const onSubmit = (e: FormEvent) => {
@@ -16,7 +18,7 @@ export function SearchPage() {
     const query = q.trim();
     if (query) {
       setRatedQuery(query);
-      run(() => api.search(query));
+      run(() => api.search(query, selected));
     }
   };
 

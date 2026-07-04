@@ -4,6 +4,7 @@ import { useAsync } from "../hooks/useAsync";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
+import { useRepoScope } from "../context/RepoScope";
 import type { DependencyEdge } from "../types";
 
 type Mode = "dependencies" | "dependents";
@@ -14,13 +15,14 @@ export function DependenciesPage() {
   const [scope, setScope] = useState("");
   const [dep, setDep] = useState("");
   const [ratedQuery, setRatedQuery] = useState("");
+  const { available } = useRepoScope();
   const { data, error, loading, run } = useAsync<DependencyEdge[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (mode === "dependencies" && repo.trim()) {
-      setRatedQuery(`dependencies of ${repo.trim()}`);
-      run(() => api.findDependencies(repo.trim(), scope.trim() || undefined));
+    if (mode === "dependencies" && repo) {
+      setRatedQuery(`dependencies of ${repo}`);
+      run(() => api.findDependencies(repo, scope.trim() || undefined));
     } else if (mode === "dependents" && dep.trim()) {
       setRatedQuery(`dependents of ${dep.trim()}`);
       run(() => api.findDependents(dep.trim()));
@@ -53,12 +55,18 @@ export function DependenciesPage() {
       <form onSubmit={onSubmit} className="query-form">
         {mode === "dependencies" ? (
           <>
-            <input
+            <select
               value={repo}
               onChange={(e) => setRepo(e.target.value)}
-              placeholder="repo name"
               autoFocus
-            />
+            >
+              <option value="">select a repository…</option>
+              {available.map((r) => (
+                <option key={r.name} value={r.name}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
             <input
               value={scope}
               onChange={(e) => setScope(e.target.value)}
