@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"graph-platform/internal/neo4j"
@@ -49,6 +50,11 @@ func (s *Service) read(ctx context.Context, fn func(tx driver.ManagedTransaction
 // Search returns nodes whose name or norm_name contains q (case-insensitive),
 // ordered by match quality (exact > prefix > contains) then by name length.
 //
+// The query compares against the pre-lowercased name_lower / norm_name_lower
+// columns (indexed; see neo4j.EnsureConstraints) rather than wrapping the
+// stored value in toLower(), which would defeat the index and force a full
+// label scan. The search term is lowercased here in Go.
+//
 // repos, when non-empty, scopes matches to those repositories. The filter is
 // on the indexed n.repo property, so org-global shared nodes (topics,
 // packages, SQL objects - which carry no repo) drop out of scoped results;
@@ -59,9 +65,8 @@ func (s *Service) Search(ctx context.Context, q string, repos []string) ([]Searc
 	}
 
 	const cypher = `
-WITH toLower($q) AS qlow
 MATCH (n:Entity)
-WHERE (toLower(n.name) CONTAINS qlow OR toLower(n.norm_name) CONTAINS qlow)
+WHERE (n.name_lower CONTAINS $q OR n.norm_name_lower CONTAINS $q)
   AND (size($repos) = 0 OR n.repo IN $repos)
 RETURN n.node_key      AS node_key,
        n.graphify_id   AS graphify_id,
@@ -71,10 +76,10 @@ RETURN n.node_key      AS node_key,
        n.path          AS path,
        n.line          AS line,
        CASE
-         WHEN toLower(n.name) = qlow                  THEN 0
-         WHEN toLower(n.name) STARTS WITH qlow        THEN 1
-         WHEN toLower(n.norm_name) = qlow             THEN 2
-         WHEN toLower(n.norm_name) STARTS WITH qlow   THEN 3
+         WHEN n.name_lower = $q                  THEN 0
+         WHEN n.name_lower STARTS WITH $q        THEN 1
+         WHEN n.norm_name_lower = $q             THEN 2
+         WHEN n.norm_name_lower STARTS WITH $q   THEN 3
          ELSE 4
        END AS rank
 ORDER BY rank, size(n.name), n.name
@@ -82,7 +87,7 @@ LIMIT $limit
 `
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"q": q, "limit": searchLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"q": strings.ToLower(q), "limit": searchLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -118,9 +123,8 @@ func (s *Service) FindSymbol(ctx context.Context, symbol string, repos []string)
 	}
 
 	const cypher = `
-WITH toLower($s) AS slow
 MATCH (n:Entity)
-WHERE (toLower(n.name) = slow OR toLower(n.norm_name) = slow)
+WHERE (n.name_lower = $s OR n.norm_name_lower = $s)
   AND (size($repos) = 0 OR n.repo IN $repos)
 RETURN n.name           AS name,
        n.repo           AS repo,
@@ -133,7 +137,7 @@ LIMIT $limit
 `
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": symbol, "limit": symbolLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"s": strings.ToLower(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -170,9 +174,8 @@ func (s *Service) FindCallers(ctx context.Context, symbol string, repos []string
 	}
 
 	const cypher = `
-WITH toLower($s) AS slow
 MATCH (caller:Entity)-[:CALLS]->(callee:Entity)
-WHERE (toLower(callee.name) = slow OR toLower(callee.norm_name) = slow)
+WHERE (callee.name_lower = $s OR callee.norm_name_lower = $s)
   AND (size($repos) = 0 OR callee.repo IN $repos)
 RETURN caller.name AS caller,
        caller.repo AS caller_repo,
@@ -196,10 +199,8 @@ func (s *Service) FindCallees(ctx context.Context, symbol string, repos []string
 	}
 
 	const cypher = `
-WITH toLower($s) AS slow
 MATCH (caller:Entity)-[:CALLS]->(callee:Entity)
-WHERE (toLower(caller.name) = slow
-   OR toLower(caller.norm_name) = slow)
+WHERE (caller.name_lower = $s OR caller.norm_name_lower = $s)
   AND (size($repos) = 0 OR caller.repo IN $repos)
 WITH caller, callee
 ORDER BY callee.repo, callee.path, callee.line
@@ -218,7 +219,7 @@ LIMIT $limit
 
 func (s *Service) runCallEdgeQuery(ctx context.Context, cypher, symbol string, repos []string) ([]CallEdge, error) {
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": symbol, "limit": symbolLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"s": strings.ToLower(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -266,13 +267,14 @@ func (s *Service) BlastRadius(ctx context.Context, symbol string, depth int, rep
 
 	// The variable-length path depth cannot be parameterized in Cypher.
 	// depth is bounded by the clamp above, so string-formatting it is safe.
-	// This is exhaustive path enumeration, not BFS - on dense graphs deep
-	// traversals are combinatorial. The LIMIT bounds the result set and the
-	// transaction timeout in read() bounds the enumeration itself.
+	// Because the query aggregates to distinct reachable nodes with
+	// min(length(p)), the planner uses a pruning BFS expansion (visits each
+	// node once per level) rather than enumerating every path. The start
+	// anchor is index-backed via start.name_lower; the LIMIT and the
+	// transaction timeout in read() bound the traversal.
 	cypher := fmt.Sprintf(`
-WITH toLower($s) AS slow
 MATCH (start:Entity)
-WHERE (toLower(start.name) = slow OR toLower(start.norm_name) = slow)
+WHERE (start.name_lower = $s OR start.norm_name_lower = $s)
   AND (size($repos) = 0 OR start.repo IN $repos)
 MATCH p = (start)-[*1..%d]->(impacted:Entity)
 WITH impacted, min(length(p)) AS distance
@@ -287,7 +289,7 @@ LIMIT $limit
 `, depth)
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": symbol, "limit": symbolLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"s": strings.ToLower(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -326,10 +328,9 @@ func (s *Service) ShortestPath(ctx context.Context, source, target string, repos
 	}
 
 	cypher := fmt.Sprintf(`
-WITH toLower($src) AS srclow, toLower($dst) AS dstlow
 MATCH (src:Entity), (dst:Entity)
-WHERE (toLower(src.name) = srclow OR toLower(src.norm_name) = srclow)
-  AND (toLower(dst.name) = dstlow OR toLower(dst.norm_name) = dstlow)
+WHERE (src.name_lower = $src OR src.norm_name_lower = $src)
+  AND (dst.name_lower = $dst OR dst.norm_name_lower = $dst)
   AND (size($repos) = 0 OR (src.repo IN $repos AND dst.repo IN $repos))
 WITH src, dst LIMIT 1
 MATCH p = shortestPath((src)-[*..%d]-(dst))
@@ -345,7 +346,7 @@ ORDER BY idx
 `, shortestPathHopsMax)
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"src": source, "dst": target, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"src": strings.ToLower(source), "dst": strings.ToLower(target), "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}

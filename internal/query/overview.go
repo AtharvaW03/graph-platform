@@ -2,9 +2,11 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
@@ -41,46 +43,35 @@ func (s *Service) RepositoryOverview(ctx context.Context, repo string) (*Reposit
 		return nil, fmt.Errorf("repository %q has no indexed nodes", repo)
 	}
 
-	kinds, err := s.overviewLabelCounts(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	langs, err := s.overviewLanguages(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	communities, err := s.overviewCommunities(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	entryPoints, err := s.overviewEntryPoints(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	modules, err := s.overviewModules(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	hubs, err := s.overviewHubs(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	kafka, err := s.overviewKafka(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	sqlSummary, err := s.overviewSQL(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-
-	// Reuse existing query logic for the HTTP and dependency inventories.
-	routes, err := s.FindRoutes(ctx, "", "", []string{repo})
-	if err != nil {
-		return nil, err
-	}
-	deps, err := s.FindDependencies(ctx, repo, "")
-	if err != nil {
+	// The remaining reads are independent of each other and each opens its own
+	// Neo4j session, so run them concurrently: wall-clock collapses from the
+	// sum of ~10 round trips to roughly the slowest single one. FindRoutes and
+	// FindDependencies reuse existing query logic for the HTTP and dependency
+	// inventories.
+	var (
+		kinds       []LabeledCount
+		langs       []LabeledCount
+		communities []CommunitySummary
+		entryPoints []EntryPoint
+		modules     []ModuleInfo
+		hubs        []ComponentInfo
+		kafka       KafkaSummary
+		sqlSummary  SQLSummary
+		routes      []HTTPRoute
+		deps        []DependencyEdge
+	)
+	if err := parallelReads(
+		func() (e error) { kinds, e = s.overviewLabelCounts(ctx, repo); return },
+		func() (e error) { langs, e = s.overviewLanguages(ctx, repo); return },
+		func() (e error) { communities, e = s.overviewCommunities(ctx, repo); return },
+		func() (e error) { entryPoints, e = s.overviewEntryPoints(ctx, repo); return },
+		func() (e error) { modules, e = s.overviewModules(ctx, repo); return },
+		func() (e error) { hubs, e = s.overviewHubs(ctx, repo); return },
+		func() (e error) { kafka, e = s.overviewKafka(ctx, repo); return },
+		func() (e error) { sqlSummary, e = s.overviewSQL(ctx, repo); return },
+		func() (e error) { routes, e = s.FindRoutes(ctx, "", "", []string{repo}); return },
+		func() (e error) { deps, e = s.FindDependencies(ctx, repo, ""); return },
+	); err != nil {
 		return nil, err
 	}
 
@@ -110,6 +101,31 @@ func (s *Service) RepositoryOverview(ctx context.Context, repo string) (*Reposit
 	ov.ReadingOrder = buildReadingOrder(ov)
 	ov.normalize()
 	return ov, nil
+}
+
+// parallelReads runs independent read closures concurrently and returns their
+// combined error. Each closure gets its own Neo4j session (created inside
+// s.read / s.each), which the driver's pooled, thread-safe connections
+// support - sessions themselves are never shared across goroutines. A panic
+// in any closure is recovered into an error so one bad read can't crash the
+// server (spawned goroutines are outside the HTTP handler's recovery).
+func parallelReads(fns ...func() error) error {
+	var wg sync.WaitGroup
+	errs := make([]error, len(fns))
+	for i, fn := range fns {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					errs[i] = fmt.Errorf("overview read panicked: %v", r)
+				}
+			}()
+			errs[i] = fn()
+		}()
+	}
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 // normalize replaces nil slices with empty ones so the JSON payload always
@@ -275,17 +291,19 @@ ORDER BY size DESC
 // functions. The WHERE clause narrows to likely candidates; classifyEntryPoint
 // assigns the final kind.
 func (s *Service) overviewEntryPoints(ctx context.Context, repo string) ([]EntryPoint, error) {
+	// Anchored by the repo index; name_lower (pre-lowercased at import) avoids
+	// recomputing toLower per row and matches the pattern used elsewhere.
 	const cypher = `
 MATCH (n:Entity {repo: $repo})
 WHERE 'Function' IN labels(n) AND (
-      toLower(n.name) = 'main()'
-   OR toLower(n.name) CONTAINS 'newserver'
-   OR toLower(n.name) CONTAINS 'listenandserve'
-   OR toLower(n.name) CONTAINS 'runserver'
-   OR toLower(n.name) STARTS WITH 'serve'
-   OR toLower(n.name) STARTS WITH 'start'
-   OR toLower(n.name) STARTS WITH 'bootstrap'
-   OR toLower(n.name) STARTS WITH 'run('
+      n.name_lower = 'main()'
+   OR n.name_lower CONTAINS 'newserver'
+   OR n.name_lower CONTAINS 'listenandserve'
+   OR n.name_lower CONTAINS 'runserver'
+   OR n.name_lower STARTS WITH 'serve'
+   OR n.name_lower STARTS WITH 'start'
+   OR n.name_lower STARTS WITH 'bootstrap'
+   OR n.name_lower STARTS WITH 'run('
 )
 RETURN n.name AS name,
        coalesce(n.path, '') AS path,
