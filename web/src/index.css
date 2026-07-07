@@ -280,31 +280,44 @@ h2 {
 }
 
 /* Button-flavoured option used by the single-select RepoSelect (ScopeBar uses
-   <label>s). Reset the native button chrome so it reads like the labels. */
-button.scope-option {
+   <label>s). Reset the native button chrome so it reads like the labels.
+   Scoped under .scope-menu so it beats the global `.query-form button` accent
+   styling when the picker is rendered inside a query form (overview/deps). */
+.scope-menu button.scope-option {
     width: 100%;
     text-align: left;
+    padding: 0.3rem 0.4rem;
     border: none;
+    border-radius: 4px;
     background: transparent;
     color: var(--text);
     font: inherit;
+    font-weight: 400;
 }
 
-.scope-option.selected {
+.scope-menu button.scope-option:hover {
+    background: var(--accent-bg);
+    filter: none;
+}
+
+.scope-menu button.scope-option.selected {
     background: var(--accent-bg);
     color: var(--text);
     font-weight: 600;
 }
 
 /* In-menu repo filter. Sticky so it stays put while a long list scrolls under
-   it; the opaque background hides options passing beneath. */
-.repo-search {
+   it; the opaque background hides options passing beneath. Scoped under
+   .scope-menu to override `.query-form input` when nested in a query form. */
+.scope-menu .repo-search {
     position: sticky;
     top: 0;
     z-index: 1;
     display: block;
+    flex: none;
     box-sizing: border-box;
     width: 100%;
+    min-width: 0;
     margin-bottom: 0.4rem;
     padding: 0.35rem 0.5rem;
     border: 1px solid var(--border);
