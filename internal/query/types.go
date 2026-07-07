@@ -57,9 +57,9 @@ type PathNode struct {
 // DependencyEdge is one repo→package or repo→repo edge from the deps extractor.
 type DependencyEdge struct {
 	Repo      string   `json:"repo"`
-	Name      string   `json:"name"`       // package or repo name
-	Labels    []string `json:"labels"`     // includes Package and (when cross-repo) Repository
-	Ecosystem string   `json:"ecosystem"`  // go | npm | pypi | maven | …
+	Name      string   `json:"name"`      // package or repo name
+	Labels    []string `json:"labels"`    // includes Package and (when cross-repo) Repository
+	Ecosystem string   `json:"ecosystem"` // go | npm | pypi | maven | …
 	Version   string   `json:"version,omitempty"`
 	Scope     string   `json:"scope,omitempty"`
 	Cross     bool     `json:"cross_repo"` // true if this is a DEPENDS_ON_REPO edge
@@ -67,13 +67,21 @@ type DependencyEdge struct {
 
 // HTTPRoute is one row from the routes inventory.
 type HTTPRoute struct {
-	Repo     string   `json:"repo"`
-	Method   string   `json:"method"`
-	Path     string   `json:"path"`
-	Handler  string   `json:"handler,omitempty"`
-	Labels   []string `json:"labels"`
-	File     string   `json:"file"`
-	Line     string   `json:"line"`
+	Repo    string   `json:"repo"`
+	Method  string   `json:"method"`
+	Path    string   `json:"path"`
+	Handler string   `json:"handler,omitempty"`
+	Labels  []string `json:"labels"`
+	File    string   `json:"file"`
+	Line    string   `json:"line"`
+	// Source is "openapi" for routes read from a committed spec (the authored
+	// contract) or "code" for routes inferred by source scanning. Documented
+	// mirrors it as a bool for convenient filtering. Classification is
+	// "business" or "infra". Tags carries OpenAPI operation tags.
+	Source         string   `json:"source,omitempty"`
+	Documented     bool     `json:"documented"`
+	Classification string   `json:"classification,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
 }
 
 // KafkaTopicInfo describes one topic plus its producer/consumer repos.
@@ -86,16 +94,16 @@ type KafkaTopicInfo struct {
 // SQLObjectInfo describes one SQL Server object plus the tables it reads,
 // writes, and depends on.
 type SQLObjectInfo struct {
-	Name        string   `json:"name"`
-	Schema      string   `json:"schema"`
-	Kind        string   `json:"kind"` // sql_table | sql_view | sql_procedure | sql_trigger | sql_function | sql_schema
-	Labels      []string `json:"labels"`
-	File        string   `json:"file,omitempty"`
-	Line        string   `json:"line,omitempty"`
-	Reads       []string `json:"reads,omitempty"`
-	Writes      []string `json:"writes,omitempty"`
-	DependsOn   []string `json:"depends_on,omitempty"`
-	TriggersOn  string   `json:"triggers_on,omitempty"`
+	Name       string   `json:"name"`
+	Schema     string   `json:"schema"`
+	Kind       string   `json:"kind"` // sql_table | sql_view | sql_procedure | sql_trigger | sql_function | sql_schema
+	Labels     []string `json:"labels"`
+	File       string   `json:"file,omitempty"`
+	Line       string   `json:"line,omitempty"`
+	Reads      []string `json:"reads,omitempty"`
+	Writes     []string `json:"writes,omitempty"`
+	DependsOn  []string `json:"depends_on,omitempty"`
+	TriggersOn string   `json:"triggers_on,omitempty"`
 }
 
 // GlueJobInfo describes one AWS Glue job plus its source/destination tables.
@@ -116,16 +124,16 @@ type GlueJobInfo struct {
 // dependencies query logic. The response is structured data, not prose - the
 // caller is expected to turn it into natural-language onboarding.
 type RepositoryOverview struct {
-	Repository   RepoMetadata       `json:"repository"`
-	Architecture ArchitectureInfo   `json:"architecture"`
-	EntryPoints  []EntryPoint       `json:"entry_points"`
-	Modules      []ModuleInfo       `json:"modules"`
-	HTTPAPIs     HTTPAPISummary     `json:"http_apis"`
-	Kafka        KafkaSummary       `json:"kafka"`
-	SQL          SQLSummary         `json:"sql"`
-	Dependencies DependencySummary  `json:"dependencies"`
-	Components   []ComponentInfo    `json:"important_components"`
-	ReadingOrder []ReadingStep      `json:"suggested_reading_order"`
+	Repository   RepoMetadata      `json:"repository"`
+	Architecture ArchitectureInfo  `json:"architecture"`
+	EntryPoints  []EntryPoint      `json:"entry_points"`
+	Modules      []ModuleInfo      `json:"modules"`
+	HTTPAPIs     HTTPAPISummary    `json:"http_apis"`
+	Kafka        KafkaSummary      `json:"kafka"`
+	SQL          SQLSummary        `json:"sql"`
+	Dependencies DependencySummary `json:"dependencies"`
+	Components   []ComponentInfo   `json:"important_components"`
+	ReadingOrder []ReadingStep     `json:"suggested_reading_order"`
 }
 
 // LabeledCount is a generic name→count pair used for label, language, method,

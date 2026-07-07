@@ -53,7 +53,7 @@ var labelAllowlist = map[string]bool{
 // have the query layer read it - a property nobody queries is dead weight.
 var metadataProps = []string{
 	"version", "scope", "manifest", // deps
-	"method", "handler", // httpapi
+	"method", "handler", "source", "classification", "documented", "tags", // httpapi
 	"script", "schedule", "sources", "dests", "expression", // glue
 	"is_repository", "discovered_as", // deps repo hubs
 	"schema", "object_name", // mssql
@@ -183,24 +183,24 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit string, nodes []g
 		}
 
 		row := map[string]any{
-			"key":            key,
-			"graphify_id":    n.ID,
-			"name":           n.Label,
-			"norm_name":      n.NormLabel,
+			"key":         key,
+			"graphify_id": n.ID,
+			"name":        n.Label,
+			"norm_name":   n.NormLabel,
 			// Pre-lowercased copies for index-backed case-insensitive lookups
 			// (see EnsureConstraints). orNil keeps empties out so the property
 			// is absent rather than an empty string on nameless nodes.
 			"name_lower":      orNil(strings.ToLower(n.Label)),
 			"norm_name_lower": orNil(strings.ToLower(n.NormLabel)),
-			"path":           n.SourceFile,
-			"line":           n.SourceLocation,
-			"language":       orNil(graphify.InferLanguage(n)),
-			"file_type":      n.FileType,
-			"community":      n.Community,
-			"community_name": n.CommunityName,
-			"ecosystem":      orNil(n.Ecosystem),
-			"repo":           repoProp,
-			"shared":         sharedProp,
+			"path":            n.SourceFile,
+			"line":            n.SourceLocation,
+			"language":        orNil(graphify.InferLanguage(n)),
+			"file_type":       n.FileType,
+			"community":       n.Community,
+			"community_name":  n.CommunityName,
+			"ecosystem":       orNil(n.Ecosystem),
+			"repo":            repoProp,
+			"shared":          sharedProp,
 		}
 		for _, k := range metadataProps {
 			row[k] = nil

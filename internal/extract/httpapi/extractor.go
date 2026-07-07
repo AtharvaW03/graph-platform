@@ -48,6 +48,26 @@ type route struct {
 	Path    string
 	Handler string // empty if not statically resolvable
 	Line    int
+	// Source is where the route was discovered. Empty (sourceCode) means a
+	// source-scanning matcher inferred it; sourceOpenAPI means it came from a
+	// committed spec. It drives the emitted confidence tier and metadata.
+	Source string
+	// Tags carries an OpenAPI operation's tags (empty for code routes),
+	// preserved on the node for business/domain grouping in the UI.
+	Tags []string
+}
+
+const (
+	sourceCode    = "code"
+	sourceOpenAPI = "openapi"
+)
+
+// heldRoute is one discovered route plus the file it was found in, buffered so
+// the code-derived and spec-derived sets can be reconciled before any node is
+// emitted (see reconcileRoutes).
+type heldRoute struct {
+	file string
+	r    route
 }
 
 // matcher fingerprints a single source file by extension and applies the
@@ -147,6 +167,15 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	groupDefs := map[string]map[string]goGroupDef{} // file -> var -> def
 	var pending []goPendingRoute
 
+	// Code-derived routes are buffered rather than emitted directly so they can
+	// be reconciled against any OpenAPI spec before nodes are created. emit is
+	// the sink every code path (matchers, JVM lookahead, Go const resolution)
+	// funnels into.
+	var codeRoutes []heldRoute
+	emit := func(file string, r route) {
+		codeRoutes = append(codeRoutes, heldRoute{file: file, r: r})
+	}
+
 	walk := func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			if d != nil && d.IsDir() && shouldSkipDir(d.Name()) {
@@ -203,7 +232,7 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 				}
 			}
 			if isJVM {
-				pendingJVM, classPrefix = resolveRequestMapping(frag, repoNodeID, repoName, rel, line, lineNum, pendingJVM, classPrefix)
+				pendingJVM, classPrefix = resolveRequestMapping(emit, rel, line, pendingJVM, classPrefix)
 				if m := requestMappingRe.FindStringSubmatch(line); m != nil {
 					if classDeclRe.MatchString(line) {
 						// Annotation and class declaration on one line
@@ -220,7 +249,7 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 					if isJVM && classPrefix != "" {
 						r.Path = joinPrefix(classPrefix, r.Path)
 					}
-					emitRoute(frag, repoNodeID, repoName, rel, r)
+					emit(rel, r)
 				}
 			}
 		}
@@ -230,7 +259,7 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		// An annotation still pending at EOF annotated nothing we saw -
 		// emit it as a route rather than dropping it silently.
 		if pendingJVM != nil {
-			emitPendingAsRoute(frag, repoNodeID, repoName, rel, pendingJVM, classPrefix)
+			emitPendingAsRoute(emit, rel, pendingJVM, classPrefix)
 		}
 		_ = f.Close()
 		return nil
@@ -266,12 +295,20 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		if p == "" {
 			continue // identifier didn't resolve to a path-like constant
 		}
-		emitRoute(frag, repoNodeID, repoName, pr.file, route{
+		emit(pr.file, route{
 			Method:  pr.method,
 			Path:    joinPrefix(prefixOf(pr.file, pr.groupVar, 0), p),
 			Handler: pr.handler,
 			Line:    pr.line,
 		})
+	}
+
+	// Reconcile code-derived routes with any committed OpenAPI/Swagger spec:
+	// spec routes are authoritative on an exact (method, path) overlap, but
+	// never suppress the undocumented/infra routes only the code path finds.
+	specRoutes := e.openAPIRoutes(repoPath, frag)
+	for _, hr := range reconcileRoutes(codeRoutes, specRoutes) {
+		emitRoute(frag, repoNodeID, repoName, hr.file, hr.r)
 	}
 
 	// Emit the repo hub node ourselves so EXPOSES_ROUTE edges don't dangle
@@ -308,7 +345,7 @@ var (
 // any other declaration means it was a method-level route (emitted here), and
 // blank lines / comments / stacked annotations keep it pending. Returns the
 // updated pending state and class prefix.
-func resolveRequestMapping(frag *extract.Fragment, repoNodeID, repoName, file, line string, _ int, pending *pendingMapping, classPrefix string) (*pendingMapping, string) {
+func resolveRequestMapping(emit func(string, route), file, line string, pending *pendingMapping, classPrefix string) (*pendingMapping, string) {
 	if pending == nil {
 		return nil, classPrefix
 	}
@@ -319,17 +356,17 @@ func resolveRequestMapping(frag *extract.Fragment, repoNodeID, repoName, file, l
 	case classDeclRe.MatchString(t):
 		return nil, pending.path
 	default:
-		emitPendingAsRoute(frag, repoNodeID, repoName, file, pending, classPrefix)
+		emitPendingAsRoute(emit, file, pending, classPrefix)
 		return nil, classPrefix
 	}
 }
 
-func emitPendingAsRoute(frag *extract.Fragment, repoNodeID, repoName, file string, p *pendingMapping, classPrefix string) {
+func emitPendingAsRoute(emit func(string, route), file string, p *pendingMapping, classPrefix string) {
 	method := p.method
 	if method == "" {
 		method = "ANY"
 	}
-	emitRoute(frag, repoNodeID, repoName, file, route{
+	emit(file, route{
 		Method: method,
 		Path:   joinPrefix(classPrefix, p.path),
 		Line:   p.line,
@@ -352,28 +389,102 @@ func emitRoute(frag *extract.Fragment, repoNodeID, repoName, file string, r rout
 	}
 	method := strings.ToUpper(r.Method)
 	path := normalizePath(r.Path)
+	source := r.Source
+	if source == "" {
+		source = sourceCode
+	}
+	// A route from a committed spec is the authored contract (EXTRACTED); one
+	// inferred by a source-scanning matcher stays INFERRED.
+	confidence := extract.ConfidenceInferred
+	if source == sourceOpenAPI {
+		confidence = extract.ConfidenceExtracted
+	}
 	id := "route::" + repoName + "::" + method + "::" + path + "::" + file
+	meta := map[string]any{
+		"method":         method,
+		"path":           path,
+		"handler":        r.Handler,
+		"repo":           repoName,
+		"source":         source,
+		"classification": classifyRoute(path),
+		"documented":     source == sourceOpenAPI,
+	}
+	if len(r.Tags) > 0 {
+		meta["tags"] = r.Tags
+	}
 	frag.AddNode(extract.FragmentNode{
 		ID:             id,
 		Label:          method + " " + path,
 		Type:           "http_route",
 		SourceFile:     file,
 		SourceLocation: fmt.Sprintf("L%d", r.Line),
-		Metadata: map[string]any{
-			"method":  method,
-			"path":    path,
-			"handler": r.Handler,
-			"repo":    repoName,
-		},
+		Metadata:       meta,
 	})
 	frag.AddEdge(extract.FragmentEdge{
 		Source:         repoNodeID,
 		Target:         id,
 		Relation:       "exposes_route",
-		Confidence:     extract.ConfidenceInferred,
+		Confidence:     confidence,
 		SourceFile:     file,
 		SourceLocation: fmt.Sprintf("L%d", r.Line),
 	})
+}
+
+// reconcileRoutes merges the code-derived and spec-derived route sets. Spec
+// routes are authoritative: on an exact (method, normalized-path) overlap the
+// code route is dropped in favour of the spec's (correct path, EXTRACTED
+// confidence, tags). Code routes that don't exactly match a spec route are all
+// kept - that's the undocumented/infra surface a spec omits, and the signal
+// that a route is exposed but not documented. Code-vs-code duplicates are left
+// for emitRoute's node-id dedup (which is file-aware), so a repo with no spec
+// is completely unaffected.
+func reconcileRoutes(code, spec []heldRoute) []heldRoute {
+	specKeys := make(map[string]bool, len(spec))
+	emitted := make(map[string]bool, len(spec))
+	out := make([]heldRoute, 0, len(spec)+len(code))
+	for _, s := range spec {
+		k := routeKey(s.r.Method, s.r.Path)
+		specKeys[k] = true
+		if emitted[k] {
+			continue // collapse duplicate documentation of the same endpoint
+		}
+		emitted[k] = true
+		out = append(out, s)
+	}
+	for _, c := range code {
+		if specKeys[routeKey(c.r.Method, c.r.Path)] {
+			continue // spec already covers this exact route, authoritatively
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// routeKey is the reconciliation identity of a route: method + normalized path,
+// independent of source file. Matches emitRoute's method/path normalization so
+// a spec route and a code route for the same endpoint compare equal.
+func routeKey(method, path string) string {
+	return strings.ToUpper(method) + " " + normalizePath(path)
+}
+
+// infraPrefixes are path prefixes for operational endpoints (health, metrics,
+// profiling, docs) as opposed to business API surface. Classification is
+// advisory metadata for filtering/grouping in the UI; it does not affect which
+// routes are emitted.
+var infraPrefixes = []string{
+	"/health", "/healthz", "/livez", "/readyz", "/ready", "/live",
+	"/metrics", "/debug/", "/debug", "/actuator", "/swagger", "/openapi",
+	"/ping", "/version", "/status", "/__",
+}
+
+func classifyRoute(path string) string {
+	p := strings.ToLower(path)
+	for _, pre := range infraPrefixes {
+		if p == pre || strings.HasPrefix(p, pre+"/") || (strings.HasSuffix(pre, "/") && strings.HasPrefix(p, pre)) {
+			return "infra"
+		}
+	}
+	return "business"
 }
 
 func normalizePath(p string) string {
