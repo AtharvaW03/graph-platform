@@ -124,13 +124,13 @@ func TestParsePomXML(t *testing.T) {
 }
 
 func TestInternalRepoNameFromDep(t *testing.T) {
-	prefixes := []string{"github.com/angel-one/", "@angel-one/"}
+	prefixes := []string{"github.com/example-org/", "@example-org/"}
 	cases := []struct {
 		dep, want string
 	}{
-		{"github.com/angel-one/auth-service", "auth-service"},
-		{"github.com/angel-one/auth-service/v2", "auth-service"},
-		{"@angel-one/ui-kit", "ui-kit"},
+		{"github.com/example-org/auth-service", "auth-service"},
+		{"github.com/example-org/auth-service/v2", "auth-service"},
+		{"@example-org/ui-kit", "ui-kit"},
 		{"github.com/gin-gonic/gin", ""},
 	}
 	for _, c := range cases {

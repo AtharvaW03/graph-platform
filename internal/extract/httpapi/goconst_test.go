@@ -50,6 +50,53 @@ func registerPledge(r *gin.RouterGroup) {
 	}
 }
 
+// TestGoConstantRoutesBareSegments covers a common convention that a stricter
+// constant filter used to miss: path constants are bare segments with no
+// leading slash and plain names that contain no route/path/endpoint hint.
+// When such a constant is used in route position it must still resolve -
+// otherwise the route is dropped entirely. Here the group prefix is defined
+// in a different file than the function that registers the routes, so the
+// paths surface partial (cross-file group resolution is a separate, documented
+// limitation); the point of this test is that the routes surface at all.
+func TestGoConstantRoutesBareSegments(t *testing.T) {
+	routes := runExtract(t, map[string]string{
+		"constants/routes.go": `package constants
+
+const (
+	V2Group   = "widgets/v2"
+	Detail    = "detail"
+	Summary   = "summary"
+	BatchEdit = "batch/edit"
+)
+`,
+		"api/router.go": `package api
+
+func Setup(router *gin.Engine) {
+	v2Router := router.Group(constants.V2Group, authMW.Auth(), mw.Logging())
+	v2.WidgetRoutesV2(v2Router)
+}
+`,
+		"api/v2/routes.go": `package v2
+
+func WidgetRoutesV2(group *gin.RouterGroup) {
+	group.POST(constants.Detail, getDetail)
+	group.GET(constants.Summary, getSummary)
+	group.POST(constants.BatchEdit, postBatchEdit)
+}
+`,
+	})
+
+	for _, want := range []string{
+		"POST /detail",
+		"GET /summary",
+		"POST /batch/edit",
+	} {
+		if !routes[want] {
+			t.Errorf("missing route %q; got %v", want, routes)
+		}
+	}
+}
+
 // TestGoConstantRoutesNoise: config-getter constants and unresolvable
 // identifiers must not become routes.
 func TestGoConstantRoutesNoise(t *testing.T) {
