@@ -125,13 +125,17 @@ WITH rt,
 WHERE ($method = '' OR toUpper(method_part) = toUpper($method))
   AND ($path = '' OR toLower(path_part) CONTAINS toLower($path))
   AND (size($repos) = 0 OR rt.repo IN $repos)
-RETURN coalesce(rt.repo, '')     AS repo,
-       method_part               AS method,
-       path_part                 AS path,
-       coalesce(rt.handler, '')  AS handler,
-       labels(rt)                AS labels,
-       coalesce(rt.path, '')     AS file_path,
-       coalesce(rt.line, '')     AS line
+RETURN coalesce(rt.repo, '')            AS repo,
+       method_part                      AS method,
+       path_part                        AS path,
+       coalesce(rt.handler, '')         AS handler,
+       labels(rt)                       AS labels,
+       coalesce(rt.path, '')            AS file_path,
+       coalesce(rt.line, '')            AS line,
+       coalesce(rt.source, 'code')      AS source,
+       coalesce(rt.documented, false)   AS documented,
+       coalesce(rt.classification, '')  AS classification,
+       coalesce(rt.tags, [])            AS tags
 ORDER BY repo, path
 LIMIT 500
 `
@@ -150,13 +154,17 @@ LIMIT 500
 		for _, rec := range records {
 			m := rec.AsMap()
 			out = append(out, HTTPRoute{
-				Repo:    asString(m["repo"]),
-				Method:  asString(m["method"]),
-				Path:    asString(m["path"]),
-				Handler: asString(m["handler"]),
-				Labels:  asStringSlice(m["labels"]),
-				File:    asString(m["file_path"]),
-				Line:    asString(m["line"]),
+				Repo:           asString(m["repo"]),
+				Method:         asString(m["method"]),
+				Path:           asString(m["path"]),
+				Handler:        asString(m["handler"]),
+				Labels:         asStringSlice(m["labels"]),
+				File:           asString(m["file_path"]),
+				Line:           asString(m["line"]),
+				Source:         asString(m["source"]),
+				Documented:     asBool(m["documented"]),
+				Classification: asString(m["classification"]),
+				Tags:           asStringSlice(m["tags"]),
 			})
 		}
 		return out, nil
