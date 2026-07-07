@@ -5,6 +5,7 @@ import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
 import { useRepoScope } from "../context/RepoScope";
+import { RepoSelect } from "../components/RepoSelect";
 import type { DependencyEdge } from "../types";
 
 type Mode = "dependencies" | "dependents";
@@ -55,18 +56,11 @@ export function DependenciesPage() {
       <form onSubmit={onSubmit} className="query-form">
         {mode === "dependencies" ? (
           <>
-            <select
+            <RepoSelect
+              available={available}
               value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-              autoFocus
-            >
-              <option value="">select a repository…</option>
-              {available.map((r) => (
-                <option key={r.name} value={r.name}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
+              onSelect={setRepo}
+            />
             <input
               value={scope}
               onChange={(e) => setScope(e.target.value)}
