@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRepoScope } from "../context/RepoScope";
 
 // ScopeBar is rendered ONLY by pages whose query is meaningfully scopable
@@ -13,6 +13,8 @@ import { useRepoScope } from "../context/RepoScope";
 export function ScopeBar() {
   const { available, selected, setSelected } = useRepoScope();
   const dropdownRef = useRef<HTMLDetailsElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [filter, setFilter] = useState("");
 
   // <details> only closes via its own summary; a dropdown must also close
   // on outside click and Escape. The menu itself stays open across checkbox
@@ -44,10 +46,24 @@ export function ScopeBar() {
         : [...selected, name],
     );
 
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? available.filter((r) => r.name.toLowerCase().includes(q))
+    : available;
+
   return (
     <div className="scope-bar">
       <span className="scope-label">Repo scope:</span>
-      <details className="scope-dropdown" ref={dropdownRef}>
+      <details
+        className="scope-dropdown"
+        ref={dropdownRef}
+        onToggle={() => {
+          if (dropdownRef.current?.open) {
+            setFilter("");
+            queueMicrotask(() => searchRef.current?.focus());
+          }
+        }}
+      >
         <summary>
           {selected.length === 0
             ? "All repos"
@@ -55,10 +71,23 @@ export function ScopeBar() {
           ▾
         </summary>
         <div className="scope-menu">
+          {available.length > 0 && (
+            <input
+              ref={searchRef}
+              className="repo-search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="search repos…"
+              aria-label="Search repositories"
+            />
+          )}
           {available.length === 0 && (
             <div className="dim small">no repositories indexed yet</div>
           )}
-          {available.map((r) => (
+          {available.length > 0 && shown.length === 0 && (
+            <div className="dim small">no matches</div>
+          )}
+          {shown.map((r) => (
             <label key={r.name} className="scope-option">
               <input
                 type="checkbox"

@@ -279,6 +279,46 @@ h2 {
     background: var(--accent-bg);
 }
 
+/* Button-flavoured option used by the single-select RepoSelect (ScopeBar uses
+   <label>s). Reset the native button chrome so it reads like the labels. */
+button.scope-option {
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+}
+
+.scope-option.selected {
+    background: var(--accent-bg);
+    color: var(--text);
+    font-weight: 600;
+}
+
+/* In-menu repo filter. Sticky so it stays put while a long list scrolls under
+   it; the opaque background hides options passing beneath. */
+.repo-search {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    margin-bottom: 0.4rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.82rem;
+}
+
+.repo-select summary {
+    min-width: 220px;
+    display: inline-block;
+}
+
 .scope-chip {
     border: none;
     cursor: pointer;

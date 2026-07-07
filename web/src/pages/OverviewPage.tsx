@@ -5,6 +5,7 @@ import { StatusBox } from "../components/StatusBox";
 import { joinList } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
 import { useRepoScope } from "../context/RepoScope";
+import { RepoSelect } from "../components/RepoSelect";
 import type { RepositoryOverview } from "../types";
 
 export function OverviewPage() {
@@ -26,19 +27,7 @@ export function OverviewPage() {
         APIs, dependencies.
       </p>
       <div className="query-form">
-        <select
-          value={repo}
-          onChange={(e) => onSelect(e.target.value)}
-          aria-label="Repository"
-          autoFocus
-        >
-          <option value="">select a repository…</option>
-          {available.map((r) => (
-            <option key={r.name} value={r.name}>
-              {r.name}
-            </option>
-          ))}
-        </select>
+        <RepoSelect available={available} value={repo} onSelect={onSelect} />
       </div>
       {available.length === 0 && (
         <p className="status">
