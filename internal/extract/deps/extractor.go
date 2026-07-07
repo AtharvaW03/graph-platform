@@ -14,14 +14,14 @@ import (
 // Graphify-compatible fragment describing every external dependency the
 // repo declares. It is the platform's analogue of graphify's own apm.yml /
 // go.mod / pyproject.toml / pom.xml extraction (which only covers 4
-// manifest types) - extended to cover the 13 ecosystems used at Angel One.
+// manifest types) - extended to cover 13 ecosystems.
 type Extractor struct {
 	// OrgPrefixes are package-name prefixes that identify "internal" repos
 	// in the org's package namespace. A dep that matches a prefix produces
 	// an additional Repository→Repository edge so cross-repo dependency
 	// queries become one-hop traversals.
 	//
-	// Examples: "github.com/angel-one/", "github.com/atharva-co/".
+	// Examples: "github.com/example-org/", "github.com/atharva-co/".
 	OrgPrefixes []string
 
 	// MaxManifests caps the number of manifest files inspected per repo

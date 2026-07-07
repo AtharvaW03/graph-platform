@@ -1,5 +1,5 @@
 // Package deps implements repository dependency extraction across the
-// ecosystems used at Angel One. Each parser is a pure function that consumes
+// supported ecosystems. Each parser is a pure function that consumes
 // one manifest file and emits a slice of Dep entries; the package-level
 // Extractor walks the repo, dispatches to parsers by manifest filename, and
 // produces a single Graphify-compatible Fragment containing:
@@ -45,7 +45,7 @@ func safeID(s string) string {
 
 // InternalRepoNameFromDep returns the internal repository name for a dep if
 // the dep matches any of the configured org prefixes (e.g.
-// "github.com/angel-one/auth-service" → "auth-service"). Empty string when
+// "github.com/example-org/auth-service" → "auth-service"). Empty string when
 // no prefix matches.
 //
 // Prefixes should include the trailing slash. Order matters: the first

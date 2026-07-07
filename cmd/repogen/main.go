@@ -3,7 +3,7 @@
 // last N days (the brief's definition of "active"). Output goes to stdout so
 // the operator reviews before committing:
 //
-//	GITHUB_TOKEN=<read-only PAT> go run ./cmd/repogen --org angel-one > config/repos.yaml
+//	GITHUB_TOKEN=<read-only PAT> go run ./cmd/repogen --org your-org > config/repos.yaml
 //
 // Names that fail the indexer's repo-name validation are skipped with a
 // warning rather than emitted as config that LoadConfig would reject.

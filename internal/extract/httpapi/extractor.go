@@ -1,17 +1,17 @@
 // Package httpapi extracts HTTP routes exposed by a repository across the
-// major backend frameworks used at Angel One: gin/echo/chi/mux/net-http (Go),
-// Spring (Java/Kotlin), Express (JS/TS), Flask/FastAPI/Django (Python), and
-// ASP.NET attributes (.NET).
+// major backend frameworks: gin/echo/chi/mux/net-http (Go), Spring
+// (Java/Kotlin), Express (JS/TS), Flask/FastAPI/Django (Python), and ASP.NET
+// attributes (.NET).
 //
 // Two complementary strategies:
 //
 //  1. Literal matchers (matchers.go): regexes that fire when the route path
 //     is a string literal at the registration call site.
-//  2. Go constant resolution (this file): the org's Go services register
-//     routes through identifiers (router.POST(constants.UpdateLimitAPIRoute,
-//     h)) with nested Group(constants.XxxRoute) prefixes, so a pre-pass
-//     collects path-looking string constants across the repo and a post-pass
-//     resolves identifier args and group-prefix chains. Group prefixes are
+//  2. Go constant resolution (this file): many services register routes
+//     through identifiers (router.POST(constants.UpdateLimitRoute, h)) with
+//     nested Group(constants.XxxRoute) prefixes, so a pre-pass collects
+//     string constants across the repo and a post-pass resolves identifier
+//     args and group-prefix chains. Group prefixes are
 //     only chained within a single file - a group passed across a function
 //     boundary loses its parent prefix (the route still surfaces, with a
 //     partial path).
@@ -110,17 +110,22 @@ var (
 	goIdentRouteRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|Any)\s*\(\s*([A-Za-z_][\w.]*)\s*(?:,\s*([A-Za-z0-9_.]+))?`)
 )
 
-// registerGoConst stores a package-level string constant if it plausibly
-// holds a route path: value starts with "/" (and is not a URL and has no
-// spaces), or the identifier name self-describes as a route/path/endpoint.
-// First declaration wins on duplicate identifiers across packages.
+// registerGoConst stores a package-level string constant that could hold a
+// route path. Whether a constant actually IS a path is decided by its use,
+// not its spelling: only constants that later appear in route position
+// (recv.METHOD(<const>, ...) or recv.Group(<const>, ...)) are ever resolved,
+// so we capture broadly here and let that usage be the filter. Values are
+// rejected only when they clearly cannot be a path segment - they contain
+// whitespace or look like a full URL.
+//
+// This deliberately does NOT require a leading "/" or a route/path/endpoint
+// name hint. An earlier version did, and it silently dropped every
+// identifier-arg route in repos whose convention is bare path segments with
+// plain constant names (e.g. `Detail = "detail"`, `V2Group = "widgets/v2"`);
+// normalizePath prepends the slash at emit time. First declaration wins on
+// duplicate identifiers across packages.
 func registerGoConst(m map[string]string, name, val string) {
-	if strings.ContainsAny(val, " \t") || strings.Contains(val, "://") {
-		return
-	}
-	l := strings.ToLower(name)
-	nameHint := strings.Contains(l, "route") || strings.Contains(l, "path") || strings.Contains(l, "endpoint")
-	if !strings.HasPrefix(val, "/") && !nameHint {
+	if val == "" || strings.ContainsAny(val, " \t") || strings.Contains(val, "://") {
 		return
 	}
 	if _, exists := m[name]; !exists {
