@@ -87,7 +87,15 @@ func (c *Client) VerifyConnectivity(ctx context.Context) error {
 }
 
 // EnsureConstraints creates the unique constraint on Entity.node_key, the repo
-// index, and the unique constraint on Repository.name - all idempotent.
+// index, the unique constraint on Repository.name, and TEXT indexes on the
+// pre-lowercased name columns - all idempotent.
+//
+// The name_lower / norm_name_lower TEXT indexes are what make case-insensitive
+// symbol lookups index-backed. Querying toLower(n.name) can't use an index
+// (the function wraps the stored value), so the importer writes an already-
+// lowercased column and the query layer compares against that directly. TEXT
+// indexes back both exact (=), prefix (STARTS WITH), and substring (CONTAINS)
+// predicates.
 func (c *Client) EnsureConstraints(ctx context.Context) error {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
 	defer session.Close(ctx)
@@ -96,6 +104,8 @@ func (c *Client) EnsureConstraints(ctx context.Context) error {
 		`CREATE CONSTRAINT entity_key IF NOT EXISTS FOR (n:Entity) REQUIRE n.node_key IS UNIQUE`,
 		`CREATE INDEX entity_repo IF NOT EXISTS FOR (n:Entity) ON (n.repo)`,
 		`CREATE CONSTRAINT repo_name IF NOT EXISTS FOR (r:Repository) REQUIRE r.name IS UNIQUE`,
+		`CREATE TEXT INDEX entity_name_lower IF NOT EXISTS FOR (n:Entity) ON (n.name_lower)`,
+		`CREATE TEXT INDEX entity_norm_name_lower IF NOT EXISTS FOR (n:Entity) ON (n.norm_name_lower)`,
 	}
 	for _, q := range stmts {
 		if _, err := session.Run(ctx, q, nil); err != nil {
@@ -177,6 +187,11 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit string, nodes []g
 			"graphify_id":    n.ID,
 			"name":           n.Label,
 			"norm_name":      n.NormLabel,
+			// Pre-lowercased copies for index-backed case-insensitive lookups
+			// (see EnsureConstraints). orNil keeps empties out so the property
+			// is absent rather than an empty string on nameless nodes.
+			"name_lower":      orNil(strings.ToLower(n.Label)),
+			"norm_name_lower": orNil(strings.ToLower(n.NormLabel)),
 			"path":           n.SourceFile,
 			"line":           n.SourceLocation,
 			"language":       orNil(graphify.InferLanguage(n)),
@@ -346,7 +361,8 @@ RETURN count(n) AS deleted`, map[string]any{}, "sweep orphaned shared nodes")
 // treats null as "remove the property", which is exactly what shared nodes
 // (repo: null) and absent metadata keys need.
 var nodeProps = append([]string{
-	"graphify_id", "name", "norm_name", "path", "line", "language",
+	"graphify_id", "name", "norm_name", "name_lower", "norm_name_lower",
+	"path", "line", "language",
 	"file_type", "community", "community_name", "ecosystem", "repo", "shared",
 }, metadataProps...)
 
