@@ -80,6 +80,7 @@ func (g *ExecGraphifier) Generate(ctx context.Context, repoPath string) (string,
 
 	cmd := exec.CommandContext(cmdCtx, g.Command, args...)
 	cmd.Dir = absRepo
+	cmd.Env = graphifyEnv(os.Environ())
 	setupProcessGroup(cmd)
 
 	stderrSink := g.Stderr
@@ -109,6 +110,38 @@ func (g *ExecGraphifier) Generate(ctx context.Context, repoPath string) (string,
 		return "", fmt.Errorf("expected output at %s is empty\n--- output tail ---\n%s", produced, tail.String())
 	}
 	return produced, nil
+}
+
+// graphifyEnv returns the environment for the graphify subprocess: the
+// daemon's own environment plus headless-indexer defaults, each applied only
+// when the operator has NOT already set it (so deployment env overrides win).
+//
+//   - GRAPHIFY_VIZ_NODE_LIMIT=0 - skip the graph.html render entirely; we only
+//     consume graph.json, so laying out and serializing an HTML viz every cycle
+//     is wasted work (0 disables it unconditionally per graphify's own docs).
+//   - PYTHONHASHSEED=0 - deterministic Leiden community assignment across
+//     cycles, matching what graphify's own git hooks set.
+//   - GRAPHIFY_MAX_GRAPH_BYTES=2GB - lift graphify's 512 MiB graph.json cap so
+//     reading a large repo's prior graph.json on an incremental run doesn't
+//     hard-fail the extraction step.
+func graphifyEnv(base []string) []string {
+	seen := make(map[string]bool, len(base))
+	for _, kv := range base {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			seen[kv[:i]] = true
+		}
+	}
+	out := append([]string(nil), base...)
+	for _, d := range []struct{ key, val string }{
+		{"GRAPHIFY_VIZ_NODE_LIMIT", "0"},
+		{"PYTHONHASHSEED", "0"},
+		{"GRAPHIFY_MAX_GRAPH_BYTES", "2GB"},
+	} {
+		if !seen[d.key] {
+			out = append(out, d.key+"="+d.val)
+		}
+	}
+	return out
 }
 
 // tailWriter buffers the LAST `max` bytes of writes so subprocess output can
