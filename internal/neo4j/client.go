@@ -157,7 +157,7 @@ func (c *Client) MergeRepository(ctx context.Context, repo string) error {
 // and remove nodes from prior commits; pass "" to skip the stamp (used by
 // the legacy importer CLI for static graph.json runs).
 // Returns the idToKey map (graphify ID → stable key) and per-label counts.
-func (c *Client) ImportNodes(ctx context.Context, repo, commit string, nodes []graphify.Node) (map[string]string, map[string]int, error) {
+func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, nodes []graphify.Node) (map[string]string, map[string]int, error) {
 	idToKey := make(map[string]string, len(nodes))
 	labelGroups := make(map[string][]map[string]any)
 	labelCounts := make(map[string]int)
@@ -217,7 +217,7 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit string, nodes []g
 			if end > len(rows) {
 				end = len(rows)
 			}
-			if err := c.importNodeBatch(ctx, label, repo, commit, rows[i:end]); err != nil {
+			if err := c.importNodeBatch(ctx, label, repo, commit, runID, rows[i:end]); err != nil {
 				return nil, nil, fmt.Errorf("import nodes (%s): %w", label, err)
 			}
 		}
@@ -232,7 +232,7 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit string, nodes []g
 // non-empty, is stamped onto every edge as last_commit so stale edges (same
 // endpoints but the relation was removed in a later commit) can be swept.
 // Returns per-relation counts, skipped-unknown count, and skipped-dangling count.
-func (c *Client) ImportLinks(ctx context.Context, repo, commit string, links []graphify.Link, idToKey map[string]string) (map[string]int, int, int, error) {
+func (c *Client) ImportLinks(ctx context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string) (map[string]int, int, int, error) {
 	relGroups := make(map[string][]map[string]any)
 	relCounts := make(map[string]int)
 	skippedUnknown := 0
@@ -267,7 +267,7 @@ func (c *Client) ImportLinks(ctx context.Context, repo, commit string, links []g
 			if end > len(rows) {
 				end = len(rows)
 			}
-			if err := c.importLinkBatch(ctx, rel, repo, commit, rows[i:end]); err != nil {
+			if err := c.importLinkBatch(ctx, rel, repo, commit, runID, rows[i:end]); err != nil {
 				return nil, 0, 0, fmt.Errorf("import links (%s): %w", rel, err)
 			}
 		}
@@ -292,9 +292,13 @@ func (c *Client) ImportLinks(ctx context.Context, repo, commit string, links []g
 // Returns (nodesDeleted, relsDeleted). DETACH DELETE on a node also removes
 // its relationships; the relsDeleted figure covers only edges between
 // already-stamped endpoints that were stale but whose endpoints survived.
-func (c *Client) SweepStale(ctx context.Context, repo, commit string) (int, int, error) {
+func (c *Client) SweepStale(ctx context.Context, repo, commit, runID string) (int, int, error) {
 	if commit == "" {
 		return 0, 0, fmt.Errorf("sweep refused: commit is empty for repo %q", repo)
+	}
+	if runID == "" {
+		// An empty run token would make every node "stale" and wipe the repo.
+		return 0, 0, fmt.Errorf("sweep refused: runID is empty for repo %q", repo)
 	}
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
 	defer session.Close(ctx)
@@ -311,7 +315,13 @@ func (c *Client) SweepStale(ctx context.Context, repo, commit string) (int, int,
 		n, _ := rec.AsMap()["deleted"].(int64)
 		return int(n), nil
 	}
-	params := map[string]any{"repo": repo, "commit": commit}
+	params := map[string]any{"repo": repo, "commit": commit, "run": runID}
+
+	// Staleness is judged by last_run (this import's token), NOT last_commit:
+	// a --force re-index of the SAME commit still needs to evict nodes/edges it
+	// didn't write (e.g. old-id orphans after a graphify id-scheme change), and
+	// those carry the current commit but a prior run token. Rows with no
+	// last_run at all (written before this field existed) are also stale.
 
 	// Step 1: sweep stale relationships. Edges are matched by their own repo
 	// stamp so an edge from this repo to a shared node is swept even though
@@ -320,7 +330,7 @@ func (c *Client) SweepStale(ctx context.Context, repo, commit string) (int, int,
 	relsDeleted, err := runCount(`
 MATCH (a)-[r]->(b:Entity)
 WHERE (r.repo = $repo OR (r.repo IS NULL AND a.repo = $repo))
-  AND (r.last_commit IS NULL OR r.last_commit <> $commit)
+  AND (r.last_run IS NULL OR r.last_run <> $run)
 DELETE r
 RETURN count(r) AS deleted`, params, "sweep stale relationships")
 	if err != nil {
@@ -332,7 +342,7 @@ RETURN count(r) AS deleted`, params, "sweep stale relationships")
 	// next import. Shared nodes never match: they have no repo property.
 	nodesDeleted, err := runCount(`
 MATCH (n:Entity {repo: $repo})
-WHERE (n.last_commit IS NULL OR n.last_commit <> $commit)
+WHERE (n.last_run IS NULL OR n.last_run <> $run)
   AND coalesce(n.shared, false) = false
 DETACH DELETE n
 RETURN count(n) AS deleted`, params, "sweep stale nodes")
@@ -371,7 +381,7 @@ var nodeProps = append([]string{
 // interpolating it into the query string is safe. commit, if non-empty, is
 // stamped on every node and CONTAINS edge as last_commit; the empty case
 // preserves legacy behavior for the static-graph importer CLI.
-func (c *Client) importNodeBatch(ctx context.Context, label, repo, commit string, batch []map[string]any) error {
+func (c *Client) importNodeBatch(ctx context.Context, label, repo, commit, runID string, batch []map[string]any) error {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
 	defer session.Close(ctx)
 
@@ -379,11 +389,13 @@ func (c *Client) importNodeBatch(ctx context.Context, label, repo, commit string
 	for _, p := range nodeProps {
 		setPairs = append(setPairs, fmt.Sprintf("%s: row.%s", p, p))
 	}
+	// last_commit is provenance; last_run is what SweepStale keys on so a
+	// same-commit re-index still evicts nodes this run didn't write.
 	commitClause := ""
 	containsCommit := ""
 	if commit != "" {
-		commitClause = ",\n    last_commit: $commit"
-		containsCommit = ", c.last_commit = $commit"
+		commitClause = ",\n    last_commit: $commit,\n    last_run: $run"
+		containsCommit = ", c.last_commit = $commit, c.last_run = $run"
 	}
 
 	query := fmt.Sprintf(`
@@ -400,6 +412,7 @@ SET c.repo = $repo%s`, label, strings.Join(setPairs, ",\n    "), commitClause, c
 	params := map[string]any{"repo": repo, "batch": batch}
 	if commit != "" {
 		params["commit"] = commit
+		params["run"] = runID
 	}
 	_, err := session.Run(ctx, query, params)
 	return err
@@ -415,13 +428,13 @@ SET c.repo = $repo%s`, label, strings.Join(setPairs, ",\n    "), commitClause, c
 // row's weight/context wins. This is deliberate - the graph answers "does A
 // call B", not "how many times" - but callers should not read weight as a
 // call-site count.
-func (c *Client) importLinkBatch(ctx context.Context, rel, repo, commit string, batch []map[string]any) error {
+func (c *Client) importLinkBatch(ctx context.Context, rel, repo, commit, runID string, batch []map[string]any) error {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
 	defer session.Close(ctx)
 
 	commitClause := ""
 	if commit != "" {
-		commitClause = ",\n    last_commit:      $commit"
+		commitClause = ",\n    last_commit:      $commit,\n    last_run:         $run"
 	}
 
 	query := fmt.Sprintf(`
@@ -440,6 +453,7 @@ SET r += {
 	params := map[string]any{"batch": batch, "repo": repo}
 	if commit != "" {
 		params["commit"] = commit
+		params["run"] = runID
 	}
 	_, err := session.Run(ctx, query, params)
 	return err
