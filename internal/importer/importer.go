@@ -5,11 +5,28 @@ package importer
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
+	"time"
 
 	"graph-platform/internal/graphify"
 )
+
+// newRunID returns a token unique to a single import run. It is stamped on
+// every node/edge this run writes so SweepStale can delete anything it did NOT
+// write - which, unlike a commit-based marker, correctly removes orphans left
+// when a re-index of the SAME commit produces different node keys (e.g. after
+// a graphify upgrade changes the id scheme).
+func newRunID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	return hex.EncodeToString(b[:])
+}
 
 // Neo4jClient is the slice of *neo4j.Client behavior the importer needs. The
 // interface lives here (not in internal/neo4j) so the importer can be tested
@@ -18,9 +35,9 @@ import (
 type Neo4jClient interface {
 	EnsureConstraints(ctx context.Context) error
 	MergeRepository(ctx context.Context, repo string) error
-	ImportNodes(ctx context.Context, repo, commit string, nodes []graphify.Node) (map[string]string, map[string]int, error)
-	ImportLinks(ctx context.Context, repo, commit string, links []graphify.Link, idToKey map[string]string) (map[string]int, int, int, error)
-	SweepStale(ctx context.Context, repo, commit string) (int, int, error)
+	ImportNodes(ctx context.Context, repo, commit, runID string, nodes []graphify.Node) (map[string]string, map[string]int, error)
+	ImportLinks(ctx context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string) (map[string]int, int, int, error)
+	SweepStale(ctx context.Context, repo, commit, runID string) (int, int, error)
 	CountEntitiesForRepo(ctx context.Context, repo string) (int, error)
 }
 
@@ -152,14 +169,23 @@ func RunWithGraph(ctx context.Context, client Neo4jClient, repo, commit string, 
 		return nil, fmt.Errorf("%s: %w", StageRepo, err)
 	}
 
+	// runID is per-import; it marks every node/edge this run writes so the
+	// sweep can delete whatever it did NOT (orphans), which commit alone can't
+	// identify on a same-commit re-index. Only meaningful in sweep mode
+	// (commit != ""); the legacy no-commit CLI path leaves it empty.
+	runID := ""
+	if commit != "" {
+		runID = newRunID()
+	}
+
 	progress(StageNodes)
-	idToKey, labelCounts, err := client.ImportNodes(ctx, repo, commit, g.Nodes)
+	idToKey, labelCounts, err := client.ImportNodes(ctx, repo, commit, runID, g.Nodes)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", StageNodes, err)
 	}
 
 	progress(StageLinks)
-	relCounts, skippedUnknown, skippedDangling, err := client.ImportLinks(ctx, repo, commit, g.Links, idToKey)
+	relCounts, skippedUnknown, skippedDangling, err := client.ImportLinks(ctx, repo, commit, runID, g.Links, idToKey)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", StageLinks, err)
 	}
@@ -167,7 +193,7 @@ func RunWithGraph(ctx context.Context, client Neo4jClient, repo, commit string, 
 	var nodesSwept, edgesSwept int
 	if commit != "" {
 		progress(StageSweep)
-		ns, es, err := client.SweepStale(ctx, repo, commit)
+		ns, es, err := client.SweepStale(ctx, repo, commit, runID)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", StageSweep, err)
 		}

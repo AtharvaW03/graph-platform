@@ -13,10 +13,13 @@ type fakeClient struct {
 	calls       []string
 	nodesRepo   string
 	nodesCommit string
+	nodesRun    string
 	linksRepo   string
 	linksCommit string
+	linksRun    string
 	sweepRepo   string
 	sweepCommit string
+	sweepRun    string
 }
 
 func (f *fakeClient) EnsureConstraints(context.Context) error {
@@ -29,9 +32,9 @@ func (f *fakeClient) MergeRepository(_ context.Context, repo string) error {
 	return nil
 }
 
-func (f *fakeClient) ImportNodes(_ context.Context, repo, commit string, nodes []graphify.Node) (map[string]string, map[string]int, error) {
+func (f *fakeClient) ImportNodes(_ context.Context, repo, commit, runID string, nodes []graphify.Node) (map[string]string, map[string]int, error) {
 	f.calls = append(f.calls, "nodes")
-	f.nodesRepo, f.nodesCommit = repo, commit
+	f.nodesRepo, f.nodesCommit, f.nodesRun = repo, commit, runID
 	idToKey := map[string]string{}
 	counts := map[string]int{}
 	for _, n := range nodes {
@@ -41,9 +44,9 @@ func (f *fakeClient) ImportNodes(_ context.Context, repo, commit string, nodes [
 	return idToKey, counts, nil
 }
 
-func (f *fakeClient) ImportLinks(_ context.Context, repo, commit string, links []graphify.Link, idToKey map[string]string) (map[string]int, int, int, error) {
+func (f *fakeClient) ImportLinks(_ context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string) (map[string]int, int, int, error) {
 	f.calls = append(f.calls, "links")
-	f.linksRepo, f.linksCommit = repo, commit
+	f.linksRepo, f.linksCommit, f.linksRun = repo, commit, runID
 	counts := map[string]int{}
 	unknown, dangling := 0, 0
 	for _, l := range links {
@@ -65,9 +68,9 @@ func (f *fakeClient) ImportLinks(_ context.Context, repo, commit string, links [
 	return counts, unknown, dangling, nil
 }
 
-func (f *fakeClient) SweepStale(_ context.Context, repo, commit string) (int, int, error) {
+func (f *fakeClient) SweepStale(_ context.Context, repo, commit, runID string) (int, int, error) {
 	f.calls = append(f.calls, "sweep")
-	f.sweepRepo, f.sweepCommit = repo, commit
+	f.sweepRepo, f.sweepCommit, f.sweepRun = repo, commit, runID
 	return 2, 1, nil
 }
 
@@ -111,6 +114,14 @@ func TestRunWithGraphSequenceAndSummary(t *testing.T) {
 	if f.linksRepo != "svc" || f.linksCommit != "abc123" {
 		t.Errorf("links got repo=%q commit=%q", f.linksRepo, f.linksCommit)
 	}
+	// The run token must be non-empty and identical across nodes, links, and
+	// sweep - the sweep only spares this run's writes if they share its token.
+	if f.nodesRun == "" {
+		t.Error("run token is empty in sweep mode")
+	}
+	if f.nodesRun != f.linksRun || f.nodesRun != f.sweepRun {
+		t.Errorf("run token mismatch: nodes=%q links=%q sweep=%q", f.nodesRun, f.linksRun, f.sweepRun)
+	}
 	if sum.NodesTotal != 2 || sum.LinksTotal != 3 || sum.LinksImported != 1 {
 		t.Errorf("summary counts: %+v", sum)
 	}
@@ -135,6 +146,9 @@ func TestRunWithGraphLegacyModeSkipsSweep(t *testing.T) {
 		if c == "sweep" {
 			t.Error("sweep ran with empty commit")
 		}
+	}
+	if f.nodesRun != "" {
+		t.Errorf("run token should be empty in legacy no-commit mode, got %q", f.nodesRun)
 	}
 	if sum.NodesMismatch() {
 		t.Error("mismatch must be meaningless (false) in legacy no-commit mode")
