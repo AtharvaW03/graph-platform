@@ -95,11 +95,9 @@ type Summary struct {
 	SkippedHyperedges int
 	NodesSwept        int
 	EdgesSwept        int
-	// NodesInGraph is the :Entity count Neo4j actually holds for this repo
-	// after the import completes (post-sweep). Compared against NodesTotal it
-	// reveals silent data loss - e.g. before the StableKey.n.ID fix, a repo
-	// with 68,058 input nodes ended up with 63,131 in Neo4j; the summary
-	// used to report only NodesTotal, hiding the 4,927-node gap.
+	// NodesInGraph is the :Entity count Neo4j holds for this repo after the
+	// import completes (post-sweep). Comparing it against NodesTotal surfaces
+	// silent data loss, e.g. from node_key collisions.
 	NodesInGraph int
 }
 

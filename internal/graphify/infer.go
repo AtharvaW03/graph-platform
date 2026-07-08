@@ -210,11 +210,9 @@ var extToLanguage = map[string]string{
 	".tf":     "terraform",
 }
 
-// InferLanguage resolves a node's programming language. Graphify only emits
-// metadata.language for its bash extraction; AST nodes from every other
-// language carry none, which used to make the overview's Languages panel
-// show "bash" as the sole language of a Go repository. When the metadata is
-// absent, fall back to the source file's extension; "" means unknown or not
+// InferLanguage resolves a node's programming language. Graphify only sets
+// metadata.language for bash extraction; AST nodes from other languages carry
+// none, so fall back to the source file's extension. "" means unknown or not
 // a code file, and the overview skips it.
 func InferLanguage(n Node) string {
 	if l := n.MetaString("language"); l != "" {

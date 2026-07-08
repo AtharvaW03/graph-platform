@@ -14,7 +14,7 @@ func TestHotspotCache(t *testing.T) {
 		t.Fatal("empty cache should miss")
 	}
 
-	nodes := []HotspotNode{{Name: "OrderService", Repo: "amx-core", FanIn: 42}}
+	nodes := []HotspotNode{{Name: "OrderService", Repo: "orders-service", FanIn: 42}}
 	c.put(25, nodes)
 
 	got, ok := c.get(25)

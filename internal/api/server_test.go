@@ -15,7 +15,7 @@ func TestParseRepos(t *testing.T) {
 		want  []string
 	}{
 		{"", nil},
-		{"repos=amx-core", []string{"amx-core"}},
+		{"repos=orders-service", []string{"orders-service"}},
 		{"repos=a,b,c", []string{"a", "b", "c"}},
 		{"repos=a,%20b%20,", []string{"a", "b"}},           // trims and drops empties
 		{"repo=legacy", []string{"legacy"}},                // legacy single-repo param

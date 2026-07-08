@@ -21,7 +21,7 @@ type Extractor struct {
 	// an additional Repository→Repository edge so cross-repo dependency
 	// queries become one-hop traversals.
 	//
-	// Examples: "github.com/example-org/", "github.com/atharva-co/".
+	// Example: "github.com/example-org/".
 	OrgPrefixes []string
 
 	// MaxManifests caps the number of manifest files inspected per repo

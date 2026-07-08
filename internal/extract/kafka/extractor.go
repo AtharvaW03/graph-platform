@@ -244,8 +244,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 // observed configs use them.
 var yamlKVRe = regexp.MustCompile(`^(\s*)(?:-\s+)?([A-Za-z0-9_.-]+)\s*:\s*(.*)$`)
 
-// topicValueRe accepts realistic Kafka topic names (amx-order-data-v2,
-// pledge_poll, PAYOUT) and rejects paths, URLs, ${VAR} templates, and other
+// topicValueRe accepts realistic Kafka topic names (order-events-v2,
+// user_signups, PAYMENTS) and rejects paths, URLs, ${VAR} templates, and other
 // punctuation-bearing values by construction.
 var topicValueRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,}$`)
 
