@@ -8,10 +8,8 @@ import (
 	"strings"
 )
 
-// readFileLimited reads up to maxBytes from path. Returns an error if the
-// file exceeds the limit - manifests are tiny in practice; a multi-megabyte
-// manifest is almost certainly a generated lockfile that we don't want to
-// load into memory.
+// readFileLimited reads up to maxBytes from path, erroring if the file is
+// larger - a multi-megabyte "manifest" is almost certainly a lockfile.
 func readFileLimited(path string, maxBytes int64) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {

@@ -21,10 +21,7 @@ type Node struct {
 	Metadata       map[string]any `json:"metadata"`
 }
 
-// MetaString returns the metadata value for key when it is a string, or ""
-// when the key is absent or holds another type. Metadata is an open map
-// (graphify's own nodes carry kind/language; platform extractors carry
-// version/script/schedule/...), so callers pull the keys they know about.
+// MetaString returns the metadata value for key if it is a string, else "".
 func (n Node) MetaString(key string) string {
 	s, _ := n.Metadata[key].(string)
 	return s

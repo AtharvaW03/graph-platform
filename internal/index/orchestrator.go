@@ -12,11 +12,10 @@ import (
 )
 
 // Orchestrator drives the per-repo pipeline for a configured set of
-// repositories. It owns no domain knowledge - every step is delegated to a
-// pluggable component (Source, Syncer, Graphifier, Importer, Store,
-// optional Scheduler and HealthChecker). Future concurrency (parallel
-// indexing) or transport (SQS, webhooks) changes happen by swapping one of
-// those collaborators.
+// repositories. Every step is delegated to a pluggable component (Source,
+// Syncer, Graphifier, Importer, Store, optional Scheduler and
+// HealthChecker), so swapping one collaborator can add parallel indexing or
+// a new transport without touching the pipeline itself.
 type Orchestrator struct {
 	Source   JobSource
 	Syncer   Syncer
@@ -132,15 +131,13 @@ func (o *Orchestrator) runCycleSafely(ctx context.Context, opts Options) {
 	o.LogSummary(s)
 }
 
-// IndexOne runs the full sync→change-detect→graphify→import pipeline for one
-// repository, persists state, and returns the result. It is the single-repo
-// entry point that webhook handlers, queue consumers, or future parallel
-// workers should call - RunOnce composes it for the configured set.
+// IndexOne runs the full sync -> change-detect -> graphify -> import
+// pipeline for one repository, persists state, and returns the result. It's
+// the entry point RunOnce composes over the configured set, and the one a
+// webhook handler or queue consumer would call directly.
 //
-// IndexOne never panics: panics in any stage are recovered into a
-// StagePanic-tagged StatusFailed result. State persistence failures are
-// logged but do not propagate, so a transient disk error does not block the
-// next repo.
+// Panics in any stage are recovered into a StagePanic-tagged StatusFailed
+// result. State persistence failures are logged but not propagated.
 func (o *Orchestrator) IndexOne(ctx context.Context, repo Repository, force bool) RepoResult {
 	start := o.now()
 	prev, _ := o.Store.Get(repo.Name)
@@ -171,8 +168,7 @@ func (o *Orchestrator) IndexOne(ctx context.Context, repo Repository, force bool
 
 func (o *Orchestrator) persistResult(name string, r RepoResult) {
 	if r.Canceled {
-		// A canceled run is not the repo's fault - leave state untouched
-		// so consecutive_fails and last_error are not polluted by SIGINT.
+		// Leave state untouched so a SIGINT doesn't pollute consecutive_fails.
 		return
 	}
 	if err := o.Store.Set(toState(r, o.Store)); err != nil {
@@ -181,14 +177,12 @@ func (o *Orchestrator) persistResult(name string, r RepoResult) {
 }
 
 // runPipeline performs the per-stage work, writing progress directly into
-// the caller-provided *RepoResult. This lets the deferred recover in
-// IndexOne see partial progress (Commit, Nodes) when a stage panics.
+// the caller-provided *RepoResult so a panic mid-stage still leaves partial
+// progress (Commit, Nodes) visible to IndexOne's deferred recover.
 func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force bool, prev RepoState, start time.Time, result *RepoResult) {
 	repoPath := filepath.Join(o.WorkDir, "repos", repo.Name)
-	// graphify update writes its output INSIDE the repo working tree
-	// (<repo>/graphify-out/graph.json), so there is no separate out_dir
-	// argument. Untracked graphify-out/ survives `git reset --hard`, giving
-	// the update command its prior-state cache for free.
+	// graphify update writes inside the repo tree (graphify-out/graph.json),
+	// which survives `git reset --hard` and gives it a prior-state cache.
 
 	o.Log.Printf("[%s] sync %s @ %s", repo.Name, repo.URL, repo.Branch)
 	commit, err := o.Syncer.Sync(ctx, repo, repoPath)
@@ -220,10 +214,9 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 		return
 	}
 
-	// Run platform extractors and merge their fragments into the unified
-	// graphify-format file the importer will read. One extractor failing
-	// records an error on the RepoResult but never blocks the others or
-	// the import; this matches the "be resilient" spec point.
+	// Run platform extractors and merge their fragments into the file the
+	// importer will read. One extractor failing records an error but never
+	// blocks the others or the import.
 	importPath := graphPath
 	if o.Extractors != nil && len(o.Extractors.Extractors) > 0 {
 		o.Log.Printf("[%s] extract (%d extractors)", repo.Name, len(o.Extractors.Extractors))
@@ -278,10 +271,10 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	result.Duration = o.now().Sub(start)
 }
 
-// recordFailure writes a Stage-tagged failure to result if err is non-nil
-// AND the failure was the repo's fault. If ctx was canceled, the run is
-// marked Canceled (not Failed) so consecutive_fails is not polluted by
-// operator-initiated shutdowns. Returns true if the caller should bail out.
+// recordFailure writes a Stage-tagged failure to result, unless ctx was
+// canceled - then it's marked Canceled instead so consecutive_fails isn't
+// polluted by an operator-initiated shutdown. Returns true if err is
+// non-nil, so the caller knows to bail out.
 func (o *Orchestrator) recordFailure(r *RepoResult, stage Stage, err error, start time.Time, ctx context.Context) bool {
 	if err == nil {
 		return false

@@ -106,7 +106,7 @@ func TestYAMLConfigTopics(t *testing.T) {
 	got := runExtract(t, map[string]string{
 		// filename says producer -> PRODUCES
 		"resources/uat/kafka_producer.yml": `kafkaProducer:
-  topicName: always-on-order-data-v2
+  topicName: orders-events-v2
 `,
 		// filename says consumer -> CONSUMES; nested consumers both captured
 		"resources/uat/kafka_consumer.yml": `kafkaConsumer:
@@ -121,7 +121,7 @@ func TestYAMLConfigTopics(t *testing.T) {
   nttKafkaTopic:
     producerTopicList: ["pledge_poll", "margin_view"]
   gpxKafkaTopic:
-    topicName: amx-order-data-v2 # trailing comment
+    topicName: payment-events-v2 # trailing comment
   awsKafkaTopic:
     topicName: "PAYOUT"
   pendingTopic:
@@ -129,7 +129,7 @@ func TestYAMLConfigTopics(t *testing.T) {
 `,
 	})
 
-	if !got.produces["always-on-order-data-v2"] {
+	if !got.produces["orders-events-v2"] {
 		t.Errorf("producer-file topic missing: produces = %v", got.produces)
 	}
 	if !got.consumes["order-data-v2"] || !got.consumes["order-data-pqa-v2"] {
@@ -138,7 +138,7 @@ func TestYAMLConfigTopics(t *testing.T) {
 	if !got.produces["pledge_poll"] || !got.produces["margin_view"] {
 		t.Errorf("producerTopicList items missing: produces = %v", got.produces)
 	}
-	if !got.references["amx-order-data-v2"] || !got.references["PAYOUT"] {
+	if !got.references["payment-events-v2"] || !got.references["PAYOUT"] {
 		t.Errorf("unclassified topics missing from references: %v", got.references)
 	}
 	if got.topics["TBD"] {

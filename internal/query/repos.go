@@ -6,18 +6,14 @@ import (
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
-// RepoInfo is one indexed repository, as served by GET /repos. The node
-// count gives the UI something to sort/size by and doubles as a sanity
-// signal (a repo with 0 nodes indexed but present means its last import
-// swept everything).
+// RepoInfo is one indexed repository, as served by GET /repos.
 type RepoInfo struct {
 	Name  string `json:"name"`
 	Nodes int    `json:"nodes"`
 }
 
 // ListRepositories returns every (:Repository) node with its contained
-// entity count. This feeds the web UI's repo-scope dropdown so users pick
-// from what is actually indexed instead of typing names from memory.
+// entity count, feeding the web UI's repo-scope dropdown.
 func (s *Service) ListRepositories(ctx context.Context) ([]RepoInfo, error) {
 	const cypher = `
 MATCH (r:Repository)

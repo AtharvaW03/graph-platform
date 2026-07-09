@@ -11,26 +11,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// OpenAPI / Swagger spec ingestion.
-//
-// A committed OpenAPI (v3) or Swagger (v2) document is the authored contract
-// for a service's HTTP surface: it lists documented endpoints with their exact
-// full paths, methods, and tags - no heuristics. Where the source-scanning
-// matchers infer routes (and can miss cross-file prefixes or emit partial
-// paths), a spec is ground truth. So when a repo ships one, we parse it and
-// reconcile it with the code-derived routes (see reconcileRoutes): spec routes
-// carry ConfidenceExtracted; code routes stay ConfidenceInferred.
-//
-// This never replaces the code path. Specs omit undocumented and infra
-// surface (health/metrics/pprof), which only source scanning finds, so the two
-// are complementary. A repo without a spec is unaffected - the code path is
-// the always-on baseline.
+// OpenAPI / Swagger spec ingestion. A committed spec is the authored contract
+// for a service's HTTP surface (exact paths, methods, tags), so spec routes are
+// treated as ConfidenceExtracted and reconciled with the inferred code routes.
+// Specs omit undocumented/infra endpoints, so they complement rather than
+// replace source scanning.
 
-// oasDoc is the minimal slice of an OpenAPI/Swagger document we read. `paths`
-// values are decoded lazily per key: a path-item object mixes HTTP-method keys
-// (get/post/...) with non-method keys (parameters, $ref, servers, summary), so
-// each entry is a raw yaml.Node we decode into oasOperation only for the keys
-// that name a method.
+// oasDoc is the slice of an OpenAPI/Swagger document we read. A path-item mixes
+// HTTP-method keys with non-method keys (parameters, $ref, servers, ...), so
+// each value stays a raw yaml.Node we decode only for method keys.
 type oasDoc struct {
 	Swagger  string                          `yaml:"swagger"`  // "2.0" for Swagger v2
 	OpenAPI  string                          `yaml:"openapi"`  // "3.x.x" for OpenAPI v3
@@ -48,18 +37,15 @@ type oasOperation struct {
 	OperationID string   `yaml:"operationId"`
 }
 
-// oasMethods are the path-item keys that name an HTTP operation. Everything
-// else in a path item (parameters, $ref, servers, summary, description) is
-// skipped.
+// oasMethods are the path-item keys that name an HTTP operation.
 var oasMethods = map[string]bool{
 	"get": true, "post": true, "put": true, "delete": true,
 	"patch": true, "head": true, "options": true, "trace": true,
 }
 
-// openAPIRoutes discovers and parses every OpenAPI/Swagger document under
-// repoPath and returns the documented routes as heldRoutes tagged source
-// "openapi". Parse failures are surfaced as fragment warnings, never fatal:
-// a malformed spec must not sink the code-derived routes.
+// openAPIRoutes parses every OpenAPI/Swagger document under repoPath and
+// returns the documented routes. Parse failures become warnings, not errors,
+// so a malformed spec can't sink the code-derived routes.
 func (e *Extractor) openAPIRoutes(repoPath string, frag interface{ Warn(string) }) []heldRoute {
 	maxBytes := e.MaxFileBytes
 	if maxBytes <= 0 {
@@ -102,11 +88,8 @@ func (e *Extractor) openAPIRoutes(repoPath string, frag interface{ Warn(string) 
 	return out
 }
 
-// isSpecFile is a cheap filename prefilter. It intentionally over-matches
-// (any *.json/*.yaml/*.yml whose name mentions swagger/openapi, plus the
-// conventional exact names); parseOpenAPI then rejects anything that isn't
-// actually a spec (no swagger/openapi version key, or no paths), so a false
-// positive here costs one parse attempt, not a bogus route.
+// isSpecFile is a cheap filename prefilter. It over-matches on purpose;
+// parseOpenAPI rejects non-specs, so a false positive costs one parse attempt.
 func isSpecFile(name string) bool {
 	l := strings.ToLower(name)
 	if !strings.HasSuffix(l, ".json") && !strings.HasSuffix(l, ".yaml") && !strings.HasSuffix(l, ".yml") {
@@ -120,10 +103,9 @@ func isSpecFile(name string) bool {
 	return strings.Contains(l, "swagger") || strings.Contains(l, "openapi")
 }
 
-// parseOpenAPI decodes one spec document (JSON or YAML - yaml.v3 parses both)
-// and returns its documented routes. It returns an error only when the file
-// parses but is not a usable spec, so callers can warn; a nil slice with nil
-// error means a valid spec with no paths.
+// parseOpenAPI decodes one spec (yaml.v3 parses both JSON and YAML) and
+// returns its routes. It errors only when the file parses but isn't a usable
+// spec; a nil slice with nil error means a valid spec with no paths.
 func parseOpenAPI(data []byte, specFile string) ([]heldRoute, error) {
 	var doc oasDoc
 	if err := yaml.Unmarshal(data, &doc); err != nil {
@@ -160,8 +142,7 @@ func parseOpenAPI(data []byte, specFile string) ([]heldRoute, error) {
 
 // specPrefix returns the global path prefix a spec applies to every route:
 // Swagger v2's basePath, or the path component of OpenAPI v3's first server
-// URL. Server URLs may be absolute ("https://api.example.com/v2") or relative
-// ("/v2"); only the path is used. Empty when the spec defines no prefix.
+// URL. Empty when the spec defines no prefix.
 func specPrefix(doc *oasDoc) string {
 	if doc.BasePath != "" {
 		return doc.BasePath

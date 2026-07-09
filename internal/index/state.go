@@ -12,12 +12,9 @@ import (
 )
 
 // JSONStateStore persists indexing state to a JSON file. Writes are atomic
-// (write to a tempfile in the same directory, fsync, rename, fsync parent)
-// and serialized by a mutex so the orchestrator can call Set after every
-// repo without worrying about partial writes or interleaving.
-//
-// Single-process, single-host scope. Swap in a Redis/Postgres-backed
-// StateStore to coordinate across distributed workers.
+// (tempfile, fsync, rename, fsync parent) and serialized by a mutex, so the
+// orchestrator can call Set after every repo without worrying about
+// interleaving or partial writes. Single-process, single-host scope.
 type JSONStateStore struct {
 	path string
 	mu   sync.Mutex
@@ -35,14 +32,10 @@ type stateFile struct {
 const stateVersion = 1
 
 // LoadJSONStateStore reads the state file at path, creating an empty store
-// if it does not exist. If the file exists but is malformed JSON it is
-// quarantined to <path>.corrupt-<timestamp> and a fresh empty store is
-// returned, with a warning logged via stderr. This is the only way a
-// long-running daemon recovers from a corrupted state file - fataling here
-// would wedge the indexer permanently against a single bad write.
-//
-// A versioned file that is NEWER than stateVersion is treated as a hard
-// error: a downgrade should refuse to load future-version data and lose it.
+// if it doesn't exist. Malformed JSON is quarantined to
+// <path>.corrupt-<timestamp> and the store starts empty rather than fataling
+// the daemon over one bad write. A file versioned newer than stateVersion is
+// a hard error, since loading it would risk data loss on a downgrade.
 func LoadJSONStateStore(path string) (*JSONStateStore, error) {
 	s := &JSONStateStore{path: path, data: map[string]RepoState{}}
 	raw, err := os.ReadFile(path)
@@ -80,9 +73,8 @@ func (s *JSONStateStore) Get(name string) (RepoState, bool) {
 	return v, ok
 }
 
-// Set updates the in-memory map and atomically flushes to disk. On flush
-// failure the in-memory map is rolled back to its previous contents so
-// memory and disk stay consistent - the next Set will be a clean retry.
+// Set updates the in-memory map and flushes to disk atomically, rolling back
+// the in-memory change on flush failure so memory and disk stay consistent.
 func (s *JSONStateStore) Set(state RepoState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -143,10 +135,8 @@ func (s *JSONStateStore) flushLocked() error {
 		return fmt.Errorf("rename state: %w", err)
 	}
 	tmpPath = "" // suppress deferred cleanup; rename consumed the file
-	// Without an fsync on the parent directory, a crash between rename and
-	// directory flush can leave the rename invisible after recovery on some
-	// filesystems. Best-effort on POSIX; skipped on Windows where Open of a
-	// directory is not supported.
+	// fsync the parent dir so the rename survives a crash before the next
+	// directory flush. POSIX only; Windows doesn't support opening a dir.
 	if runtime.GOOS != "windows" {
 		if d, err := os.Open(dir); err == nil {
 			_ = d.Sync()

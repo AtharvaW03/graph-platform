@@ -1,7 +1,7 @@
 // Command repogen generates the `repositories:` manifest for repos.yaml from
-// the GitHub API: every non-archived repository in an org with a push in the
-// last N days (the brief's definition of "active"). Output goes to stdout so
-// the operator reviews before committing:
+// the GitHub API: every non-archived repository in an org pushed to within
+// the last N days. Output goes to stdout so the operator reviews before
+// committing:
 //
 //	GITHUB_TOKEN=<read-only PAT> go run ./cmd/repogen --org your-org > config/repos.yaml
 //
@@ -108,9 +108,8 @@ func main() {
 	}
 }
 
-// listOrgRepos pages through GET /orgs/{org}/repos. 100 per page, following
-// until a short page. Rate limits are generous enough (5000/h authenticated)
-// that a simple sequential walk is fine even for very large orgs.
+// listOrgRepos pages through GET /orgs/{org}/repos, 100 per page, until a
+// short page ends the walk.
 func listOrgRepos(apiBase, org, token string) ([]ghRepo, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	var all []ghRepo

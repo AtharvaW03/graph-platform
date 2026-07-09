@@ -27,7 +27,7 @@ config/repos.yaml
 └──────┬───────┘
        ▼
    ┌───────┐     ┌───────────────┐     ┌────────────┐
-   │ Neo4j │◀────│ query-service │◀────│ mcp-server │◀── Claude / agents
+   │ Neo4j │◀────│ query-service │◀────│ mcp-server │◀── IDE / AI agents
    └───────┘     │  (REST, 8080) │     │  (stdio)   │
                  └───────▲───────┘     └────────────┘
                          └── engineers via curl / web UI
@@ -167,7 +167,7 @@ To generate the manifest for a whole GitHub org (every non-archived repo
 pushed in the last 90 days - the brief's "active repo" definition):
 
 ```bash
-GITHUB_TOKEN=<read-only PAT> go run ./cmd/repogen --org angel-one > config/repos.yaml
+GITHUB_TOKEN=<read-only PAT> go run ./cmd/repogen --org your-org > config/repos.yaml
 ```
 
 Review the output before committing; `--days` and `--ssh` adjust the window

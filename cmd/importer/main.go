@@ -12,10 +12,15 @@ import (
 )
 
 func main() {
-	repo := flag.String("repo", "golang-gin-realworld-example-app", "repository name to scope the graph")
-	graphPath := flag.String("graph", "sample-data/graph.json", "path to graph.json")
+	repo := flag.String("repo", "", "repository name to scope the imported graph (required)")
+	graphPath := flag.String("graph", "", "path to the graph.json to import (required)")
 	commit := flag.String("commit", "", "source commit SHA to stamp on imported nodes/edges; non-empty enables sweep of stale data from prior commits")
 	flag.Parse()
+
+	if *repo == "" || *graphPath == "" {
+		flag.Usage()
+		log.Fatal("both --repo and --graph are required")
+	}
 
 	password := os.Getenv("NEO4J_PASSWORD")
 	if password == "" {

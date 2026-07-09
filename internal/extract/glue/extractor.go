@@ -1,15 +1,13 @@
-// Package glue extracts AWS Glue job definitions from a repository. Glue jobs
-// can be declared in several places - Terraform (aws_glue_job), CloudFormation
-// (AWS::Glue::Job), CDK code, or directly created with boto3 calls. This
-// extractor handles the three declarative shapes (Terraform HCL, CloudFormation
-// YAML/JSON) plus a heuristic Python scan for `glueContext.create_dynamic_frame`
-// and `glueContext.write_dynamic_frame` calls to infer source/destination
-// tables when the job script lives in the same repo.
+// Package glue extracts AWS Glue job definitions from a repository. Jobs may be
+// declared in Terraform (aws_glue_job), CloudFormation (AWS::Glue::Job), CDK, or
+// boto3. This handles the declarative shapes (Terraform HCL, CloudFormation
+// YAML/JSON) plus a heuristic scan of Python Glue scripts for
+// create_dynamic_frame/write_dynamic_frame calls to infer source/destination
+// tables.
 //
-// Each discovered Glue job becomes a (:GlueJob {name}) node attached to its
-// repository, with READS_SOURCE/WRITES_DESTINATION edges to inferred table
-// nodes and an optional SCHEDULED edge to a schedule expression node when one
-// is declared.
+// Each job becomes a (:GlueJob {name}) node on its repo, with
+// READS_SOURCE/WRITES_DESTINATION edges to inferred tables and an optional
+// SCHEDULED edge when a schedule is declared.
 package glue
 
 import (
@@ -96,8 +94,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 
 	jobs = mergeScriptJobs(jobs)
 
-	// Emit the repo hub node ourselves so CONTAINS edges don't dangle when
-	// the deps extractor (which also creates this hub) is disabled.
+	// Emit the repo hub ourselves so edges don't dangle when the deps extractor
+	// (which also creates it) is disabled.
 	if len(jobs) > 0 {
 		frag.AddNode(extract.FragmentNode{
 			ID:    repoNodeID,
@@ -114,11 +112,10 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	return frag, nil
 }
 
-// mergeScriptJobs folds script-derived jobs into TF/CFN-declared jobs that
-// reference the same script (matched by script filename): the declared job
-// keeps its name and schedule and absorbs the script's inferred source and
-// destination tables. Script jobs with no declaring resource survive as
-// standalone entries.
+// mergeScriptJobs folds script-derived jobs into the TF/CFN job that references
+// the same script (matched by filename): the declared job keeps its name and
+// schedule and absorbs the script's source/destination tables. Script jobs
+// with no declaring resource stay standalone.
 func mergeScriptJobs(jobs []discoveredJob) []discoveredJob {
 	declaredByScript := map[string]int{}
 	for i, j := range jobs {
@@ -140,9 +137,9 @@ func mergeScriptJobs(jobs []discoveredJob) []discoveredJob {
 	return out
 }
 
-// scriptBase normalizes a script reference to its filename so a Terraform
-// script_location like "s3://bucket/scripts/etl_daily.py" matches the local
-// checkout path "jobs/etl_daily.py".
+// scriptBase reduces a script reference to its filename so a Terraform
+// script_location (s3://.../etl_daily.py) matches a checkout path
+// (jobs/etl_daily.py).
 func scriptBase(script string) string {
 	script = strings.TrimSpace(script)
 	if i := strings.LastIndexAny(script, "/\\"); i >= 0 {
@@ -168,10 +165,10 @@ func appendUnique(dst []string, src []string) []string {
 // --- Terraform aws_glue_job resource ---
 
 var (
-	tfGlueJobRe = regexp.MustCompile(`(?s)resource\s+"aws_glue_job"\s+"([^"]+)"\s*\{(.*?)\n\}`)
-	tfNameRe    = regexp.MustCompile(`name\s*=\s*"([^"]+)"`)
-	tfScriptRe  = regexp.MustCompile(`script_location\s*=\s*"([^"]+)"`)
-	tfTriggerRe = regexp.MustCompile(`(?s)resource\s+"aws_glue_trigger"\s+"([^"]+)"\s*\{(.*?)\n\}`)
+	tfGlueJobRe  = regexp.MustCompile(`(?s)resource\s+"aws_glue_job"\s+"([^"]+)"\s*\{(.*?)\n\}`)
+	tfNameRe     = regexp.MustCompile(`name\s*=\s*"([^"]+)"`)
+	tfScriptRe   = regexp.MustCompile(`script_location\s*=\s*"([^"]+)"`)
+	tfTriggerRe  = regexp.MustCompile(`(?s)resource\s+"aws_glue_trigger"\s+"([^"]+)"\s*\{(.*?)\n\}`)
 	tfScheduleRe = regexp.MustCompile(`schedule\s*=\s*"([^"]+)"`)
 	tfJobsList   = regexp.MustCompile(`job_name\s*=\s*"([^"]+)"`)
 )
@@ -241,9 +238,8 @@ func walkCFResources(doc map[string]any, file string) []discoveredJob {
 	if resources == nil {
 		return out
 	}
-	// Two passes: jobs first, then triggers. Resources is a Go map with
-	// random iteration order - a trigger visited before its job would bind
-	// its schedule to nothing.
+	// Two passes: jobs first, then triggers, since map iteration is unordered
+	// and a trigger seen before its job would bind to nothing.
 	for logicalID, raw := range resources {
 		res, ok := raw.(map[string]any)
 		if !ok || res["Type"] != "AWS::Glue::Job" {
@@ -299,12 +295,11 @@ var (
 
 func parseGlueScript(body, file string) []discoveredJob {
 	if !glueJobInitRe.MatchString(body) && !glueJobNameRe.MatchString(body) {
-		// Bare boto3 call or unrelated module - skip rather than guess.
+		// Bare boto3 or unrelated module; skip rather than guess.
 		return nil
 	}
-	// We don't have the job name in the script itself in general - use the
-	// script filename as a best-effort label. mergeScriptJobs folds this
-	// entry into a TF/CFN-declared job when one references the same script.
+	// The script rarely names the job; use the filename as a best-effort label.
+	// mergeScriptJobs folds this into a TF/CFN job referencing the same script.
 	name := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
 	j := discoveredJob{name: name, script: file, file: file, fromScript: true}
 	for _, m := range glueReadCatalog.FindAllStringSubmatch(body, -1) {
@@ -379,8 +374,8 @@ func emitJob(frag *extract.Fragment, repoNodeID, repoName string, j discoveredJo
 		})
 	}
 	if j.schedule != "" {
-		// Schedule IDs embed the repo: two repos can declare jobs with the
-		// same name, and their schedules are distinct resources.
+		// Schedule IDs embed the repo: two repos may declare same-named jobs
+		// with distinct schedules.
 		schedID := "glue::schedule::" + repoName + "::" + j.name
 		frag.AddNode(extract.FragmentNode{
 			ID:    schedID,

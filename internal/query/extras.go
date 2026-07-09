@@ -7,25 +7,18 @@ import (
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
-// Result-set caps for the extractor-backed queries. These queries aggregate
-// per-row collections (reads/writes/sources/targets), so an unbounded row
-// count multiplies memory on both Neo4j and this service.
+// Result-set caps for the extractor-backed queries, which aggregate per-row
+// collections.
 const (
 	depLimit     = 1000
 	sqlLimit     = 200
 	glueJobLimit = 500
 )
 
-// FindDependencies returns every package (and cross-repo target) the given
-// repository declares a dependency on. Pass scope="" to include every scope
-// (runtime, dev, indirect, peer, optional); pass a specific scope to filter.
-//
-// The source anchor is the deps extractor's per-repo hub Entity - an
-// (:Entity:Package {graphify_id: "repo::<name>"}) node - NOT the importer's
-// (:Repository {name}) node. The extractors emit their edges from the hub
-// they create themselves; the (:Repository) node is only connected to
-// entities via generic (:Repository)-[:CONTAINS]->(:Entity) edges from
-// importNodeBatch, never via typed relations like DEPENDS_ON.
+// FindDependencies returns every package (and cross-repo target) the repo
+// depends on. scope="" includes every scope; pass a scope to filter. The
+// anchor is the deps extractor's per-repo hub Entity (graphify_id
+// "repo::<name>"), not the (:Repository) node.
 func (s *Service) FindDependencies(ctx context.Context, repo, scope string) ([]DependencyEdge, error) {
 	if repo == "" {
 		return []DependencyEdge{}, nil
@@ -45,13 +38,8 @@ LIMIT $limit
 	return s.runDepQuery(ctx, cypher, map[string]any{"repo": repo, "scope": scope, "limit": depLimit}, repo)
 }
 
-// FindDependents returns every repository whose manifest declares a
-// dependency on dep. dep may be a package name (e.g. "github.com/foo/bar"
-// or "lodash") or, when the deps extractor inferred a cross-repo edge, the
-// short name of the depended-upon repository ("auth-service").
-//
-// r is the deps extractor's per-repo hub Entity - see FindDependencies for
-// why we don't match on (:Repository) here.
+// FindDependents returns every repository that depends on dep. dep may be a
+// package name or, for an inferred cross-repo edge, a short repo name.
 func (s *Service) FindDependents(ctx context.Context, dep string) ([]DependencyEdge, error) {
 	if dep == "" {
 		return []DependencyEdge{}, nil
@@ -102,19 +90,10 @@ func (s *Service) runDepQuery(ctx context.Context, cypher string, params map[str
 	return out.([]DependencyEdge), nil
 }
 
-// FindRoutes returns HTTP routes matching the supplied filters. Empty filters
-// mean "any". Results are ordered by repo then path.
-//
-// HttpRoute nodes carry the method + HTTP path in their `name` property
-// (formatted "METHOD /path" by the extractor); the node's `path` property is
-// the source FILE path, not the HTTP path. Method and path are parsed from
-// `rt.name` - which works for data imported before metadata promotion - and
-// the handler falls back to the promoted `handler` property when present.
-//
-// The query doesn't join through (:Repository) - each HttpRoute carries a
-// `repo` property set by importNodeBatch (routes are repo-owned, not shared),
-// so scoping by repo is a direct property filter with no join. repos empty
-// means every repository.
+// FindRoutes returns HTTP routes matching the filters (empty means any),
+// ordered by repo then path. Method and path are parsed from the node's name
+// ("METHOD /path"); each route carries a repo property, so scoping is a direct
+// filter.
 func (s *Service) FindRoutes(ctx context.Context, method, pathContains string, repos []string) ([]HTTPRoute, error) {
 	const cypher = `
 MATCH (rt:HttpRoute)
@@ -186,10 +165,8 @@ func (s *Service) FindKafkaTopic(ctx context.Context, topic string) (*KafkaTopic
 	// hub nodes so we surface repo names, not arbitrary function nodes if
 	// the extractor is later extended to emit finer-grained producers.
 	//
-	// Aggregation groups by t.name (not by node) so producers and consumers
-	// are collected across every node carrying the topic's name - the current
-	// unified shared node plus any legacy per-repo duplicates from imports
-	// that predate cross-repo node unification.
+	// Grouped by t.name so producers/consumers collect across every node with
+	// the topic's name (the unified shared node plus any legacy duplicates).
 	const cypher = `
 MATCH (t:KafkaTopic {name: $topic})
 OPTIONAL MATCH (rp:Entity)-[:PRODUCES]->(t) WHERE rp.graphify_id STARTS WITH 'repo::'

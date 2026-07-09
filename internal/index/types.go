@@ -1,12 +1,8 @@
-// Package index provides the indexing service: it discovers repositories,
-// keeps them cloned and in sync, runs Graphify on changed repos, and feeds
-// the produced graph.json into the existing Neo4j importer.
-//
-// The package is designed so future enhancements - GitHub webhooks, SQS or
-// other job queues, distributed workers, retry policies, parallel indexing,
-// and additional extractors - can be added by swapping out the JobSource,
-// Syncer, Graphifier, or StateStore implementations without touching the
-// orchestrator or pipeline.
+// Package index implements the indexing service: it discovers repositories,
+// keeps them cloned and in sync, runs graphify on changed repos, and feeds
+// the produced graph.json into the Neo4j importer. JobSource, Syncer,
+// Graphifier, and StateStore are all interfaces, so webhooks, job queues, or
+// parallel workers can be added later by swapping an implementation.
 package index
 
 import (
@@ -44,9 +40,9 @@ type Repository struct {
 	Branch string `yaml:"branch"`
 }
 
-// RepoState is the persisted indexing record for one repository. It survives
-// process restarts; the indexer uses LastIndexedCommit to decide whether a
-// repo has actually changed since the last successful run.
+// RepoState is the persisted indexing record for one repository, used across
+// restarts to decide (via LastIndexedCommit) whether a repo has changed
+// since the last successful run.
 type RepoState struct {
 	Name              string    `json:"name"`
 	LastAttemptAt     time.Time `json:"last_attempt_at,omitempty"`
@@ -78,22 +74,16 @@ type RepoResult struct {
 	NodesSwept int
 	EdgesSwept int
 	// NodesInGraph is Neo4j's actual :Entity count for the repo after import.
-	// Compared to Nodes it exposes silent data loss (e.g. node_key collisions).
+	// A mismatch against Nodes signals silent data loss, e.g. node_key collisions.
 	NodesInGraph int
-	// Mismatch is true when NodesInGraph != Nodes with commit stamping on -
-	// a signal that the importer's input and Neo4j's post-import state diverged.
-	Mismatch bool
-	// ExtractorStats records per-extractor node/edge counts so operators can
-	// see at a glance which extractors contributed how much to the unified
-	// graph. Empty for runs where no extractors were registered.
+	Mismatch     bool
+	// ExtractorStats holds per-extractor node/edge counts.
 	ExtractorStats map[string]ExtractorStat
-	// ExtractorErrors maps extractor name → error message for extractors
-	// that failed for this repo. Other extractors' fragments still go through.
+	// ExtractorErrors maps extractor name to error message; other extractors
+	// still run and their fragments still merge in.
 	ExtractorErrors map[string]string
-	// Canceled is true when ctx cancellation, not the repo itself, caused the
-	// run to stop early. State persistence is skipped in this case so a SIGINT
-	// does not pollute consecutive_fails or overwrite last_error with a kill
-	// signal.
+	// Canceled is true when ctx cancellation, not the repo, stopped the run;
+	// state persistence is skipped so consecutive_fails isn't polluted.
 	Canceled  bool
 	StartedAt time.Time
 	Duration  time.Duration
@@ -129,35 +119,26 @@ func (s RunSummary) Counts() (total, success, skipped, failed int) {
 }
 
 // JobSource yields the set of repositories to index. The YAML-backed
-// implementation reads from a config file; future implementations can drain a
-// queue, listen to webhooks, or merge multiple sources.
+// implementation reads a config file; other implementations could drain a
+// queue or listen to webhooks.
 type JobSource interface {
 	Repositories(ctx context.Context) ([]Repository, error)
 }
 
-// Syncer ensures a repo is cloned at dest and synchronized to its branch.
-// It returns the current HEAD commit so the orchestrator can compare against
-// previously-indexed state.
+// Syncer clones or updates a repo at dest and returns the current HEAD
+// commit, so the orchestrator can compare it against previously-indexed state.
 type Syncer interface {
 	Sync(ctx context.Context, repo Repository, dest string) (commit string, err error)
 }
 
-// Graphifier produces (or incrementally updates) a graph.json for a repo at
-// repoPath. It returns the resolved absolute path of the produced file so
-// callers do not need to know the extractor's output layout.
-//
-// The default implementation invokes `graphify update <repo_path>`, which is
-// graphify's incremental, AST-only-by-default workflow - it does NOT pass an
-// --out flag because `update` writes inside the repo (at
-// <repo_path>/graphify-out/graph.json by default). The output_file knob on
-// GraphifyConfig stays relative to repoPath.
+// Graphifier produces or updates a graph.json for a repo at repoPath and
+// returns the resolved absolute path of the result.
 type Graphifier interface {
 	Generate(ctx context.Context, repoPath string) (graphPath string, err error)
 }
 
-// StateStore is the persistence layer for per-repo indexing state.
-// The JSON-file implementation is enough for single-process operation; a
-// future Redis or Postgres backend can swap in by satisfying this interface.
+// StateStore persists per-repo indexing state. The JSON-file implementation
+// is enough for single-process operation.
 type StateStore interface {
 	Get(name string) (RepoState, bool)
 	Set(state RepoState) error

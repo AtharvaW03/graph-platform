@@ -23,29 +23,17 @@
 # Match the org's package namespace conventions.
 
 repositories:
-  - name: amx-core
-    url: file:///Users/atharva.wadodkar/core-trading/amx-core
-    branch: master
+  - name: auth-service
+    url: https://github.com/example-org/auth-service.git
+    branch: main
 
-  - name: amx-always-on
-    url: file:///Users/atharva.wadodkar/core-trading/amx-always-on
-    branch: master
+  - name: payments-service
+    url: https://github.com/example-org/payments-service.git
+    branch: main
 
-  - name: amx-margin-maker
-    url: file:///Users/atharva.wadodkar/core-trading/amx-margin-maker
-    branch: master
-
-  - name: amx-margin-service
-    url: file:///Users/atharva.wadodkar/core-trading/amx-margin-service
-    branch: master
-
-  - name: amx-reports
-    url: file:///Users/atharva.wadodkar/core-trading/amx-reports
-    branch: master
-
-  - name: amx-scrip-insights
-    url: file:///Users/atharva.wadodkar/core-trading/amx-scrip-insights
-    branch: master
+  - name: orders-service
+    url: https://github.com/example-org/orders-service.git
+    branch: main
 
 git:
   timeout: 10m
@@ -68,5 +56,4 @@ extractors:
 
 org:
   prefixes:
-    - github.com/angel-one/
-    - github.com/atharva-co/
+    - github.com/example-org/

@@ -11,14 +11,8 @@ import (
 
 var fileExtRe = regexp.MustCompile(`\.(go|kt|sh|py|md|ya?ml|json|toml)$`)
 
-// typeToLabel resolves the Graphify-format `type` field of a node to a Neo4j
-// label. This is the single extension point external extractors use to map
-// their entities to the Neo4j data model. Any Graphify-emitted fragment can
-// set node.type to one of these keys and the importer will pick the right
-// label automatically.
-//
-// `package` was already used by Graphify's own manifest extractor; the other
-// keys are introduced by the platform's extractor plugins.
+// typeToLabel maps a node's `type` field to a Neo4j label. Extractors set
+// node.type to one of these keys to control how their entities are labelled.
 var typeToLabel = map[string]string{
 	"package":        "Package",
 	"dependency":     "Package",
@@ -36,9 +30,8 @@ var typeToLabel = map[string]string{
 	"glue_schedule":  "GlueSchedule",
 }
 
-// InferLabel returns the Neo4j label for a node using first-match-wins rules.
-// The explicit `type` field wins over all heuristic rules so fragments emitted
-// by extractor plugins never get misclassified by the filename heuristics.
+// InferLabel returns the Neo4j label for a node, first-match-wins. An explicit
+// `type` takes priority over the filename/label heuristics below.
 func InferLabel(n Node) string {
 	if l, ok := typeToLabel[n.Type]; ok {
 		return l
@@ -74,10 +67,8 @@ func InferLabel(n Node) string {
 	return "Symbol"
 }
 
-// relationMap maps Graphify-format relation strings (the verbs extractors
-// emit) to Neo4j relationship types (UPPER_SNAKE_CASE). New relations added
-// here must also pass through ImportLinks' allowlist via this map - there is
-// no separate allowlist to extend.
+// relationMap maps relation verbs to Neo4j relationship types. It doubles as
+// the allowlist: ImportLinks skips any relation not listed here.
 var relationMap = map[string]string{
 	// graphify built-in code relations
 	"calls":      "CALLS",
@@ -100,16 +91,16 @@ var relationMap = map[string]string{
 	"consumes": "CONSUMES",
 
 	// sql server extractor
-	"reads_table":  "READS_TABLE",
-	"writes_table": "WRITES_TABLE",
-	"triggers_on":  "TRIGGERS_ON",
+	"reads_table":       "READS_TABLE",
+	"writes_table":      "WRITES_TABLE",
+	"triggers_on":       "TRIGGERS_ON",
 	"depends_on_object": "DEPENDS_ON_OBJECT",
-	"in_schema":    "IN_SCHEMA",
+	"in_schema":         "IN_SCHEMA",
 
 	// aws glue extractor
-	"reads_source":      "READS_SOURCE",
+	"reads_source":       "READS_SOURCE",
 	"writes_destination": "WRITES_DESTINATION",
-	"scheduled":         "SCHEDULED",
+	"scheduled":          "SCHEDULED",
 }
 
 // MapRelation maps a Graphify relation string to a Neo4j relationship type.
@@ -119,15 +110,10 @@ func MapRelation(relation string) (string, bool) {
 	return r, ok
 }
 
-// sharedIDPrefixes are the platform node-ID prefixes that denote org-global
-// entities - one Neo4j node shared by every repo that references it. A Kafka
-// topic, a package, a SQL object, or a repository hub is the same real-world
-// thing no matter which repo's scan discovered it; keeping one node per
-// entity is what makes cross-repo questions ("who consumes trade_executed?",
-// "which repos depend on auth-service?") one-hop traversals.
-//
-// Shared nodes carry shared=true and NO repo property in Neo4j, and are
-// excluded from the repo-scoped stale sweep (see neo4j.SweepStale).
+// sharedIDPrefixes mark org-global entities - a topic, package, SQL object, or
+// repo hub is one node shared across every repo that references it, so
+// cross-repo queries stay single-hop. Shared nodes carry shared=true, no repo
+// property, and are skipped by the repo-scoped sweep.
 var sharedIDPrefixes = []string{"topic::", "pkg::", "sql::", "repo::"}
 
 // IsShared reports whether a platform-emitted node is an org-global entity.
@@ -145,25 +131,14 @@ func IsShared(n Node) bool {
 
 // StableKey returns the Neo4j node_key for a node.
 //
-// Platform-extractor nodes (_origin == "platform") use their extractor-
-// assigned ID directly. Those IDs are globally unique by construction:
-// repo-scoped entities embed the repo name (route::<repo>::...,
-// glue::job::<repo>::...), while org-global entities deliberately share one
-// ID across repos (topic::<name>, pkg::<eco>::<name>, sql::...,
-// repo::<name>) so the same topic or package discovered in two repos merges
-// into ONE node. Hashing these with the repo - as the AST branch below does -
-// would split every shared entity into per-repo copies, leaving cross-repo
-// edges pointing at phantom duplicates and breaking shortest-path /
-// blast-radius traversal across repository boundaries.
+// Platform-extractor nodes use their ID directly: repo-scoped IDs embed the
+// repo name, while shared entities use one ID across repos so the same topic
+// or package merges into a single node. Hashing those with the repo would
+// split each shared entity into per-repo copies and break cross-repo traversal.
 //
-// Graphify AST nodes hash repo + source_file + label + ID. The hash includes
-// Node.ID (graphify's per-repo-stable id) because (source_file, label) alone
-// is NOT unique in real code - a single Go source file typically defines many
-// types that each implement the same method (e.g. 52 distinct types in
-// vendor/.../redis/v9/command.go each declaring .String()). Graphify emits
-// those as distinct nodes with distinct ids; omitting the id here collapses
-// them into one Neo4j Entity via MERGE on node_key, silently losing the other
-// 51 rows and their edges.
+// AST nodes hash repo + source_file + label + ID. The ID is required because
+// (source_file, label) is not unique - one file can define many types with the
+// same method name, and dropping the ID would merge them into one node.
 func StableKey(repo string, n Node) string {
 	if n.Origin == "platform" {
 		return "platform::" + n.ID
@@ -173,9 +148,8 @@ func StableKey(repo string, n Node) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// extToLanguage maps source-file extensions to programming-language names.
-// Deliberately code-only: config and doc formats (yaml, json, md, ...) are
-// not languages and would pollute the overview's Languages panel.
+// extToLanguage maps source-file extensions to language names. Code only;
+// config and doc formats are omitted so they don't show up as languages.
 var extToLanguage = map[string]string{
 	".go":     "go",
 	".kt":     "kotlin",
@@ -210,12 +184,8 @@ var extToLanguage = map[string]string{
 	".tf":     "terraform",
 }
 
-// InferLanguage resolves a node's programming language. Graphify only emits
-// metadata.language for its bash extraction; AST nodes from every other
-// language carry none, which used to make the overview's Languages panel
-// show "bash" as the sole language of a Go repository. When the metadata is
-// absent, fall back to the source file's extension; "" means unknown or not
-// a code file, and the overview skips it.
+// InferLanguage resolves a node's language, preferring metadata.language and
+// falling back to the source-file extension. "" means unknown or non-code.
 func InferLanguage(n Node) string {
 	if l := n.MetaString("language"); l != "" {
 		return l

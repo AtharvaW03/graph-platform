@@ -48,9 +48,8 @@ func main() {
 		logger.Fatalf("create workdir: %v", err)
 	}
 
-	// Acquire local resources first (lock, state) so config and disk errors
-	// surface immediately. Neo4j connect - the only network dependency -
-	// comes after, so a remote outage doesn't mask a typo'd config.
+	// Acquire local resources first so config/disk errors surface before the
+	// Neo4j connect attempt, the only network dependency.
 	lock, err := index.LockWorkDir(absWorkDir)
 	if err != nil {
 		logger.Fatal(err)
@@ -144,12 +143,9 @@ func envOr(key, def string) string {
 	return def
 }
 
-// buildExtractorRunner constructs the extract.Runner whose Extractors are the
-// platform's domain extractors (deps, http_api, kafka, mssql, glue). Each
-// extractor can be disabled via cfg.Extractors; the runner inherits the
-// per-cycle context from the orchestrator. Returns nil if all extractors are
-// disabled, which is a meaningful operator choice (the indexer reverts to
-// pure-Graphify enrichment).
+// buildExtractorRunner constructs the extract.Runner from the platform's
+// domain extractors (deps, http_api, kafka, mssql, glue), each toggleable via
+// cfg.Extractors. Returns nil if all are disabled.
 func buildExtractorRunner(cfg *index.Config, logger *log.Logger) *extract.Runner {
 	var exs []extract.Extractor
 	if cfg.Extractors.DepsEnabled() {

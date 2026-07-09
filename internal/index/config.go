@@ -10,46 +10,41 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// validRepoName restricts Repository.Name to characters that are safe to use
-// as filesystem path segments and Neo4j string properties: alphanumerics
-// plus '.', '_', and '-'. The first character is restricted further (no
-// dot/dash leading) to prevent hidden-file or option-flag confusion.
-// Names like "../bad" or "/etc/passwd" or "foo bar" are rejected.
+// validRepoName restricts Repository.Name to characters safe as a filesystem
+// path segment and Neo4j string property, rejecting things like "../bad" or
+// "/etc/passwd".
 var validRepoName = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]*$`)
 
-// validBranch restricts Repository.Branch to plausible git ref names that are
-// safe to pass as a positional argument to `git fetch origin <branch>`. The
-// leading character excludes '-' so a configured branch can never be parsed
-// as a git option flag (argument injection through the config file).
+// validBranch restricts Repository.Branch to safe git ref names; no leading
+// '-' means a configured branch can never be parsed as a git option flag.
 var validBranch = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._/-]*$`)
 
 // Config is the indexer's on-disk configuration. It declares the repository
 // manifest and tunables for the git, graphify, and orchestrator subsystems.
 type Config struct {
-	Repositories []Repository   `yaml:"repositories"`
-	Git          GitConfig      `yaml:"git"`
-	Graphify     GraphifyConfig `yaml:"graphify"`
+	Repositories []Repository     `yaml:"repositories"`
+	Git          GitConfig        `yaml:"git"`
+	Graphify     GraphifyConfig   `yaml:"graphify"`
 	Extractors   ExtractorsConfig `yaml:"extractors"`
-	Org          OrgConfig      `yaml:"org"`
+	Org          OrgConfig        `yaml:"org"`
 }
 
 // ExtractorsConfig toggles each platform extractor on/off. All default to
 // enabled - operators can disable any one by setting it to false.
 type ExtractorsConfig struct {
-	Deps     *bool `yaml:"deps"`
-	HTTPAPI  *bool `yaml:"http_api"`
-	Kafka    *bool `yaml:"kafka"`
-	MSSQL    *bool `yaml:"mssql"`
-	Glue     *bool `yaml:"glue"`
+	Deps    *bool `yaml:"deps"`
+	HTTPAPI *bool `yaml:"http_api"`
+	Kafka   *bool `yaml:"kafka"`
+	MSSQL   *bool `yaml:"mssql"`
+	Glue    *bool `yaml:"glue"`
 	// MaxParallel caps concurrent extractors per repo. Zero or negative means
 	// run all configured extractors at once.
 	MaxParallel int `yaml:"max_parallel"`
 }
 
-// OrgConfig captures organization-wide conventions used by extractors. The
-// most important is Prefixes - when a dependency's name starts with one of
-// these, the deps extractor emits a cross-repository edge so questions like
-// "which repos depend on auth-service?" become one-hop traversals.
+// OrgConfig captures org-wide conventions used by extractors. When a
+// dependency's name starts with one of Prefixes, the deps extractor emits a
+// cross-repository edge, so "which repos depend on X" becomes a one-hop query.
 type OrgConfig struct {
 	Prefixes []string `yaml:"prefixes"`
 }
@@ -76,10 +71,7 @@ type GitConfig struct {
 }
 
 // GraphifyConfig tunes the ExecGraphifier. Args supports the {repo_path}
-// placeholder, substituted at run-time. There is no {out_dir} placeholder:
-// the default invocation is `graphify update <repo_path>` which writes
-// inside the repo (no --out flag). OutputFile is interpreted relative to
-// {repo_path}.
+// placeholder; OutputFile is interpreted relative to it.
 type GraphifyConfig struct {
 	Command    string        `yaml:"command"`
 	Args       []string      `yaml:"args"`
@@ -87,9 +79,8 @@ type GraphifyConfig struct {
 	Timeout    time.Duration `yaml:"timeout"`
 }
 
-// DefaultConfig returns sane defaults that match the locally installed
-// graphify CLI and the existing project conventions. ApplyDefaults uses
-// these to fill any unset fields in a loaded Config.
+// DefaultConfig returns defaults for fields ApplyDefaults fills in on a
+// loaded Config.
 func DefaultConfig() Config {
 	return Config{
 		Git: GitConfig{
@@ -142,8 +133,8 @@ func (c *Config) ApplyDefaults() {
 	}
 }
 
-// Validate enforces invariants that would otherwise produce confusing failures
-// deep in the pipeline (e.g. a repo with no URL would fail at clone time).
+// Validate catches config errors here rather than as confusing failures deep
+// in the pipeline, e.g. a missing URL failing at clone time.
 func (c *Config) Validate() error {
 	if len(c.Repositories) == 0 {
 		return fmt.Errorf("no repositories configured")
@@ -174,8 +165,7 @@ func (c *Config) Validate() error {
 }
 
 // ConfigJobSource is the default JobSource: it serves the static repository
-// list from a Config struct. Replace with a queue- or webhook-backed source
-// to evolve toward event-driven indexing.
+// list from a Config struct.
 type ConfigJobSource struct {
 	cfg *Config
 }

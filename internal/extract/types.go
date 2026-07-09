@@ -1,16 +1,9 @@
-// Package extract defines the platform's extractor framework. Extractors
-// scan a freshly-synced repository checkout and emit Graphify-compatible
-// extraction fragments - the same {nodes, edges} dictionary shape that
-// graphify's own `extract()` functions produce.
+// Package extract defines the extractor framework. Extractors scan a synced
+// repo checkout and emit graphify-compatible {nodes, edges} fragments. The
+// orchestrator runs every extractor, merges their fragments into graphify's
+// graph.json, and feeds the result to the Neo4j importer.
 //
-// The orchestrator runs every Extractor for a repo, merges all returned
-// Fragments with graphify's main graph.json (via Graphify's NetworkX
-// node-link merge semantics), and feeds the unified graph into the existing
-// Neo4j importer. This keeps Graphify responsible for graph construction and
-// our extractors strictly responsible for producing entity dictionaries.
-//
-// Adding a new extractor is one struct + one Extract method. No orchestration
-// changes are required.
+// A new extractor is one struct plus one Extract method.
 package extract
 
 import (
@@ -18,18 +11,16 @@ import (
 	"fmt"
 )
 
-// Confidence labels follow Graphify's three-tier model (see
-// docs/graphify/graphify-how-it-works.md). EXTRACTED edges always have
-// confidence_score 1.0.
+// Confidence labels follow graphify's three-tier model. EXTRACTED edges
+// always have confidence_score 1.0.
 const (
 	ConfidenceExtracted = "EXTRACTED"
 	ConfidenceInferred  = "INFERRED"
 	ConfidenceAmbiguous = "AMBIGUOUS"
 )
 
-// FragmentNode mirrors a graphify-format node. Field tags match graphify's
-// NetworkX node-link serialization so a Fragment written to disk is a
-// drop-in input for `graphify merge-graphs`.
+// FragmentNode mirrors a graphify-format node; the field tags match graphify's
+// node-link serialization.
 type FragmentNode struct {
 	ID             string         `json:"id"`
 	Label          string         `json:"label"`
@@ -45,9 +36,9 @@ type FragmentNode struct {
 	Metadata       map[string]any `json:"metadata,omitempty"`
 }
 
-// FragmentEdge mirrors a graphify-format edge. The relation field uses
-// Graphify's lowercase verb form (e.g. "depends_on", "produces"); the
-// importer's MapRelation translates these to Neo4j UPPER_SNAKE_CASE.
+// FragmentEdge mirrors a graphify-format edge. Relation uses graphify's
+// lowercase verb form (e.g. "depends_on"); the importer maps it to Neo4j's
+// UPPER_SNAKE_CASE.
 type FragmentEdge struct {
 	Source          string  `json:"source"`
 	Target          string  `json:"target"`
@@ -60,17 +51,15 @@ type FragmentEdge struct {
 	Context         string  `json:"context,omitempty"`
 }
 
-// Fragment is one extractor's contribution to the unified graph. Each
-// Extractor.Extract returns exactly one Fragment; the orchestrator merges
-// them all with graphify's main extraction before import.
+// Fragment is one extractor's contribution to the unified graph.
 type Fragment struct {
-	Extractor string         `json:"-"` // set by the runner; not serialized into graphify format
+	Extractor string         `json:"-"` // set by the runner
 	Nodes     []FragmentNode `json:"nodes"`
 	Edges     []FragmentEdge `json:"edges"`
-	Warnings  []string       `json:"-"` // non-fatal issues surfaced to operators
+	Warnings  []string       `json:"-"` // non-fatal issues
 
-	// byID indexes Nodes by ID for AddNode's dedup. Built lazily so a
-	// Fragment constructed by literal or JSON unmarshal still works.
+	// byID indexes Nodes for AddNode's dedup. Built lazily so a Fragment from
+	// a literal or JSON unmarshal still works.
 	byID map[string]int
 }
 
@@ -79,15 +68,11 @@ func NewFragment(extractor string) *Fragment {
 	return &Fragment{Extractor: extractor}
 }
 
-// AddNode appends a node, defaulting common fields and stamping _origin so
-// downstream consumers can tell platform-emitted nodes apart from graphify's
-// own AST extraction (which uses `_origin: "ast"`).
-//
-// AddNode is idempotent per ID: a second call with the same id merges its
-// metadata into the existing node (later values fill empty fields; existing
-// values are preserved). This makes fragments a set-of-nodes naturally and
-// lets extractors emit the same hub node from multiple discovery sites
-// without tracking a private "seen" map.
+// AddNode appends a node, defaulting common fields and stamping _origin to
+// mark platform-emitted nodes apart from graphify's AST nodes. It is
+// idempotent per ID: a repeat call merges metadata into the existing node
+// (existing values win), so extractors can emit the same hub from several
+// sites without tracking a seen-set.
 func (f *Fragment) AddNode(n FragmentNode) {
 	if n.Origin == "" {
 		n.Origin = "platform"
@@ -186,26 +171,19 @@ func (f *Fragment) Empty() bool {
 	return len(f.Nodes) == 0 && len(f.Edges) == 0
 }
 
-// Extractor is the framework's only contract. Each implementation reads files
-// under repoPath (a freshly synced clone) and returns a Fragment containing
-// the entities it discovered for the given repo. Extractors:
-//   - operate independently - no shared state between extractors
-//   - emit Graphify-compatible nodes and edges
-//   - validate their own output before returning
-//   - report errors independently - returning an error never aborts other
-//     extractors for the same repo
-//   - are pure with respect to disk: they read but never write
+// Extractor reads files under repoPath and returns the entities it found for
+// the repo. Implementations run independently (no shared state), are read-only
+// on disk, and one returning an error never aborts the others.
 type Extractor interface {
 	Name() string
 	Extract(ctx context.Context, repoPath, repoName string) (*Fragment, error)
 }
 
-// Validate enforces the minimal schema invariants build_graph relies on:
-// non-empty node IDs and labels, non-empty edge endpoints and relations, and
-// a recognized confidence tier. Edges referencing node IDs absent from this
-// fragment are deliberately NOT rejected - they may resolve against nodes
-// another fragment or graphify itself emits; anything still dangling is
-// counted and skipped at import time.
+// Validate checks the minimal schema invariants: non-empty node IDs and
+// labels, non-empty edge endpoints and relations, and a known confidence tier.
+// Edges to node IDs absent from this fragment are allowed - they may resolve
+// against another fragment or graphify's own nodes, and anything still dangling
+// is skipped at import time.
 func (f *Fragment) Validate() error {
 	if f == nil {
 		return fmt.Errorf("nil fragment")

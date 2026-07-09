@@ -11,8 +11,7 @@ import (
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
-// Caps keep the overview compact enough to be a single onboarding payload
-// while still surfacing the load-bearing structure of a repository.
+// Result caps that keep the overview a single compact payload.
 const (
 	overviewCommunities  = 12
 	overviewModules      = 30
@@ -22,19 +21,13 @@ const (
 )
 
 // RepositoryOverview aggregates the indexed graph for one repository into a
-// single structured onboarding snapshot. It issues a small set of focused
-// read queries (each scoped by the Entity.repo property) and reuses the
-// existing FindRoutes / FindDependencies logic rather than re-scanning the
-// graph, so the whole thing is a handful of cheap round trips.
-//
-// Nothing here touches the source tree - every field is derived from Neo4j.
+// single onboarding snapshot, built entirely from Neo4j (no source access).
 func (s *Service) RepositoryOverview(ctx context.Context, repo string) (*RepositoryOverview, error) {
 	if repo == "" {
 		return nil, fmt.Errorf("repo required")
 	}
 
-	// Fail fast with a clear signal when the repo isn't indexed, rather than
-	// returning a hollow overview that looks like an empty repository.
+	// Fail fast if the repo isn't indexed rather than return a hollow overview.
 	nodeCount, relCount, err := s.overviewCounts(ctx, repo)
 	if err != nil {
 		return nil, err
@@ -43,11 +36,7 @@ func (s *Service) RepositoryOverview(ctx context.Context, repo string) (*Reposit
 		return nil, fmt.Errorf("repository %q has no indexed nodes", repo)
 	}
 
-	// The remaining reads are independent of each other and each opens its own
-	// Neo4j session, so run them concurrently: wall-clock collapses from the
-	// sum of ~10 round trips to roughly the slowest single one. FindRoutes and
-	// FindDependencies reuse existing query logic for the HTTP and dependency
-	// inventories.
+	// The remaining reads are independent, so run them concurrently.
 	var (
 		kinds       []LabeledCount
 		langs       []LabeledCount
@@ -103,12 +92,9 @@ func (s *Service) RepositoryOverview(ctx context.Context, repo string) (*Reposit
 	return ov, nil
 }
 
-// parallelReads runs independent read closures concurrently and returns their
-// combined error. Each closure gets its own Neo4j session (created inside
-// s.read / s.each), which the driver's pooled, thread-safe connections
-// support - sessions themselves are never shared across goroutines. A panic
-// in any closure is recovered into an error so one bad read can't crash the
-// server (spawned goroutines are outside the HTTP handler's recovery).
+// parallelReads runs independent read closures concurrently and joins their
+// errors. Each closure gets its own session; panics are recovered so one bad
+// read can't crash the server.
 func parallelReads(fns ...func() error) error {
 	var wg sync.WaitGroup
 	errs := make([]error, len(fns))
@@ -128,9 +114,8 @@ func parallelReads(fns ...func() error) error {
 	return errors.Join(errs...)
 }
 
-// normalize replaces nil slices with empty ones so the JSON payload always
-// presents list fields as [] rather than null - a small but real contract
-// improvement for a structured API.
+// normalize replaces nil slices with empty ones so list fields serialize as
+// [] rather than null.
 func (ov *RepositoryOverview) normalize() {
 	ov.Repository.Languages = orEmptyCounts(ov.Repository.Languages)
 	ov.Repository.NodeKinds = orEmptyCounts(ov.Repository.NodeKinds)
@@ -186,8 +171,7 @@ func orEmptyCounts(xs []LabeledCount) []LabeledCount {
 	return xs
 }
 
-// each runs cypher and invokes fn once per result row. It centralizes the
-// read-transaction boilerplate the overview queries would otherwise repeat.
+// each runs cypher and invokes fn once per result row.
 func (s *Service) each(ctx context.Context, cypher string, params map[string]any, fn func(m map[string]any)) error {
 	_, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
 		res, err := tx.Run(ctx, cypher, params)
@@ -206,9 +190,8 @@ func (s *Service) each(ctx context.Context, cypher string, params map[string]any
 	return err
 }
 
-// overviewCounts returns the repo's :Entity node count and the number of
-// relationships whose endpoints both live in the repo (a single query so the
-// two figures stay consistent).
+// overviewCounts returns the repo's node count and its internal relationship
+// count in a single query.
 func (s *Service) overviewCounts(ctx context.Context, repo string) (nodes, rels int, err error) {
 	const cypher = `
 MATCH (n:Entity {repo: $repo})
@@ -223,9 +206,7 @@ RETURN count(DISTINCT n) AS nodes, count(r) AS rels
 }
 
 func (s *Service) overviewLabelCounts(ctx context.Context, repo string) ([]LabeledCount, error) {
-	// Scoped via Repository CONTAINS rather than the repo property so shared
-	// (org-global) entities the repo references - Kafka topics, packages,
-	// SQL objects - appear in the kind counts alongside repo-owned nodes.
+	// Scoped via CONTAINS so shared entities (topics, packages, SQL) count too.
 	const cypher = `
 MATCH (:Repository {name: $repo})-[:CONTAINS]->(n:Entity)
 UNWIND labels(n) AS l
@@ -254,10 +235,9 @@ ORDER BY c DESC, name
 	return out, err
 }
 
-// overviewCommunities returns the largest Graphify communities with sample
-// members and their file paths. The importer stores an empty community_name,
-// so the human-facing Label and DominantDir are synthesized in Go from the
-// members' paths.
+// overviewCommunities returns the largest communities with sample members.
+// Label and DominantDir are synthesized from member paths (community_name is
+// empty at import).
 func (s *Service) overviewCommunities(ctx context.Context, repo string) ([]CommunitySummary, error) {
 	const cypher = `
 MATCH (n:Entity {repo: $repo})
@@ -287,12 +267,9 @@ ORDER BY size DESC
 	return out, err
 }
 
-// overviewEntryPoints returns executable mains, servers, and startup/bootstrap
-// functions. The WHERE clause narrows to likely candidates; classifyEntryPoint
-// assigns the final kind.
+// overviewEntryPoints returns executable mains, servers, and bootstrap funcs.
 func (s *Service) overviewEntryPoints(ctx context.Context, repo string) ([]EntryPoint, error) {
-	// Anchored by the repo index; name_lower (pre-lowercased at import) avoids
-	// recomputing toLower per row and matches the pattern used elsewhere.
+	// name_lower is pre-lowercased at import, so no per-row toLower.
 	const cypher = `
 MATCH (n:Entity {repo: $repo})
 WHERE 'Function' IN labels(n) AND (
@@ -326,17 +303,15 @@ LIMIT 100
 	if err != nil {
 		return nil, err
 	}
-	// Executable mains first, then servers, then bootstrap - the order a
-	// newcomer would actually trace a process startup in.
+	// Executable mains first, then servers, then bootstrap.
 	sort.SliceStable(out, func(i, j int) bool {
 		return entryKindRank(out[i].Kind) < entryKindRank(out[j].Kind)
 	})
 	return out, nil
 }
 
-// overviewModules groups nodes by their containing directory (derived from the
-// path in Cypher via reduce, since Cypher has no path-join) and reports each
-// directory's node and function counts.
+// overviewModules groups nodes by containing directory with node and function
+// counts.
 func (s *Service) overviewModules(ctx context.Context, repo string) ([]ModuleInfo, error) {
 	const cypher = `
 MATCH (n:Entity {repo: $repo})
@@ -362,8 +337,7 @@ LIMIT $limit
 	return out, err
 }
 
-// overviewHubs returns the highest-degree nodes - the "god nodes" / core
-// abstractions - computed from the graph via a COUNT{} degree subquery.
+// overviewHubs returns the highest-degree nodes (the core abstractions).
 func (s *Service) overviewHubs(ctx context.Context, repo string) ([]ComponentInfo, error) {
 	const cypher = `
 MATCH (n:Entity {repo: $repo})
@@ -390,10 +364,8 @@ LIMIT $limit
 }
 
 // overviewKafka returns the topics the repo references with their producers
-// and consumers, plus flattened distinct producer/consumer lists. Topics are
-// shared (org-global) nodes, so scoping goes via the Repository CONTAINS edge
-// rather than a repo property; the producer/consumer lists deliberately
-// include OTHER repos' hubs - the full topology is the useful answer.
+// and consumers. Topics are shared nodes, scoped via CONTAINS; the producer
+// and consumer lists span all repos to show the full topology.
 func (s *Service) overviewKafka(ctx context.Context, repo string) (KafkaSummary, error) {
 	const cypher = `
 MATCH (:Repository {name: $repo})-[:CONTAINS]->(t:KafkaTopic)
@@ -428,8 +400,8 @@ ORDER BY topic
 	return summary, nil
 }
 
-// overviewSQL groups the SQL objects the repo references by kind. SQL objects
-// are shared (org-global) nodes, so scoping goes via Repository CONTAINS.
+// overviewSQL groups the SQL objects the repo references by kind (scoped via
+// CONTAINS, since SQL objects are shared nodes).
 func (s *Service) overviewSQL(ctx context.Context, repo string) (SQLSummary, error) {
 	const cypher = `
 MATCH (:Repository {name: $repo})-[:CONTAINS]->(o:Entity)
@@ -460,7 +432,7 @@ ORDER BY kind, name
 	return summary, err
 }
 
-// -------- pure aggregation helpers (no DB access) --------
+// --- aggregation helpers ---
 
 // summarizeRoutes turns the flat route inventory into a method distribution
 // and prefix-grouped buckets.
@@ -525,10 +497,9 @@ func summarizeDependencies(deps []DependencyEdge) DependencySummary {
 	return summary
 }
 
-// synthesizeSummary composes a one-line high-level description from the
-// aggregated metrics - a factual anchor the caller can expand on. It leans on
-// node-kind counts rather than the language property, which the importer only
-// populates for a small subset of nodes and so would misdescribe the repo.
+// synthesizeSummary composes a one-line description from the aggregated
+// metrics, using node-kind counts rather than the sparsely-populated language
+// field.
 func synthesizeSummary(ov *RepositoryOverview) string {
 	parts := []string{
 		fmt.Sprintf("%s: %d nodes, %d relationships, %d communities",
@@ -564,9 +535,8 @@ func topKindsPhrase(kinds []LabeledCount, n int) string {
 	return strings.Join(parts, ", ")
 }
 
-// buildReadingOrder derives an onboarding path straight from the aggregated
-// graph data: start at process entry points, move to the biggest core
-// packages, then services, then infrastructure, then utilities.
+// buildReadingOrder derives an onboarding path: entry points, core packages,
+// services, infrastructure, then utilities.
 func buildReadingOrder(ov *RepositoryOverview) []ReadingStep {
 	var steps []ReadingStep
 
@@ -658,7 +628,7 @@ func serviceItems(ov *RepositoryOverview) []string {
 	return out
 }
 
-// -------- small string/utility helpers --------
+// --- helpers ---
 
 // dominantDir returns the most common directory among a set of file paths.
 func dominantDir(paths []string) string {
@@ -686,9 +656,8 @@ func dirOf(path string) string {
 	return path[:i]
 }
 
-// communityLabel synthesizes a human-readable community name from its dominant
-// directory (falling back to a representative member) since the importer stores
-// an empty community_name.
+// communityLabel derives a community name from its dominant directory, falling
+// back to a member name.
 func communityLabel(dir string, names []string) string {
 	if dir != "" && dir != "." {
 		return dir

@@ -7,40 +7,26 @@ import (
 	"path/filepath"
 )
 
-// MergeIntoGraphFile merges a set of Fragments into an existing
-// graphify-format graph.json on disk, producing a unified file the importer
-// can read. The semantics match what Graphify's own build_graph() does:
-// node IDs are unioned (duplicates collapse, later non-empty fields
-// overwrite earlier empty ones); edges are appended.
-//
-// This in-process merge is preferred over shelling out to
-// `graphify merge-graphs` because:
-//   - it preserves the exact NetworkX node-link envelope graphify emits
-//   - it adds zero process-startup overhead per repo
-//   - it lets the orchestrator surface merge errors in Go-native form
-//
-// The resulting file is written atomically (temp + rename) so a crash
-// mid-write never leaves an incomplete graph.json the importer would partially
-// read.
+// MergeIntoGraphFile merges fragments into an existing graphify-format
+// graph.json and writes a unified file for the importer. Node IDs are unioned
+// (duplicates collapse, missing fields filled in); edges are appended. The
+// write is atomic (temp + rename).
 func MergeIntoGraphFile(srcPath, dstPath string, fragments []*Fragment) error {
 	raw, err := os.ReadFile(srcPath)
 	if err != nil {
 		return fmt.Errorf("read graph file: %w", err)
 	}
 
-	// Decode into a map so we preserve every top-level field graphify emitted
-	// (directed, multigraph, graph metadata, hyperedges, built_at_commit, ...)
-	// even ones our Go types don't know about.
+	// Decode into a map to preserve every top-level field graphify emitted,
+	// including ones our Go types don't model.
 	var envelope map[string]any
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return fmt.Errorf("parse graph file: %w", err)
 	}
 
-	// Pull out the typed slices we care about.
 	existingNodes, _ := envelope["nodes"].([]any)
 	existingLinks, _ := envelope["links"].([]any)
 
-	// Index existing nodes by id for fast duplicate detection.
 	byID := make(map[string]int, len(existingNodes))
 	for i, n := range existingNodes {
 		nm, ok := n.(map[string]any)
@@ -52,7 +38,6 @@ func MergeIntoGraphFile(srcPath, dstPath string, fragments []*Fragment) error {
 		}
 	}
 
-	// Merge each fragment's nodes.
 	for _, frag := range fragments {
 		if frag == nil {
 			continue
@@ -60,8 +45,7 @@ func MergeIntoGraphFile(srcPath, dstPath string, fragments []*Fragment) error {
 		for _, fn := range frag.Nodes {
 			nm := nodeToMap(fn)
 			if idx, exists := byID[fn.ID]; exists {
-				// Merge into existing entry: existing wins on populated fields,
-				// the fragment fills in anything missing.
+				// Existing wins on populated fields; fragment fills the gaps.
 				prev, _ := existingNodes[idx].(map[string]any)
 				for k, v := range nm {
 					if !hasMeaningfulValue(prev[k]) {
@@ -82,10 +66,8 @@ func MergeIntoGraphFile(srcPath, dstPath string, fragments []*Fragment) error {
 	envelope["nodes"] = existingNodes
 	envelope["links"] = existingLinks
 
-	// Marshal and atomically replace. No indentation: the merged graph is a
-	// machine-read intermediate (importer input), and indenting a large
-	// graph.json meaningfully inflates both the encode allocation and the
-	// on-disk size.
+	// No indentation: this is a machine-read intermediate, and indenting a
+	// large graph.json inflates the encode allocation and file size.
 	out, err := json.Marshal(envelope)
 	if err != nil {
 		return fmt.Errorf("encode merged graph: %w", err)
@@ -119,9 +101,8 @@ func MergeIntoGraphFile(srcPath, dstPath string, fragments []*Fragment) error {
 	return nil
 }
 
-// WriteFragment writes a single fragment to disk as a standalone graphify-
-// format node-link JSON file. Useful for debugging and for the
-// `graphify merge-graphs` CLI compatibility path.
+// WriteFragment writes a single fragment as a standalone graphify-format
+// node-link JSON file (debugging / merge-graphs compatibility).
 func WriteFragment(path string, frag *Fragment) error {
 	envelope := map[string]any{
 		"directed":   false,
