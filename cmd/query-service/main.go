@@ -16,10 +16,9 @@ import (
 	"graph-platform/internal/query"
 )
 
-// requestTimeout bounds each request end-to-end; it propagates through the
-// request context into the Cypher transaction. Slightly longer than the
-// query layer's own transaction timeout so the DB-side limit fires first
-// and surfaces as a query error rather than a dropped connection.
+// requestTimeout bounds each request end-to-end, propagating through the
+// request context into the Cypher transaction. It's slightly longer than the
+// query layer's own transaction timeout so the DB-side limit fires first.
 const requestTimeout = 35 * time.Second
 
 func main() {
@@ -43,9 +42,8 @@ func main() {
 
 	token := os.Getenv("QUERY_AUTH_TOKEN")
 
-	// Without a token there is no authentication, so default to loopback-only:
-	// open mode should mean "open to this machine", not "open to the network".
-	// QUERY_BIND overrides in both directions for operators who know better.
+	// No token means no auth, so default to loopback-only rather than exposing
+	// an unauthenticated service to the network. QUERY_BIND overrides either way.
 	bind := os.Getenv("QUERY_BIND")
 	if bind == "" {
 		if token == "" {
@@ -62,8 +60,7 @@ func main() {
 	}
 
 	// Middleware order (outermost first): CORS answers preflights before auth
-	// (preflights never carry Authorization), auth gates everything else, the
-	// timeout scopes the handler work.
+	// runs, since preflights never carry an Authorization header.
 	handler := api.WithCORS(
 		api.WithAuth(
 			api.WithRequestTimeout(server.Routes(), requestTimeout),

@@ -7,22 +7,18 @@ import (
 	"sync"
 )
 
-// Runner executes a collection of Extractors for one repository. Extractors
-// run concurrently because they are pure file readers - there is no shared
-// state. The runner enforces panic recovery per-extractor so one buggy
-// plugin can't take down a whole repo's enrichment pass.
+// Runner executes a set of Extractors for one repo. Extractors run
+// concurrently (no shared state), each with panic recovery so one bad plugin
+// can't sink the whole pass.
 type Runner struct {
 	Extractors []Extractor
 	Log        *log.Logger
-	// MaxParallel caps concurrent extractors per repo. Zero or negative
-	// means run all extractors in parallel.
+	// MaxParallel caps concurrent extractors. Zero or negative means all.
 	MaxParallel int
 }
 
-// Result is the aggregate of running every configured extractor against one
-// repository. Errors are returned per-extractor rather than aggregated so the
-// orchestrator can record them on RepoResult without conflating extractor
-// failures with sync/import failures.
+// Result aggregates one repo's extractor run. Errors are keyed per-extractor
+// so the caller can tell an extractor failure from a sync/import failure.
 type Result struct {
 	Fragments []*Fragment
 	Errors    map[string]error
@@ -30,8 +26,7 @@ type Result struct {
 }
 
 // Run executes every extractor against repoPath and gathers their fragments.
-// One extractor failing never aborts the others; failures appear in the
-// returned Result.Errors keyed by extractor Name.
+// A failing extractor never aborts the others; its error lands in Result.Errors.
 func (r *Runner) Run(ctx context.Context, repoPath, repoName string) Result {
 	res := Result{
 		Errors:   map[string]error{},

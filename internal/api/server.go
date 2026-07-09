@@ -16,14 +16,9 @@ import (
 )
 
 // WithAuth wraps h with static bearer-token authentication. An empty token
-// disables auth entirely (open mode for local development - the caller should
-// log loudly when that happens). /health stays unauthenticated so load
-// balancers and uptime probes work without credentials.
-//
-// A static shared token is deliberately minimal: it keeps the org-wide code
-// index off the open network today, while the eventual repo-permission-aware
-// access control (per-user tokens mapped to Git permissions) slots in here
-// without touching handlers.
+// disables auth (open mode, for local development). /health stays
+// unauthenticated so load balancers and uptime probes work without
+// credentials.
 func WithAuth(h http.Handler, token string) http.Handler {
 	if token == "" {
 		return h
@@ -59,10 +54,8 @@ func WithRequestTimeout(h http.Handler, d time.Duration) http.Handler {
 }
 
 // WithCORS wraps h with a minimal CORS policy for a single trusted origin.
-// origin == "" disables CORS entirely (same-origin deployments - the
-// recommended setup - never need it). The Authorization header forces a
-// preflight, so OPTIONS is answered here; only GET is exposed because the
-// API is read-only.
+// origin == "" disables CORS (same-origin deployments don't need it). The
+// Authorization header forces a preflight, so OPTIONS is answered here.
 func WithCORS(h http.Handler, origin string) http.Handler {
 	if origin == "" {
 		return h
@@ -94,7 +87,6 @@ func NewServer(svc *query.Service) *Server {
 // Routes returns the HTTP handler with all read-only query routes mounted.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
-	// existing routes
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /repos", s.listRepos)
 	mux.HandleFunc("GET /search", s.search)
@@ -104,10 +96,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /blast-radius/{symbol}", s.blastRadius)
 	mux.HandleFunc("GET /path", s.shortestPath)
 
-	// repository onboarding
 	mux.HandleFunc("GET /overview/{repo}", s.repositoryOverview)
 
-	// extractor-backed routes
 	mux.HandleFunc("GET /dependencies/{repo}", s.findDependencies)
 	mux.HandleFunc("GET /dependents/{dep}", s.findDependents)
 	mux.HandleFunc("GET /routes", s.findRoutes)
@@ -115,10 +105,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /sql/object", s.findSQLObject)
 	mux.HandleFunc("GET /glue/jobs", s.findGlueJobs)
 
-	// hotspot ranking (UC-7)
 	mux.HandleFunc("GET /hotspots", s.findHotspots)
 
-	// relevance feedback (the brief's quality metric)
 	mux.HandleFunc("POST /feedback", s.submitFeedback)
 	mux.HandleFunc("GET /feedback/stats", s.feedbackStats)
 	return mux
@@ -129,8 +117,7 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 }
 
 // parseRepos reads the optional repository scope from a request: `repos` is
-// comma-separated; a legacy single `repo` value is merged in so existing
-// clients (the MCP server sends repo=) keep working unchanged.
+// comma-separated, and a single `repo` value merges in alongside it.
 func parseRepos(q url.Values) []string {
 	raw := q.Get("repos")
 	if v := q.Get("repo"); v != "" {
@@ -337,9 +324,8 @@ func (s *Server) findHotspots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// submitFeedback records one thumbs up/down. The only write endpoint on an
-// otherwise read-only API; the body is size-capped and every field is
-// validated/truncated in the service layer.
+// submitFeedback records one thumbs up/down; the only write endpoint on an
+// otherwise read-only API. Body is size-capped and validated downstream.
 func (s *Server) submitFeedback(w http.ResponseWriter, r *http.Request) {
 	var f query.Feedback
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))

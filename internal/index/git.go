@@ -12,15 +12,11 @@ import (
 	"time"
 )
 
-// GitSyncer is the default Syncer: it shells out to the local `git` binary.
-// Authentication is whatever the user's git is configured for (SSH keys,
-// credential helpers, etc.) - the indexer never touches credentials.
-//
-// All subprocesses run with credential prompts disabled (GIT_TERMINAL_PROMPT=0,
-// BatchMode SSH) so a missing key surfaces as a fast error instead of hanging
-// until the per-command timeout fires. On unix, cancellation kills the entire
-// process group via process_unix.go so long-running clone/fetch subprocesses
-// aren't orphaned.
+// GitSyncer is the default Syncer: it shells out to the local `git` binary,
+// using whatever auth the host's git is already configured for. Subprocesses
+// run with credential prompts disabled so a missing key fails fast instead of
+// hanging; on unix, cancellation kills the whole process group so a
+// long-running clone or fetch can't be orphaned.
 type GitSyncer struct {
 	Timeout time.Duration
 }
@@ -53,14 +49,13 @@ func (g *GitSyncer) Sync(ctx context.Context, repo Repository, dest string) (str
 }
 
 func (g *GitSyncer) clone(ctx context.Context, repo Repository, dest string) error {
-	// If the directory exists but is not a git repo (e.g. partial previous
-	// clone interrupted), refuse to clobber it; operator should clean up.
+	// A non-empty dir that isn't a git repo is likely a partial prior clone;
+	// refuse to clobber it.
 	if entries, err := os.ReadDir(dest); err == nil && len(entries) > 0 {
 		return fmt.Errorf("clone target %s is non-empty and not a git repo; remove it manually before retrying", dest)
 	}
-	// Shallow single-branch clone: the indexer only ever reads the branch
-	// tip, and full history across dozens of org repos is pure waste. Later
-	// fetches into a shallow clone stay shallow.
+	// Shallow single-branch clone: only the branch tip is needed, and full
+	// history across dozens of repos would be wasted disk and time.
 	args := []string{"clone", "--depth", "1", "--single-branch", "--branch", repo.Branch, "--", repo.URL, dest}
 	if _, err := g.run(ctx, "", "git", args...); err != nil {
 		return fmt.Errorf("clone %s: %w", repo.URL, err)
@@ -69,15 +64,13 @@ func (g *GitSyncer) clone(ctx context.Context, repo Repository, dest string) err
 }
 
 func (g *GitSyncer) update(ctx context.Context, repo Repository, dest string) error {
-	// Sanity-check the on-disk repo with a cheap call; this catches half-broken
-	// .git directories (interrupted prior clones, manual deletes) early instead
-	// of bubbling up a misleading error from a deeper command.
+	// Cheap sanity check catches a half-broken .git dir early, with a clearer
+	// error than a deeper command would give.
 	if _, err := g.run(ctx, dest, "git", "rev-parse", "--git-dir"); err != nil {
 		return fmt.Errorf("corrupt clone at %s (rm and re-run to heal): %w", dest, err)
 	}
-	// Verify the existing clone points at the same remote URL. If a repo's URL
-	// changes (e.g. ownership transfer), refuse to silently re-sync against
-	// the wrong remote - surface it so the operator can remediate.
+	// Refuse to sync if the remote URL changed underneath us - surface it
+	// instead of silently updating against the wrong repo.
 	out, err := g.run(ctx, dest, "git", "remote", "get-url", "origin")
 	if err != nil {
 		return fmt.Errorf("read remote: %w", err)
@@ -114,10 +107,7 @@ func (g *GitSyncer) run(ctx context.Context, workdir, name string, args ...strin
 	if workdir != "" {
 		cmd.Dir = workdir
 	}
-	// GIT_TERMINAL_PROMPT=0 makes missing credentials fail fast instead of
-	// hanging on a prompt; BatchMode does the same for SSH. No ASKPASS
-	// override - hardcoding /bin/echo breaks on Windows and adds nothing
-	// once prompts are disabled.
+	// Disable credential prompts so a missing key fails fast instead of hanging.
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10",

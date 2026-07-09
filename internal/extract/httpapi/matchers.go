@@ -5,10 +5,8 @@ import (
 	"strings"
 )
 
-// Each matcher is responsible for ONE framework family. They are deliberately
-// narrow regexes - the framework's own canonical method names. False positives
-// (e.g. a variable named `app.get` in unrelated code) are rare and confidence
-// is INFERRED so consumers know these are heuristic.
+// Each matcher handles one framework family with a narrow regex over its
+// canonical method names. False positives are rare, and every edge is INFERRED.
 
 // --- Go: gin / echo / chi ---
 

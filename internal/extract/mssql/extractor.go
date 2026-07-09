@@ -1,14 +1,11 @@
-// Package mssql extracts Microsoft SQL Server schema objects from a repo's
-// .sql files: schemas, tables, views, stored procedures, triggers, and
-// functions (scalar + table-valued). Each object becomes a typed node and
-// the relationships between them - view DEPENDS_ON table, procedure
-// READS_TABLE / WRITES_TABLE / triggers TRIGGERS_ON table - are inferred
-// from the bodies of CREATE/ALTER statements.
+// Package mssql extracts Microsoft SQL Server schema objects from .sql files:
+// schemas, tables, views, procedures, triggers, and functions. Each object
+// becomes a typed node; relationships (view reads table, procedure
+// reads/writes table, trigger on table) are inferred from CREATE/ALTER bodies.
 //
-// The extractor is regex-based; it does NOT parse T-SQL grammar. It is
-// sufficient for inventory and dependency graphs but not for query analysis.
-// Confidence on inferred dependency edges is INFERRED; structural edges
-// (object → schema) are EXTRACTED.
+// It is regex-based, not a T-SQL parser: good for inventory and dependency
+// graphs, not query analysis. Dependency edges are INFERRED; structural
+// object-to-schema edges are EXTRACTED.
 package mssql
 
 import (
@@ -45,12 +42,12 @@ const (
 )
 
 var (
-	createSchemaRe   = regexp.MustCompile(`(?i)CREATE\s+SCHEMA\s+\[?([A-Za-z0-9_]+)\]?`)
-	createTableRe    = regexp.MustCompile(`(?i)CREATE\s+TABLE\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
-	createViewRe     = regexp.MustCompile(`(?i)CREATE\s+(?:OR\s+ALTER\s+)?VIEW\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
+	createSchemaRe    = regexp.MustCompile(`(?i)CREATE\s+SCHEMA\s+\[?([A-Za-z0-9_]+)\]?`)
+	createTableRe     = regexp.MustCompile(`(?i)CREATE\s+TABLE\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
+	createViewRe      = regexp.MustCompile(`(?i)CREATE\s+(?:OR\s+ALTER\s+)?VIEW\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
 	createProcedureRe = regexp.MustCompile(`(?i)CREATE\s+(?:OR\s+ALTER\s+)?PROC(?:EDURE)?\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
-	createTriggerRe  = regexp.MustCompile(`(?i)CREATE\s+(?:OR\s+ALTER\s+)?TRIGGER\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?[\s\S]+?ON\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
-	createFunctionRe = regexp.MustCompile(`(?i)CREATE\s+(?:OR\s+ALTER\s+)?FUNCTION\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
+	createTriggerRe   = regexp.MustCompile(`(?i)CREATE\s+(?:OR\s+ALTER\s+)?TRIGGER\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?[\s\S]+?ON\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
+	createFunctionRe  = regexp.MustCompile(`(?i)CREATE\s+(?:OR\s+ALTER\s+)?FUNCTION\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
 
 	// Body scans for cross-object references.
 	bodySelectRe = regexp.MustCompile(`(?is)\bFROM\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
@@ -61,17 +58,15 @@ var (
 	bodyExecRe   = regexp.MustCompile(`(?is)\bEXEC(?:UTE)?\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
 )
 
-// objectStmt is one CREATE statement parsed from a SQL file. We need the body
-// substring after the header so the dependency-inference regexes only scan
-// inside the object's definition (not the next object's).
+// objectStmt is one CREATE statement. body is the text after the header, so
+// the dependency regexes scan only this object's definition.
 type objectStmt struct {
-	kind   objectKind
-	schema string
-	name   string
-	body   string
-	file   string
-	line   int
-	// extra metadata
+	kind          objectKind
+	schema        string
+	name          string
+	body          string
+	file          string
+	line          int
 	triggerTarget [2]string // (schema, table) for triggers
 }
 
@@ -117,11 +112,9 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	return frag, nil
 }
 
-// splitObjects scans a SQL file for CREATE/ALTER statements, identifies the
-// object kind, captures schema + name, and returns the body that follows up
-// to the next CREATE/ALTER or end-of-file. T-SQL doesn't have a clean
-// statement separator without proper parsing; "GO" batch separators and the
-// next CREATE keyword serve as good-enough delimiters here.
+// splitObjects returns each CREATE/ALTER statement with its body up to the next
+// CREATE/ALTER or EOF. Without a real parser, the next CREATE keyword and GO
+// separators act as statement delimiters.
 func splitObjects(text, file string) []objectStmt {
 	var out []objectStmt
 	// Find all top-level CREATE positions in order.
@@ -201,9 +194,8 @@ func splitObjects(text, file string) []objectStmt {
 }
 
 func emit(frag *extract.Fragment, repoName string, s objectStmt) {
-	// For CREATE SCHEMA statements, the schema name is in s.name (the parser
-	// sets it there); for all other CREATE statements, s.schema holds the
-	// schema and we default to "dbo" when none is qualified.
+	// CREATE SCHEMA carries the name in s.name; other statements use s.schema,
+	// defaulting to "dbo" when unqualified.
 	schema := s.schema
 	if s.kind == kindSchema {
 		schema = s.name
@@ -249,8 +241,8 @@ func emit(frag *extract.Fragment, repoName string, s objectStmt) {
 
 	if s.kind == kindTrigger {
 		targetID := fmt.Sprintf("sql::%s::%s.%s", kindTable, s.triggerTarget[0], s.triggerTarget[1])
-		// Forward-declare the target table node so the edge has both endpoints
-		// even if the table was defined in another file.
+		// Forward-declare the target table so the edge resolves even if the
+		// table is defined in another file.
 		frag.AddNode(extract.FragmentNode{
 			ID:    targetID,
 			Label: s.triggerTarget[0] + "." + s.triggerTarget[1],
@@ -274,9 +266,8 @@ func emit(frag *extract.Fragment, repoName string, s objectStmt) {
 	emitBodyRefs(frag, objectID, s)
 }
 
-// deleteFromRe locates the FROM keyword inside DELETE FROM statements so the
-// reads scan (bodySelectRe, which matches every FROM) can skip them - a proc
-// that only deletes from a table must not also get a reads_table edge for it.
+// deleteFromRe marks the FROM in DELETE FROM so the reads scan skips it: a
+// DELETE FROM must not also produce a reads_table edge.
 var deleteFromRe = regexp.MustCompile(`(?is)\bDELETE\s+(FROM)\b`)
 
 func emitBodyRefs(frag *extract.Fragment, sourceID string, s objectStmt) {

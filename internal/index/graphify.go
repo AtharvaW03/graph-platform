@@ -14,25 +14,14 @@ import (
 	"time"
 )
 
-// ExecGraphifier runs an external extractor command (the locally-installed
-// `graphify` CLI by default, invoked as `graphify update <repo_path>`) and
-// resolves the produced graph.json inside the repository's own
-// graphify-out/ directory.
+// ExecGraphifier runs an external extractor command (by default the
+// `graphify` CLI, invoked as `graphify update <repo_path>`) and resolves the
+// produced graph.json inside the repository's own graphify-out/ directory.
 //
-// `update` is graphify's incremental, AST-only-by-default workflow per
-// docs/graphify/ ("re-extract only changed files",
-// "auto-rebuild on git commit (AST only, no API cost)"). This wrapper
-// matches that model:
-//   - the command runs from repoPath as its working directory
-//   - the {repo_path} placeholder is substituted into Args; {out_dir} is no
-//     longer a valid placeholder (update has no --out flag)
-//   - the post-run output is located at <repoPath>/<OutputFile>
-//   - the pre-run output is NOT deleted - `update` consumes the prior
-//     graph.json to do incremental updates, so wiping it would force a full
-//     re-extract every cycle and kill incremental performance
-//   - the post-run file must exist and be non-empty for the run to be
-//     considered successful; this catches a graphify that exited 0 without
-//     producing output
+// The {repo_path} placeholder is substituted into Args; the command runs
+// with repoPath as its working directory. Prior output is never deleted -
+// `update` consumes it to do an incremental run - and the post-run file must
+// exist and be non-empty for the run to count as successful.
 type ExecGraphifier struct {
 	Command    string
 	Args       []string
@@ -112,18 +101,13 @@ func (g *ExecGraphifier) Generate(ctx context.Context, repoPath string) (string,
 	return produced, nil
 }
 
-// graphifyEnv returns the environment for the graphify subprocess: the
-// daemon's own environment plus headless-indexer defaults, each applied only
-// when the operator has NOT already set it (so deployment env overrides win).
-//
-//   - GRAPHIFY_VIZ_NODE_LIMIT=0 - skip the graph.html render entirely; we only
-//     consume graph.json, so laying out and serializing an HTML viz every cycle
-//     is wasted work (0 disables it unconditionally per graphify's own docs).
-//   - PYTHONHASHSEED=0 - deterministic Leiden community assignment across
-//     cycles, matching what graphify's own git hooks set.
-//   - GRAPHIFY_MAX_GRAPH_BYTES=2GB - lift graphify's 512 MiB graph.json cap so
-//     reading a large repo's prior graph.json on an incremental run doesn't
-//     hard-fail the extraction step.
+// graphifyEnv returns the daemon's environment plus headless-indexer
+// defaults, applied only where the operator hasn't already set them:
+//   - GRAPHIFY_VIZ_NODE_LIMIT=0: skip the HTML viz render, since only
+//     graph.json is consumed downstream.
+//   - PYTHONHASHSEED=0: deterministic community assignment across cycles.
+//   - GRAPHIFY_MAX_GRAPH_BYTES=2GB: raise graphify's default 512 MiB cap so
+//     a large repo's incremental read doesn't hard-fail.
 func graphifyEnv(base []string) []string {
 	seen := make(map[string]bool, len(base))
 	for _, kv := range base {
@@ -144,11 +128,9 @@ func graphifyEnv(base []string) []string {
 	return out
 }
 
-// tailWriter buffers the LAST `max` bytes of writes so subprocess output can
-// be quoted in error messages without growing unbounded for chatty tools.
-// Goroutine-safe because cmd.Stdout and cmd.Stderr are both wired to the
-// same instance via MultiWriter and the exec package's two output goroutines
-// write concurrently.
+// tailWriter buffers the last `max` bytes written so subprocess output can be
+// quoted in error messages without growing unbounded. Safe for concurrent
+// writes since cmd.Stdout/Stderr both feed it via MultiWriter.
 type tailWriter struct {
 	mu  sync.Mutex
 	buf bytes.Buffer

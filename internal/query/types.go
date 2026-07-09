@@ -118,11 +118,9 @@ type GlueJobInfo struct {
 	File     string   `json:"file,omitempty"`
 }
 
-// RepositoryOverview is the aggregated onboarding snapshot for one repository.
-// It is built entirely from the indexed graph in Neo4j (no source-file access)
-// by aggregating a handful of focused queries plus the existing routes and
-// dependencies query logic. The response is structured data, not prose - the
-// caller is expected to turn it into natural-language onboarding.
+// RepositoryOverview is the aggregated onboarding snapshot for one
+// repository, built entirely from the indexed graph in Neo4j. The response
+// is structured data, not prose.
 type RepositoryOverview struct {
 	Repository   RepoMetadata      `json:"repository"`
 	Architecture ArchitectureInfo  `json:"architecture"`
@@ -143,7 +141,7 @@ type LabeledCount struct {
 	Count int    `json:"count"`
 }
 
-// RepoMetadata is section 1: repository identity plus graph size and the
+// RepoMetadata is repository identity plus graph size and the
 // label/language distributions that characterize it.
 type RepoMetadata struct {
 	Name              string         `json:"name"`
@@ -153,8 +151,8 @@ type RepoMetadata struct {
 	NodeKinds         []LabeledCount `json:"node_kinds"`
 }
 
-// ArchitectureInfo is section 2: a synthesized high-level summary plus the
-// major Graphify communities ordered by size (largest components first).
+// ArchitectureInfo is a synthesized high-level summary plus the major
+// communities ordered by size (largest first).
 type ArchitectureInfo struct {
 	Summary     string             `json:"summary"`
 	Communities []CommunitySummary `json:"communities"`
@@ -171,8 +169,8 @@ type CommunitySummary struct {
 	SampleMembers []string `json:"sample_members"`
 }
 
-// EntryPoint is section 3: an executable main, server, or startup/bootstrap
-// function. Kind is one of executable_main | server | bootstrap.
+// EntryPoint is an executable main, server, or startup/bootstrap function.
+// Kind is one of executable_main | server | bootstrap.
 type EntryPoint struct {
 	Name   string   `json:"name"`
 	Kind   string   `json:"kind"`
@@ -181,15 +179,15 @@ type EntryPoint struct {
 	Labels []string `json:"labels"`
 }
 
-// ModuleInfo is section 4: one package/directory with its approximate size.
+// ModuleInfo is one package/directory with its approximate size.
 type ModuleInfo struct {
 	Package   string `json:"package"`
 	NodeCount int    `json:"node_count"`
 	Functions int    `json:"functions"`
 }
 
-// HTTPAPISummary is section 5: route count plus method distribution and
-// endpoints grouped by path prefix.
+// HTTPAPISummary is route count plus method distribution and endpoints
+// grouped by path prefix.
 type HTTPAPISummary struct {
 	RouteCount int            `json:"route_count"`
 	Methods    []LabeledCount `json:"methods"`
@@ -203,8 +201,8 @@ type RouteGroup struct {
 	Methods []string `json:"methods"`
 }
 
-// KafkaSummary is section 6: topics plus the producers and consumers wired to
-// them within this repository.
+// KafkaSummary is topics plus the producers and consumers wired to them
+// within this repository.
 type KafkaSummary struct {
 	Topics    []string         `json:"topics"`
 	Producers []string         `json:"producers"`
@@ -212,7 +210,7 @@ type KafkaSummary struct {
 	ByTopic   []KafkaTopicInfo `json:"by_topic,omitempty"`
 }
 
-// SQLSummary is section 7: SQL objects grouped by kind.
+// SQLSummary is SQL objects grouped by kind.
 type SQLSummary struct {
 	Schemas    []string `json:"schemas"`
 	Tables     []string `json:"tables"`
@@ -222,16 +220,16 @@ type SQLSummary struct {
 	Triggers   []string `json:"triggers"`
 }
 
-// DependencySummary is section 8: internal (cross-repo) targets, external
-// packages, and the ecosystems they cluster into.
+// DependencySummary is internal (cross-repo) targets, external packages, and
+// the ecosystems they cluster into.
 type DependencySummary struct {
 	InternalRepos []string         `json:"internal_repos"`
 	External      []DependencyEdge `json:"external"`
 	TopEcosystems []LabeledCount   `json:"top_ecosystems"`
 }
 
-// ComponentInfo is section 9: one highest-degree hub node (a god node), the
-// core abstraction other code clusters around.
+// ComponentInfo is one highest-degree hub node, the core abstraction other
+// code clusters around.
 type ComponentInfo struct {
 	Name      string   `json:"name"`
 	Path      string   `json:"path"`
@@ -240,9 +238,8 @@ type ComponentInfo struct {
 	Labels    []string `json:"labels"`
 }
 
-// ReadingStep is one bucket of section 10's suggested reading order. Category
-// is one of entry_points | core_packages | services | infrastructure |
-// utilities. Items are graph-derived names to read in that phase.
+// ReadingStep is one bucket of the suggested reading order. Category is one
+// of entry_points | core_packages | services | infrastructure | utilities.
 type ReadingStep struct {
 	Category string   `json:"category"`
 	Why      string   `json:"why"`

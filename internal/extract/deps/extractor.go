@@ -10,23 +10,16 @@ import (
 	"graph-platform/internal/extract"
 )
 
-// Extractor scans a repo for known dependency manifests and emits a unified
-// Graphify-compatible fragment describing every external dependency the
-// repo declares. It is the platform's analogue of graphify's own apm.yml /
-// go.mod / pyproject.toml / pom.xml extraction (which only covers 4
-// manifest types) - extended to cover 13 ecosystems.
+// Extractor scans a repo for dependency manifests and emits a fragment of
+// Package nodes and depends_on edges, covering 13 ecosystems.
 type Extractor struct {
-	// OrgPrefixes are package-name prefixes that identify "internal" repos
-	// in the org's package namespace. A dep that matches a prefix produces
-	// an additional Repository→Repository edge so cross-repo dependency
-	// queries become one-hop traversals.
-	//
-	// Example: "github.com/example-org/".
+	// OrgPrefixes are package-name prefixes identifying internal repos. A dep
+	// that matches one gets an extra repo-to-repo edge so cross-repo dependency
+	// queries are one hop. Example: "github.com/example-org/".
 	OrgPrefixes []string
 
-	// MaxManifests caps the number of manifest files inspected per repo
-	// (defensive against monorepos with thousands of nested manifests).
-	// Zero or negative means no cap.
+	// MaxManifests caps manifest files inspected per repo (guards against
+	// monorepos with thousands of nested manifests). Zero or less means no cap.
 	MaxManifests int
 }
 
@@ -76,10 +69,8 @@ var dispatchByExt = []extEntry{
 	{".vbproj", parseDotNetProj},
 }
 
-// Extract walks repoPath, dispatches each manifest to its parser, and emits
-// one Package node per unique (ecosystem, name) pair plus DEPENDS_ON edges
-// from the repo. The repoName argument is used as the source side of every
-// DEPENDS_ON edge so the relationship is anchored to (:Repository {name}).
+// Extract walks repoPath, dispatches each manifest to its parser, and emits one
+// Package node per (ecosystem, name) plus DEPENDS_ON edges from the repo.
 func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*extract.Fragment, error) {
 	frag := extract.NewFragment(e.Name())
 	if repoPath == "" {

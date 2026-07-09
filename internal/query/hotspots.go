@@ -12,11 +12,8 @@ const (
 	hotspotDefaultLimit = 25
 	hotspotMaxLimit     = 100
 
-	// hotspotCacheTTL bounds staleness of the cached org-wide ranking. The
-	// underlying data only changes when a repo re-indexes, so a few minutes
-	// of staleness is invisible to users while making the page open-cheap
-	// even with hundreds of repos: at most one full aggregation per TTL
-	// window instead of one per visitor.
+	// hotspotCacheTTL bounds staleness of the cached org-wide ranking; the data
+	// only changes on re-index, so a few minutes is invisible.
 	hotspotCacheTTL = 5 * time.Minute
 )
 
@@ -54,10 +51,8 @@ func (c *hotspotCache) put(limit int, nodes []HotspotNode) {
 	c.entries[limit] = hotspotCacheEntry{at: c.now(), nodes: nodes}
 }
 
-// hotspotRelations are the dependency-bearing relationship types counted for
-// fan-in. Structural relations (CONTAINS, HAS_METHOD, DECLARES, IN_SCHEMA,
-// EXPOSES_ROUTE, SCHEDULED) are excluded: a file "containing" fifty functions
-// is not fifty pieces of code depending on it.
+// hotspotRelations are the dependency-bearing relations counted for fan-in.
+// Structural relations (CONTAINS, HAS_METHOD, DECLARES, ...) are excluded.
 var hotspotRelations = []string{
 	"CALLS", "REFERENCES", "EMBEDS", "HANDLED_BY",
 	"DEPENDS_ON", "DEPENDS_ON_REPO",

@@ -9,17 +9,13 @@ import (
 	"strings"
 )
 
-// defaultMaxGraphBytes caps the graph.json size Load will read into memory.
-// A JSON decode expands to several times the file size in live Go structs, so
-// an unbounded read of a pathologically large graph.json is an OOM risk. This
-// mirrors graphify's own GRAPHIFY_MAX_GRAPH_BYTES knob (and honors the same
-// env var), so raising the limit for a big monorepo is a single setting on both
-// the extractor subprocess and the importer.
+// defaultMaxGraphBytes caps the graph.json size Load will read; a JSON decode
+// expands to several times the file size in memory. Overridable via
+// GRAPHIFY_MAX_GRAPH_BYTES (same env var graphify uses).
 const defaultMaxGraphBytes = 2 << 30 // 2 GiB
 
-// Load reads and parses a graph.json file, refusing files larger than the
-// configured limit (GRAPHIFY_MAX_GRAPH_BYTES, default 2 GiB) rather than risking
-// an out-of-memory decode.
+// Load reads and parses a graph.json file, refusing files over the configured
+// limit (GRAPHIFY_MAX_GRAPH_BYTES, default 2 GiB).
 func Load(path string) (*Graph, error) {
 	limit := maxGraphBytes()
 
@@ -33,9 +29,8 @@ func Load(path string) (*Graph, error) {
 		return nil, fmt.Errorf("graph.json is %d bytes, exceeds limit of %d (raise GRAPHIFY_MAX_GRAPH_BYTES)", fi.Size(), limit)
 	}
 
-	// LimitReader is a belt-and-suspenders backstop in case Stat under-reports
-	// (e.g. a file still being written): read one byte past the limit so we can
-	// detect an overflow rather than silently truncating the JSON.
+	// Read one byte past the limit so an overflow is detectable rather than a
+	// silent truncation, in case Stat under-reported.
 	data, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
@@ -51,9 +46,8 @@ func Load(path string) (*Graph, error) {
 	return &graph, nil
 }
 
-// maxGraphBytes returns the graph.json size limit, honoring GRAPHIFY_MAX_GRAPH_BYTES
-// (accepts a plain byte count or a KB/MB/GB suffix, matching graphify) and
-// falling back to the default when unset or unparseable.
+// maxGraphBytes returns the size limit from GRAPHIFY_MAX_GRAPH_BYTES (plain
+// bytes or a KB/MB/GB suffix), or the default when unset or unparseable.
 func maxGraphBytes() int64 {
 	if v := os.Getenv("GRAPHIFY_MAX_GRAPH_BYTES"); v != "" {
 		if n, err := parseByteSize(v); err == nil && n > 0 {

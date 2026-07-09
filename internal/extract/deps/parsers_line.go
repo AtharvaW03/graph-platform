@@ -5,9 +5,8 @@ import (
 	"strings"
 )
 
-// parseGoMod handles Go modules. We look at `require` blocks AND inline
-// `require` lines. Indirect deps (`// indirect` suffix) are extracted with
-// scope="indirect" so consumers can filter them out.
+// parseGoMod handles Go modules: both `require` blocks and inline `require`
+// lines. Indirect deps get scope="indirect" so consumers can filter them.
 func parseGoMod(_, contents string) ([]Dep, error) {
 	var deps []Dep
 	inBlock := false

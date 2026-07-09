@@ -114,8 +114,7 @@ func TestRunWithGraphSequenceAndSummary(t *testing.T) {
 	if f.linksRepo != "svc" || f.linksCommit != "abc123" {
 		t.Errorf("links got repo=%q commit=%q", f.linksRepo, f.linksCommit)
 	}
-	// The run token must be non-empty and identical across nodes, links, and
-	// sweep - the sweep only spares this run's writes if they share its token.
+	// Run token must be non-empty and identical across nodes, links, and sweep.
 	if f.nodesRun == "" {
 		t.Error("run token is empty in sweep mode")
 	}

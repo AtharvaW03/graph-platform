@@ -18,16 +18,12 @@ const (
 	shortestPathHopsMax = 15
 	searchLimit         = 100
 
-	// symbolLimit caps result sets on the symbol/caller/callee/blast-radius
-	// queries. Without a LIMIT, a hub symbol (a logger, a base class) can
-	// return tens of thousands of rows that Collect() buffers in memory on
-	// both Neo4j and this service.
+	// symbolLimit caps result sets so a hub symbol can't return tens of
+	// thousands of rows.
 	symbolLimit = 500
 
-	// txTimeout bounds every read transaction server-side. It is the backstop
-	// against runaway traversals (blast-radius path enumeration in particular):
-	// Neo4j kills the query when the timeout elapses instead of letting one
-	// request pin the database indefinitely.
+	// txTimeout bounds every read transaction server-side so a runaway
+	// traversal can't pin the database.
 	txTimeout = 30 * time.Second
 )
 
@@ -48,17 +44,10 @@ func (s *Service) read(ctx context.Context, fn func(tx driver.ManagedTransaction
 }
 
 // Search returns nodes whose name or norm_name contains q (case-insensitive),
-// ordered by match quality (exact > prefix > contains) then by name length.
-//
-// The query compares against the pre-lowercased name_lower / norm_name_lower
-// columns (indexed; see neo4j.EnsureConstraints) rather than wrapping the
-// stored value in toLower(), which would defeat the index and force a full
-// label scan. The search term is lowercased here in Go.
-//
-// repos, when non-empty, scopes matches to those repositories. The filter is
-// on the indexed n.repo property, so org-global shared nodes (topics,
-// packages, SQL objects - which carry no repo) drop out of scoped results;
-// they have dedicated cross-repo pages and are inherently unscopable.
+// ordered by match quality (exact > prefix > contains) then name length. It
+// matches the indexed name_lower/norm_name_lower columns; the term is
+// lowercased here. repos, when non-empty, scopes to those repos - shared nodes
+// carry no repo and drop out of scoped results.
 func (s *Service) Search(ctx context.Context, q string, repos []string) ([]SearchResult, error) {
 	if q == "" {
 		return []SearchResult{}, nil
@@ -165,9 +154,8 @@ LIMIT $limit
 	return out.([]SymbolResult), nil
 }
 
-// FindCallers returns every function with a CALLS edge pointing at the
-// symbol. repos non-empty scopes to callees defined in those repos (CALLS
-// edges are intra-repo, so this bounds both endpoints).
+// FindCallers returns every function with a CALLS edge into the symbol. repos
+// non-empty scopes to callees in those repos.
 func (s *Service) FindCallers(ctx context.Context, symbol string, repos []string) ([]CallEdge, error) {
 	if symbol == "" {
 		return []CallEdge{}, nil
@@ -265,13 +253,9 @@ func (s *Service) BlastRadius(ctx context.Context, symbol string, depth int, rep
 		depth = maxBlastDepth
 	}
 
-	// The variable-length path depth cannot be parameterized in Cypher.
-	// depth is bounded by the clamp above, so string-formatting it is safe.
-	// Because the query aggregates to distinct reachable nodes with
-	// min(length(p)), the planner uses a pruning BFS expansion (visits each
-	// node once per level) rather than enumerating every path. The start
-	// anchor is index-backed via start.name_lower; the LIMIT and the
-	// transaction timeout in read() bound the traversal.
+	// depth can't be a Cypher parameter; it's clamped above, so formatting it
+	// in is safe. Aggregating to distinct nodes with min(length(p)) makes the
+	// planner use a pruning BFS rather than enumerate every path.
 	cypher := fmt.Sprintf(`
 MATCH (start:Entity)
 WHERE (start.name_lower = $s OR start.norm_name_lower = $s)
@@ -377,14 +361,13 @@ ORDER BY idx
 // doesn't yet produce.
 var ErrNotImplemented = errors.New("not implemented")
 
-// FindRepositoryDependencies will eventually return cross-repo dependency
-// edges. The importer doesn't emit those yet, so this is a deliberate stub.
+// FindRepositoryDependencies will return cross-repo dependency edges once the
+// importer emits them; stub for now.
 func (s *Service) FindRepositoryDependencies(ctx context.Context, repo string) ([]SymbolResult, error) {
 	return nil, ErrNotImplemented
 }
 
-// orEmpty normalizes a nil repo filter to an empty slice: the driver needs a
-// concrete list for $repos, and size($repos) = 0 is the "no scope" signal.
+// orEmpty normalizes a nil repo filter to an empty slice for the driver.
 func orEmpty(xs []string) []string {
 	if xs == nil {
 		return []string{}

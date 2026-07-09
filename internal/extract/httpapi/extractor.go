@@ -1,24 +1,15 @@
-// Package httpapi extracts HTTP routes exposed by a repository across the
-// major backend frameworks: gin/echo/chi/mux/net-http (Go), Spring
-// (Java/Kotlin), Express (JS/TS), Flask/FastAPI/Django (Python), and ASP.NET
-// attributes (.NET).
+// Package httpapi extracts HTTP routes across the major backend frameworks:
+// gin/echo/chi/mux/net-http (Go), Spring (Java/Kotlin), Express (JS/TS),
+// Flask/FastAPI/Django (Python), and ASP.NET (.NET).
 //
-// Two complementary strategies:
+// Two strategies: literal matchers (matchers.go) for string-literal paths at
+// the call site, and Go constant resolution (this file) for routes registered
+// through identifiers, e.g. router.POST(constants.XxxRoute, h) with nested
+// Group() prefixes. Group prefixes are chained only within one file; a group
+// passed across a function boundary loses its parent prefix (the route still
+// surfaces, with a partial path).
 //
-//  1. Literal matchers (matchers.go): regexes that fire when the route path
-//     is a string literal at the registration call site.
-//  2. Go constant resolution (this file): many services register routes
-//     through identifiers (router.POST(constants.UpdateLimitRoute, h)) with
-//     nested Group(constants.XxxRoute) prefixes, so a pre-pass collects
-//     string constants across the repo and a post-pass resolves identifier
-//     args and group-prefix chains. Group prefixes are
-//     only chained within a single file - a group passed across a function
-//     boundary loses its parent prefix (the route still surfaces, with a
-//     partial path).
-//
-// The extractor is intentionally heuristic - full-grammar parsing of every
-// supported framework would balloon the codebase. Confidence on every
-// emitted edge is INFERRED, reflecting the heuristic nature.
+// The extractor is heuristic, so every emitted edge is INFERRED.
 package httpapi
 
 import (
@@ -42,19 +33,14 @@ func New() *Extractor { return &Extractor{MaxFileBytes: 2 * 1024 * 1024} }
 
 func (e *Extractor) Name() string { return "httpapi" }
 
-// route is the unified shape every language-specific matcher returns.
+// route is the shape every matcher returns.
 type route struct {
 	Method  string // GET | POST | PUT | PATCH | DELETE | HEAD | OPTIONS | ANY
 	Path    string
 	Handler string // empty if not statically resolvable
 	Line    int
-	// Source is where the route was discovered. Empty (sourceCode) means a
-	// source-scanning matcher inferred it; sourceOpenAPI means it came from a
-	// committed spec. It drives the emitted confidence tier and metadata.
-	Source string
-	// Tags carries an OpenAPI operation's tags (empty for code routes),
-	// preserved on the node for business/domain grouping in the UI.
-	Tags []string
+	Source  string   // sourceCode (inferred) or sourceOpenAPI (from a spec)
+	Tags    []string // OpenAPI operation tags; empty for code routes
 }
 
 const (
@@ -62,23 +48,18 @@ const (
 	sourceOpenAPI = "openapi"
 )
 
-// heldRoute is one discovered route plus the file it was found in, buffered so
-// the code-derived and spec-derived sets can be reconciled before any node is
-// emitted (see reconcileRoutes).
+// heldRoute is one route plus its file, buffered so code and spec routes can
+// be reconciled before any node is emitted.
 type heldRoute struct {
 	file string
 	r    route
 }
 
-// matcher fingerprints a single source file by extension and applies the
-// matching framework's regex set. Each language family lives in its own file.
+// matcher applies one framework's regex set to a source line.
 type matcher func(line string, lineNum int) []route
 
-// matchers per file extension. Each entry is a NON-OVERLAPPING set: matchGin
-// covers gin / echo / chi-upper / generic recv.METHOD patterns; matchChi
-// supplements with chi's lowercase aliases; matchGorillaMux and matchNetHTTP
-// catch their respective specific shapes. Duplication across matchers would
-// produce duplicate route nodes (caught only by Fragment.AddNode's dedup).
+// matchers per file extension. Each list is non-overlapping so the same route
+// isn't emitted twice.
 var matchers = map[string][]matcher{
 	".go":   {matchGin, matchChi, matchGorillaMux, matchNetHTTP},
 	".py":   {matchFlaskFastAPI, matchDjango},
@@ -118,32 +99,22 @@ type goPendingRoute struct {
 }
 
 var (
-	// `AdminRoute = "/admin"` inside const blocks, plus `var X = "..."` and
-	// `const X = "..."` single declarations. Deliberately does NOT match `:=`
-	// locals - route constants live at package level.
+	// Package-level string constants: `X = "..."`, `const X = "..."`,
+	// `var X = "..."`. Does not match `:=` locals.
 	goConstStrRe = regexp.MustCompile(`^\s*(?:var\s+|const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:string\s*)?=\s*"([^"]+)"`)
-	// `v := recv.Group(arg, ...)` - arg may be an identifier or a literal.
+	// `v := recv.Group(arg, ...)`; arg may be an identifier or a literal.
 	goGroupDefRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*:?=\s*([A-Za-z_]\w*)\.Group\s*\(\s*([A-Za-z_][\w.]*|"[^"]*")`)
-	// `recv.POST(pkg.Identifier, handler)` - uppercase verbs only, identifier
-	// arg only; literal args are matchGin's job and lowercase .Get() is config
-	// getter noise (see matchChi's comment).
+	// `recv.POST(pkg.Identifier, handler)`: uppercase verbs, identifier arg.
+	// Literal args are matchGin's job; lowercase .Get() is config-getter noise.
 	goIdentRouteRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|Any)\s*\(\s*([A-Za-z_][\w.]*)\s*(?:,\s*([A-Za-z0-9_.]+))?`)
 )
 
-// registerGoConst stores a package-level string constant that could hold a
-// route path. Whether a constant actually IS a path is decided by its use,
-// not its spelling: only constants that later appear in route position
-// (recv.METHOD(<const>, ...) or recv.Group(<const>, ...)) are ever resolved,
-// so we capture broadly here and let that usage be the filter. Values are
-// rejected only when they clearly cannot be a path segment - they contain
-// whitespace or look like a full URL.
-//
-// This deliberately does NOT require a leading "/" or a route/path/endpoint
-// name hint. An earlier version did, and it silently dropped every
-// identifier-arg route in repos whose convention is bare path segments with
-// plain constant names (e.g. `Detail = "detail"`, `V2Group = "widgets/v2"`);
-// normalizePath prepends the slash at emit time. First declaration wins on
-// duplicate identifiers across packages.
+// registerGoConst stores a package-level string constant that might hold a
+// route path. Whether it IS one is decided by use, not spelling: only
+// constants that later appear in route position get resolved, so capture
+// broadly and reject only values that can't be a path (whitespace or a URL).
+// A leading "/" or path-like name is not required; normalizePath adds the
+// slash at emit time. First declaration wins on duplicate names.
 func registerGoConst(m map[string]string, name, val string) {
 	if val == "" || strings.ContainsAny(val, " \t") || strings.Contains(val, "://") {
 		return
@@ -167,10 +138,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	groupDefs := map[string]map[string]goGroupDef{} // file -> var -> def
 	var pending []goPendingRoute
 
-	// Code-derived routes are buffered rather than emitted directly so they can
-	// be reconciled against any OpenAPI spec before nodes are created. emit is
-	// the sink every code path (matchers, JVM lookahead, Go const resolution)
-	// funnels into.
+	// Buffer code-derived routes so they can be reconciled against an OpenAPI
+	// spec before any node is created. Every code path funnels through emit.
 	var codeRoutes []heldRoute
 	emit := func(file string, r route) {
 		codeRoutes = append(codeRoutes, heldRoute{file: file, r: r})
@@ -235,8 +204,7 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 				pendingJVM, classPrefix = resolveRequestMapping(emit, rel, line, pendingJVM, classPrefix)
 				if m := requestMappingRe.FindStringSubmatch(line); m != nil {
 					if classDeclRe.MatchString(line) {
-						// Annotation and class declaration on one line
-						// (common in Kotlin): it's a class-level prefix.
+						// Annotation and class decl on one line: class-level prefix.
 						classPrefix = m[1]
 					} else {
 						pendingJVM = &pendingMapping{path: m[1], method: m[2], line: lineNum}
@@ -256,8 +224,7 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		if serr := scanner.Err(); serr != nil {
 			frag.Warn(fmt.Sprintf("%s: scan: %v", rel, serr))
 		}
-		// An annotation still pending at EOF annotated nothing we saw -
-		// emit it as a route rather than dropping it silently.
+		// An annotation still pending at EOF: emit it rather than drop it.
 		if pendingJVM != nil {
 			emitPendingAsRoute(emit, rel, pendingJVM, classPrefix)
 		}
@@ -303,9 +270,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		})
 	}
 
-	// Reconcile code-derived routes with any committed OpenAPI/Swagger spec:
-	// spec routes are authoritative on an exact (method, path) overlap, but
-	// never suppress the undocumented/infra routes only the code path finds.
+	// Reconcile against any OpenAPI/Swagger spec: spec routes win on an exact
+	// (method, path) overlap but never suppress code-only routes.
 	specRoutes := e.openAPIRoutes(repoPath, frag)
 	for _, hr := range reconcileRoutes(codeRoutes, specRoutes) {
 		emitRoute(frag, repoNodeID, repoName, hr.file, hr.r)
@@ -326,9 +292,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	return frag, nil
 }
 
-// pendingMapping is an @RequestMapping annotation whose role - class-level
-// path prefix vs method-level route - is not yet known. Spring reuses the
-// same annotation for both; only the declaration that follows disambiguates.
+// pendingMapping is an @RequestMapping whose role (class-level prefix vs
+// method-level route) isn't known yet; the next declaration disambiguates it.
 type pendingMapping struct {
 	path   string
 	method string // captured RequestMethod.X; empty means ANY
@@ -341,10 +306,9 @@ var (
 )
 
 // resolveRequestMapping advances a pending @RequestMapping against the next
-// line: a class/interface declaration promotes it to the class-level prefix,
-// any other declaration means it was a method-level route (emitted here), and
-// blank lines / comments / stacked annotations keep it pending. Returns the
-// updated pending state and class prefix.
+// line: a class/interface decl makes it the class-level prefix, any other decl
+// makes it a method-level route (emitted here), and blanks/comments/stacked
+// annotations keep it pending.
 func resolveRequestMapping(emit func(string, route), file, line string, pending *pendingMapping, classPrefix string) (*pendingMapping, string) {
 	if pending == nil {
 		return nil, classPrefix
@@ -352,7 +316,7 @@ func resolveRequestMapping(emit func(string, route), file, line string, pending 
 	t := strings.TrimSpace(line)
 	switch {
 	case t == "" || strings.HasPrefix(t, "//") || strings.HasPrefix(t, "*") || strings.HasPrefix(t, "/*") || strings.HasPrefix(t, "@"):
-		return pending, classPrefix // still looking past comments/annotations
+		return pending, classPrefix // still looking
 	case classDeclRe.MatchString(t):
 		return nil, pending.path
 	default:
@@ -393,8 +357,7 @@ func emitRoute(frag *extract.Fragment, repoNodeID, repoName, file string, r rout
 	if source == "" {
 		source = sourceCode
 	}
-	// A route from a committed spec is the authored contract (EXTRACTED); one
-	// inferred by a source-scanning matcher stays INFERRED.
+	// Spec routes are the authored contract (EXTRACTED); code routes stay INFERRED.
 	confidence := extract.ConfidenceInferred
 	if source == sourceOpenAPI {
 		confidence = extract.ConfidenceExtracted
@@ -430,14 +393,10 @@ func emitRoute(frag *extract.Fragment, repoNodeID, repoName, file string, r rout
 	})
 }
 
-// reconcileRoutes merges the code-derived and spec-derived route sets. Spec
-// routes are authoritative: on an exact (method, normalized-path) overlap the
-// code route is dropped in favour of the spec's (correct path, EXTRACTED
-// confidence, tags). Code routes that don't exactly match a spec route are all
-// kept - that's the undocumented/infra surface a spec omits, and the signal
-// that a route is exposed but not documented. Code-vs-code duplicates are left
-// for emitRoute's node-id dedup (which is file-aware), so a repo with no spec
-// is completely unaffected.
+// reconcileRoutes merges the code and spec route sets. On an exact
+// (method, path) overlap the spec route wins; code routes with no spec match
+// are all kept (the undocumented/infra surface). Code-vs-code duplicates fall
+// to emitRoute's file-aware node-id dedup, so a spec-less repo is unaffected.
 func reconcileRoutes(code, spec []heldRoute) []heldRoute {
 	specKeys := make(map[string]bool, len(spec))
 	emitted := make(map[string]bool, len(spec))
@@ -446,31 +405,28 @@ func reconcileRoutes(code, spec []heldRoute) []heldRoute {
 		k := routeKey(s.r.Method, s.r.Path)
 		specKeys[k] = true
 		if emitted[k] {
-			continue // collapse duplicate documentation of the same endpoint
+			continue // same endpoint documented twice
 		}
 		emitted[k] = true
 		out = append(out, s)
 	}
 	for _, c := range code {
 		if specKeys[routeKey(c.r.Method, c.r.Path)] {
-			continue // spec already covers this exact route, authoritatively
+			continue // spec already covers this exact route
 		}
 		out = append(out, c)
 	}
 	return out
 }
 
-// routeKey is the reconciliation identity of a route: method + normalized path,
-// independent of source file. Matches emitRoute's method/path normalization so
-// a spec route and a code route for the same endpoint compare equal.
+// routeKey is a route's reconciliation identity: method + normalized path,
+// matching emitRoute's normalization so a spec and code route compare equal.
 func routeKey(method, path string) string {
 	return strings.ToUpper(method) + " " + normalizePath(path)
 }
 
-// infraPrefixes are path prefixes for operational endpoints (health, metrics,
-// profiling, docs) as opposed to business API surface. Classification is
-// advisory metadata for filtering/grouping in the UI; it does not affect which
-// routes are emitted.
+// infraPrefixes flag operational endpoints (health, metrics, profiling, docs)
+// vs business API surface. Advisory metadata only; doesn't affect emission.
 var infraPrefixes = []string{
 	"/health", "/healthz", "/livez", "/readyz", "/ready", "/live",
 	"/metrics", "/debug/", "/debug", "/actuator", "/swagger", "/openapi",

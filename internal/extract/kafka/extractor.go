@@ -1,19 +1,11 @@
-// Package kafka extracts Kafka topology - topics, producers, consumers -
-// from a repository by scanning source files for the canonical client-library
-// call patterns of each supported language, AND by scanning YAML config files
-// for declared topic names (resources/<env>/kafka_producer.yml and friends).
-// The config scan exists because real services rarely inline topic names at
-// the call site - they read them from config (kafkaProps.TopicName), so the
-// string literal the code patterns need does not exist in the source at all.
+// Package kafka extracts Kafka topology (topics, producers, consumers) from a
+// repository. It scans source for client-library call patterns per language
+// and YAML config for declared topic names, since services usually read topic
+// names from config rather than inlining them at the call site.
 //
-// The resulting fragment emits one KafkaTopic node per unique topic, plus
-// PRODUCES/CONSUMES edges from the repository hub. Topics found in config
-// whose direction cannot be determined (no producer/consumer hint in the
-// filename, key, or ancestor keys) get a REFERENCES edge instead - the topic
-// is real, the role is unknown, and guessing would pollute the topology.
-//
-// This is a strictly heuristic extractor - confidence on every edge is
-// INFERRED for exactly that reason.
+// It emits one KafkaTopic node per topic plus PRODUCES/CONSUMES edges from the
+// repo hub; topics with no direction hint get a REFERENCES edge. Every edge is
+// INFERRED.
 package kafka
 
 import (
@@ -36,37 +28,29 @@ func New() *Extractor { return &Extractor{MaxFileBytes: 2 * 1024 * 1024} }
 
 func (e *Extractor) Name() string { return "kafka" }
 
-// patternSet groups the regexes for one language. Every pattern MUST have a
-// capture group for the topic name - a match without a captured topic emits
-// nothing (there is no node to create), so bare constructor-detection
-// patterns like `new KafkaProducer` would be dead weight and are deliberately
-// not included.
+// patternSet groups the regexes for one language. Every pattern must capture
+// the topic name; a match without one emits nothing.
 type patternSet struct {
 	produces []*regexp.Regexp
 	consumes []*regexp.Regexp
 }
 
 var (
-	// Go: sarama, segmentio/kafka-go, confluent-kafka-go (consumer side only -
-	// confluent producing uses TopicPartition{Topic: &topic}, a pointer that
-	// regex-on-literals cannot resolve; those topics come from the config scan).
+	// Go: sarama, segmentio/kafka-go, confluent-kafka-go. Confluent producing
+	// uses a pointer topic that regex can't resolve; those come from config.
 	goPatterns = patternSet{
 		produces: []*regexp.Regexp{
 			regexp.MustCompile(`ProducerMessage\s*\{[^}]*Topic\s*:\s*"([^"]+)"`),
 			regexp.MustCompile(`Writer\s*\{[^}]*Topic\s*:\s*"([^"]+)"`),
 		},
 		consumes: []*regexp.Regexp{
-			// segmentio/kafka-go: kafka.NewReader(kafka.ReaderConfig{Topic: "..."}) - the
-			// pattern matches both ReaderConfig{} and bare Reader{} initializers.
+			// Matches both ReaderConfig{} and bare Reader{}.
 			regexp.MustCompile(`Reader(?:Config)?\s*\{[^}]*Topic\s*:\s*"([^"]+)"`),
 			regexp.MustCompile(`ConsumeClaim\s*\([^)]*"([^"]+)"`),
-			// confluent-kafka-go: consumer.Subscribe("topic", cb). Bare .Subscribe(
-			// also matches other pub-sub clients (NATS, event buses) - acceptable
-			// here because every edge is INFERRED by design.
+			// Bare .Subscribe( also matches other pub-sub clients; fine since
+			// edges are INFERRED.
 			regexp.MustCompile(`\.Subscribe\s*\(\s*"([^"]+)"`),
-			// confluent-kafka-go: consumer.SubscribeTopics([]string{"a", ...}, cb).
-			// Only the FIRST literal in the list is captured - a multi-topic list
-			// loses the rest, same class of miss as topics passed via variables.
+			// Only the first literal in the topic list is captured.
 			regexp.MustCompile(`\.SubscribeTopics\s*\(\s*\[\]string\s*\{\s*"([^"]+)"`),
 		},
 	}
@@ -120,9 +104,8 @@ var languageDispatch = map[string]patternSet{
 	".py":    pyPatterns,
 }
 
-// configExts are the config-file extensions scanned for declared topic names.
-// YAML only for now - every observed topic declaration in the org's repos
-// lives in resources/**/*.yml. Extend here if .properties/.env usage appears.
+// configExts are the config-file extensions scanned for topic names. YAML only
+// for now; extend if .properties/.env usage appears.
 var configExts = map[string]bool{".yml": true, ".yaml": true}
 
 func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*extract.Fragment, error) {
@@ -173,10 +156,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 			return nil
 		}
 
-		// Scan the whole file (already size-capped above), not line-by-line:
-		// idiomatic struct literals split the pattern across lines
-		// (ProducerMessage{\n    Topic: "x"}), and the [^}]* classes in the
-		// patterns span newlines, so whole-content matching catches them.
+		// Scan the whole file, not line by line: struct literals split the
+		// pattern across lines and the patterns span newlines.
 		body, rerr := os.ReadFile(path)
 		if rerr != nil {
 			frag.Warn(fmt.Sprintf("%s: %v", rel, rerr))
@@ -204,9 +185,7 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		return frag, fmt.Errorf("walk repo: %w", err)
 	}
 
-	// A topic found by both the code scan and the config scan (or by a
-	// producer file and a consumer file) keeps its specific roles; drop the
-	// vague REFERENCES edge when a specific one exists for the same topic.
+	// Drop the vague REFERENCES edge for any topic that also has a specific role.
 	for topic := range referenced {
 		if _, p := produced[topic]; p {
 			delete(referenced, topic)
@@ -217,9 +196,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		}
 	}
 
-	// Emit the repo hub node ourselves: PRODUCES/CONSUMES/REFERENCES edges
-	// hang off it, and relying on the deps extractor to create it would make
-	// this extractor's edges dangle whenever deps is disabled.
+	// Emit the repo hub ourselves so edges don't dangle when the deps extractor
+	// (which also creates it) is disabled.
 	if len(produced) > 0 || len(consumed) > 0 || len(referenced) > 0 {
 		frag.AddNode(extract.FragmentNode{
 			ID:    repoNodeID,
@@ -239,14 +217,11 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 
 // --- YAML config topic extraction ---
 
-// yamlKVRe matches one "key: value" line, tolerating a leading "- " list
-// marker. Quoted keys and multi-line values are out of scope - none of the
-// observed configs use them.
+// yamlKVRe matches one "key: value" line, tolerating a leading "- " marker.
 var yamlKVRe = regexp.MustCompile(`^(\s*)(?:-\s+)?([A-Za-z0-9_.-]+)\s*:\s*(.*)$`)
 
-// topicValueRe accepts realistic Kafka topic names (order-events-v2,
-// user_signups, PAYMENTS) and rejects paths, URLs, ${VAR} templates, and other
-// punctuation-bearing values by construction.
+// topicValueRe accepts plausible topic names and rejects paths, URLs, ${VAR}
+// templates, and other punctuation-bearing values.
 var topicValueRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,}$`)
 
 // notTopics are placeholder/scalar values that pass topicValueRe but are
@@ -255,14 +230,11 @@ var notTopics = map[string]bool{
 	"tbd": true, "true": true, "false": true, "null": true, "none": true,
 }
 
-// scanYAMLTopics walks a YAML file line by line, tracking the ancestor-key
-// stack via indentation, and registers every value under a *topic* key.
-// Direction comes from producer/consumer hints in the filename, the key
-// itself, or any ancestor key; with no hint the topic lands in referenced.
-//
-// Files with no "kafka" in path or content are skipped entirely so that SNS
-// topics, S3 notification topics, and similarly-named keys in unrelated
-// config don't produce phantom KafkaTopic nodes.
+// scanYAMLTopics walks a YAML file line by line, tracking ancestor keys by
+// indentation, and registers values under a topic key. Direction comes from
+// producer/consumer hints in the filename, key, or an ancestor key; absent a
+// hint the topic lands in referenced. Files with no "kafka" in the path or
+// content are skipped so unrelated topic-named keys don't create phantom nodes.
 func scanYAMLTopics(rel, contents string, produced, consumed, referenced map[string]occurrence) {
 	lowerAll := strings.ToLower(contents)
 	if !strings.Contains(strings.ToLower(rel), "kafka") && !strings.Contains(lowerAll, "kafka") {
@@ -303,9 +275,9 @@ func scanYAMLTopics(rel, contents string, produced, consumed, referenced map[str
 	}
 }
 
-// roleMap picks the destination map from producer/consumer hints across the
+// roleMap picks the destination map from producer/consumer hints in the
 // filename, key, and ancestor keys. Conflicting or absent hints fall back to
-// referenced - a real topic with unknown direction beats a guessed direction.
+// referenced.
 func roleMap(file, key string, ancestors []string, produced, consumed, referenced map[string]occurrence) map[string]occurrence {
 	l := strings.ToLower(file + " " + key + " " + strings.Join(ancestors, " "))
 	hasProd := strings.Contains(l, "produc")
@@ -320,8 +292,8 @@ func roleMap(file, key string, ancestors []string, produced, consumed, reference
 	}
 }
 
-// topicValues extracts candidate topic names from a scalar or a flow-style
-// list value ( ["a", "b"] ), stripping quotes and trailing # comments.
+// topicValues extracts candidate topic names from a scalar or flow-style list
+// value, stripping quotes and trailing # comments.
 func topicValues(val string) []string {
 	var raw []string
 	if strings.HasPrefix(val, "[") {
