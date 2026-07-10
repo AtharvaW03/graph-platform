@@ -1,0 +1,26 @@
+# Compose smoke-test config: one small, real public repo so `docker compose
+# up` proves the full pipeline (clone -> graphify -> import) without cloning
+# the whole org. Swap in a real config/repos.yaml for actual use.
+
+repositories:
+  - name: color
+    url: https://github.com/fatih/color.git
+    branch: main
+
+graphify:
+  command: graphify
+  args:
+    - update
+    - "{repo_path}"
+  output_file: graphify-out/graph.json
+  timeout: 20m
+
+extractors:
+  deps: true
+  http_api: true
+  kafka: true
+  mssql: true
+  glue: true
+
+org:
+  prefixes: []

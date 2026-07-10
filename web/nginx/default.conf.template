@@ -1,0 +1,19 @@
+server {
+    listen 80;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Strips /api to match vite.config.ts's dev proxy rewrite, and injects
+    # the bearer token server-side so it never reaches the browser bundle.
+    location /api/ {
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass ${QUERY_SERVICE_URL};
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "Bearer ${QUERY_AUTH_TOKEN}";
+    }
+}
