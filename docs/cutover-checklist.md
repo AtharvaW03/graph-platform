@@ -121,9 +121,16 @@ Small blast radius first: 10-20 repos, not the whole org.
 ---
 
 > **Single writer only.** At no point may two indexers point at the same
-> Neo4j instance. Two writers racing is an undocumented, untested path that
-> silently deletes nodes the other writer still needs - there is no lock or
-> coordination between separate indexer processes across hosts. Before
+> Neo4j instance. Two writers racing silently deletes nodes the other writer
+> still needs. This is now enforced in the database: each indexer acquires a
+> writer lease (`IndexerLease` node, `--lease-ttl`, default 15m) on startup
+> and renews it before every repo, in both one-shot and `--interval` mode; a
+> second indexer refuses to start (or stops immediately on its next renewal)
+> while the lease is held.
+> The freeze step below remains as belt-and-braces - don't rely on the lease
+> alone to skip it. If a crashed indexer leaves a stuck lease (rare - it
+> self-expires after the TTL), `--steal-lease` takes it unconditionally for
+> operator recovery; use it deliberately, not as a routine workaround. Before
 > starting the ECS indexer (step C), confirm the laptop one is fully stopped
 > (step A). Before resuming the laptop one (rollback), confirm the ECS
 > service is at desired-count 0.

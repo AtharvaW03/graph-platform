@@ -77,6 +77,11 @@ type GraphifyConfig struct {
 	Args       []string      `yaml:"args"`
 	OutputFile string        `yaml:"output_file"`
 	Timeout    time.Duration `yaml:"timeout"`
+	// ExpectedVersion, if set, is compared against `<command> --version` once
+	// at startup; a mismatch or failed detection hard-fails before any repo is
+	// processed. Empty means "log whatever's detected and continue" - useful
+	// while a fleet is still converging on one pinned version.
+	ExpectedVersion string `yaml:"expected_version"`
 }
 
 // DefaultConfig returns defaults for fields ApplyDefaults fills in on a

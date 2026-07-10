@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -99,6 +101,63 @@ func (g *ExecGraphifier) Generate(ctx context.Context, repoPath string) (string,
 		return "", fmt.Errorf("expected output at %s is empty\n--- output tail ---\n%s", produced, tail.String())
 	}
 	return produced, nil
+}
+
+// graphifyVersionRe extracts a lenient semver token from `graphify --version`
+// output, which varies between "graphify 0.9.9" and a bare "0.9.9".
+var graphifyVersionRe = regexp.MustCompile(`\d+\.\d+(?:\.\d+)?`)
+
+// parseGraphifyVersion pulls the version substring out of --version output.
+// Returns ("", false) when nothing version-shaped is found.
+func parseGraphifyVersion(output string) (string, bool) {
+	m := graphifyVersionRe.FindString(output)
+	if m == "" {
+		return "", false
+	}
+	return m, true
+}
+
+// checkGraphifyVersion is the pure decision step for CheckGraphifyVersion,
+// factored out so the mismatch/unknown logic is testable without a
+// subprocess. runErr is whatever running `<command> --version` returned;
+// output is its combined stdout+stderr.
+func checkGraphifyVersion(expected, output string, runErr error, log *log.Logger) error {
+	if runErr != nil {
+		if expected == "" {
+			log.Printf("graphify version: unknown (--version failed: %v)", runErr)
+			return nil
+		}
+		return fmt.Errorf("graphify version check failed: could not run --version (%v); expected %s", runErr, expected)
+	}
+
+	detected, ok := parseGraphifyVersion(output)
+	if !ok {
+		if expected == "" {
+			log.Printf("graphify version: unknown (no version string in --version output)")
+			return nil
+		}
+		return fmt.Errorf("graphify version check failed: no version string in --version output; expected %s", expected)
+	}
+
+	if expected == "" {
+		log.Printf("graphify version: %s", detected)
+		return nil
+	}
+	if detected != expected {
+		return fmt.Errorf("graphify version mismatch: detected %s, expected %s", detected, expected)
+	}
+	log.Printf("graphify version: %s (matches expected)", detected)
+	return nil
+}
+
+// CheckGraphifyVersion runs `<command> --version` once and hard-fails on a
+// mismatch against cfg.ExpectedVersion. Call it once at startup, before any
+// repo is processed - native operator drift (a graphify upgraded outside the
+// pinned Docker image) should stop the run, not corrupt a partial one.
+func CheckGraphifyVersion(ctx context.Context, cfg GraphifyConfig, log *log.Logger) error {
+	cmd := exec.CommandContext(ctx, cfg.Command, "--version")
+	out, err := cmd.CombinedOutput()
+	return checkGraphifyVersion(cfg.ExpectedVersion, string(out), err, log)
 }
 
 // graphifyEnv returns the daemon's environment plus headless-indexer

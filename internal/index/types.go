@@ -77,6 +77,12 @@ type RepoResult struct {
 	// A mismatch against Nodes signals silent data loss, e.g. node_key collisions.
 	NodesInGraph int
 	Mismatch     bool
+	// SweepResidueNodes/Rels are what VerifySweepClean found left behind after
+	// SweepStale ran - stale data the sweep should have removed but didn't.
+	// Nonzero means the sweep is broken or a concurrent writer raced this run.
+	SweepResidueNodes int
+	SweepResidueRels  int
+	SweepResidue      bool
 	// ExtractorStats holds per-extractor node/edge counts.
 	ExtractorStats map[string]ExtractorStat
 	// ExtractorErrors maps extractor name to error message; other extractors

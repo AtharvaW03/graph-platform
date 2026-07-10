@@ -2,7 +2,10 @@ package neo4j
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 
 	"graph-platform/internal/graphify"
@@ -98,6 +101,12 @@ func (c *Client) EnsureConstraints(ctx context.Context) error {
 		`CREATE CONSTRAINT repo_name IF NOT EXISTS FOR (r:Repository) REQUIRE r.name IS UNIQUE`,
 		`CREATE TEXT INDEX entity_name_lower IF NOT EXISTS FOR (n:Entity) ON (n.name_lower)`,
 		`CREATE TEXT INDEX entity_norm_name_lower IF NOT EXISTS FOR (n:Entity) ON (n.norm_name_lower)`,
+		// Backs the sweep's shared-node lookups (SweepStale step 3, VerifySweepClean).
+		`CREATE INDEX entity_shared IF NOT EXISTS FOR (n:Entity) ON (n.shared)`,
+		// The writer lease is a singleton row; this constraint is what makes a
+		// concurrent first-ever AcquireLease race safe (MERGE alone can still
+		// double-create without it).
+		`CREATE CONSTRAINT indexer_lease_id IF NOT EXISTS FOR (l:IndexerLease) REQUIRE l.id IS UNIQUE`,
 	}
 	for _, q := range stmts {
 		if _, err := session.Run(ctx, q, nil); err != nil {
@@ -138,9 +147,11 @@ func (c *Client) MergeRepository(ctx context.Context, repo string) error {
 }
 
 // ImportNodes imports all nodes in label-grouped UNWIND batches. commit/runID
-// are stamped on each node for the sweep; pass "" to skip stamping. Returns the
-// graphify-ID to node_key map and per-label counts.
-func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, nodes []graphify.Node) (map[string]string, map[string]int, error) {
+// are stamped on each node for the sweep; pass "" to skip stamping. rewriteAll
+// forces a full property rewrite on every node regardless of content hash -
+// the --force repair path for manual property drift. Returns the graphify-ID
+// to node_key map and per-label counts.
+func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, nodes []graphify.Node, rewriteAll bool) (map[string]string, map[string]int, error) {
 	idToKey := make(map[string]string, len(nodes))
 	labelGroups := make(map[string][]map[string]any)
 	labelCounts := make(map[string]int)
@@ -187,6 +198,7 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, no
 				row[k] = v
 			}
 		}
+		row["hash"] = rowContentHash(row, nodeProps)
 		labelGroups[label] = append(labelGroups[label], row)
 	}
 
@@ -196,7 +208,7 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, no
 			if end > len(rows) {
 				end = len(rows)
 			}
-			if err := c.importNodeBatch(ctx, label, repo, commit, runID, rows[i:end]); err != nil {
+			if err := c.importNodeBatch(ctx, label, repo, commit, runID, rows[i:end], rewriteAll); err != nil {
 				return nil, nil, fmt.Errorf("import nodes (%s): %w", label, err)
 			}
 		}
@@ -205,11 +217,33 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, no
 	return idToKey, labelCounts, nil
 }
 
+// rowContentHash hashes exactly the properties a batch write's SET map would
+// apply, so a re-import with unchanged content can skip the rewrite. Keys are
+// sorted so map build order never affects the hash; %v gives a stable string
+// for the primitive/string/slice values graphify metadata actually produces.
+// Sixteen hex chars (64 bits) is plenty to catch accidental drift - this
+// isn't a security hash, just a cheap change detector.
+func rowContentHash(row map[string]any, keys []string) string {
+	sorted := append([]string(nil), keys...)
+	sort.Strings(sorted)
+	h := sha256.New()
+	for _, k := range sorted {
+		fmt.Fprintf(h, "%s=%v\n", k, row[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// linkHashProps are the row keys hashed for the edge content-change check -
+// the actual content fields, not the endpoints (which are the MERGE key) or
+// provenance stamps (which always update).
+var linkHashProps = []string{"weight", "confidence", "cs", "context"}
+
 // ImportLinks imports all links in relation-grouped UNWIND batches. Each edge
 // is stamped with repo (and commit/runID when set) so the sweep can scope edge
-// deletion per repo. Returns per-relation, skipped-unknown, and
-// skipped-dangling counts.
-func (c *Client) ImportLinks(ctx context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string) (map[string]int, int, int, error) {
+// deletion per repo. rewriteAll forces a full property rewrite regardless of
+// content hash. Returns per-relation, skipped-unknown, and skipped-dangling
+// counts.
+func (c *Client) ImportLinks(ctx context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string, rewriteAll bool) (map[string]int, int, int, error) {
 	relGroups := make(map[string][]map[string]any)
 	relCounts := make(map[string]int)
 	skippedUnknown := 0
@@ -228,14 +262,16 @@ func (c *Client) ImportLinks(ctx context.Context, repo, commit, runID string, li
 			continue
 		}
 		relCounts[rel]++
-		relGroups[rel] = append(relGroups[rel], map[string]any{
+		row := map[string]any{
 			"s":          srcKey,
 			"t":          tgtKey,
 			"weight":     l.Weight,
 			"confidence": l.Confidence,
 			"cs":         l.ConfidenceScore,
 			"context":    l.Context,
-		})
+		}
+		row["hash"] = rowContentHash(row, linkHashProps)
+		relGroups[rel] = append(relGroups[rel], row)
 	}
 
 	for rel, rows := range relGroups {
@@ -244,7 +280,7 @@ func (c *Client) ImportLinks(ctx context.Context, repo, commit, runID string, li
 			if end > len(rows) {
 				end = len(rows)
 			}
-			if err := c.importLinkBatch(ctx, rel, repo, commit, runID, rows[i:end]); err != nil {
+			if err := c.importLinkBatch(ctx, rel, repo, commit, runID, rows[i:end], rewriteAll); err != nil {
 				return nil, 0, 0, fmt.Errorf("import links (%s): %w", rel, err)
 			}
 		}
@@ -313,17 +349,67 @@ RETURN count(n) AS deleted`, params, "sweep stale nodes")
 	}
 
 	// Step 3: reap shared nodes with no remaining Entity edges. CONTAINS edges
-	// from a Repository don't count as references.
-	orphans, err := runCount(`
+	// from a Repository don't count as references. This is an unscoped
+	// full-graph scan, so only run it when this sweep actually deleted
+	// something - in a single-writer world, a shared node can only become
+	// orphaned as the direct result of a node or edge deletion, never by
+	// itself. Skipping it on a no-op re-index avoids that scan cost every cycle.
+	var orphans int
+	if relsDeleted > 0 || nodesDeleted > 0 {
+		orphans, err = runCount(`
 MATCH (n:Entity)
 WHERE n.shared = true AND NOT EXISTS { MATCH (n)--(:Entity) }
 DETACH DELETE n
 RETURN count(n) AS deleted`, map[string]any{}, "sweep orphaned shared nodes")
-	if err != nil {
-		return 0, 0, err
+		if err != nil {
+			return 0, 0, err
+		}
 	}
 
 	return nodesDeleted + orphans, relsDeleted, nil
+}
+
+// VerifySweepClean counts repo-owned entities and repo-stamped relationships
+// whose last_run doesn't match runID - i.e. exactly what SweepStale's queries
+// target, but counted instead of deleted. A nonzero result means the sweep
+// left stale data behind: either a bug in the sweep queries, or a concurrent
+// writer touched the graph mid-run. Call this right after SweepStale.
+func (c *Client) VerifySweepClean(ctx context.Context, repo, runID string) (staleNodes, staleRels int, err error) {
+	session := c.Driver.NewSession(ctx, driver.SessionConfig{AccessMode: driver.AccessModeRead})
+	defer session.Close(ctx)
+
+	count := func(query string) (int, error) {
+		res, err := session.Run(ctx, query, map[string]any{"repo": repo, "run": runID})
+		if err != nil {
+			return 0, err
+		}
+		rec, err := res.Single(ctx)
+		if err != nil {
+			return 0, err
+		}
+		n, _ := rec.AsMap()["c"].(int64)
+		return int(n), nil
+	}
+
+	staleNodes, err = count(`
+MATCH (n:Entity {repo: $repo})
+WHERE coalesce(n.shared, false) = false
+  AND (n.last_run IS NULL OR n.last_run <> $run)
+RETURN count(n) AS c`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("verify sweep (nodes): %w", err)
+	}
+
+	staleRels, err = count(`
+MATCH (a)-[r]->(b:Entity)
+WHERE (r.repo = $repo OR (r.repo IS NULL AND a.repo = $repo))
+  AND (r.last_run IS NULL OR r.last_run <> $run)
+RETURN count(r) AS c`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("verify sweep (relationships): %w", err)
+	}
+
+	return staleNodes, staleRels, nil
 }
 
 // nodeProps are the row keys importNodeBatch copies onto each node. They're
@@ -336,11 +422,23 @@ var nodeProps = append([]string{
 }, metadataProps...)
 
 // importNodeBatch runs one UNWIND batch for a single label.
+//
 // label is validated against labelAllowlist before reaching here, so
 // interpolating it into the query string is safe. commit, if non-empty, is
-// stamped on every node and CONTAINS edge as last_commit; the empty case
-// preserves legacy behavior for the static-graph importer CLI.
-func (c *Client) importNodeBatch(ctx context.Context, label, repo, commit, runID string, batch []map[string]any) error {
+// stamped on every node and CONTAINS edge as last_commit/last_run,
+// unconditionally for every row in the batch - that stamp is what SweepStale
+// keys staleness on, so it must never be skipped for a live row. An empty
+// commit preserves legacy behavior for the static-graph importer CLI: no
+// stamps, and always a full property rewrite (there's no content_hash
+// baseline to gate against without a run to compare against).
+//
+// The full `SET n += {...}` (and content_hash refresh) only runs for rows
+// whose hash differs from the stored one, or when rewriteAll forces it. The
+// label set and CONTAINS edge stay unconditional so every row still gets
+// those regardless of whether its properties were rewritten - a FOREACH/CASE
+// gate is used instead of a WITH...WHERE filter so unchanged rows aren't
+// dropped from the query's row stream before reaching the CONTAINS step.
+func (c *Client) importNodeBatch(ctx context.Context, label, repo, commit, runID string, batch []map[string]any, rewriteAll bool) error {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
 	defer session.Close(ctx)
 
@@ -348,13 +446,17 @@ func (c *Client) importNodeBatch(ctx context.Context, label, repo, commit, runID
 	for _, p := range nodeProps {
 		setPairs = append(setPairs, fmt.Sprintf("%s: row.%s", p, p))
 	}
-	// last_commit is provenance; last_run is what SweepStale keys on so a
-	// same-commit re-index still evicts nodes this run didn't write.
-	commitClause := ""
+
+	stampClause := ""
 	containsCommit := ""
 	if commit != "" {
-		commitClause = ",\n    last_commit: $commit,\n    last_run: $run"
+		stampClause = "SET n.last_commit = $commit, n.last_run = $run"
 		containsCommit = ", c.last_commit = $commit, c.last_run = $run"
+	}
+
+	skipGate := "true"
+	if commit != "" && !rewriteAll {
+		skipGate = "coalesce(n.content_hash, '') <> row.hash"
 	}
 
 	query := fmt.Sprintf(`
@@ -362,11 +464,16 @@ MATCH (repo:Repository {name: $repo})
 UNWIND $batch AS row
 MERGE (n:Entity {node_key: row.key})
 SET n:%s
-SET n += {
-    %s%s
-}
+%s
+WITH repo, n, row, (%s) AS needsRewrite
+FOREACH (_ IN CASE WHEN needsRewrite THEN [1] ELSE [] END |
+  SET n += {
+    %s,
+    content_hash: row.hash
+  }
+)
 MERGE (repo)-[c:CONTAINS]->(n)
-SET c.repo = $repo%s`, label, strings.Join(setPairs, ",\n    "), commitClause, containsCommit)
+SET c.repo = $repo%s`, label, stampClause, skipGate, strings.Join(setPairs, ",\n    "), containsCommit)
 
 	params := map[string]any{"repo": repo, "batch": batch}
 	if commit != "" {
@@ -379,21 +486,29 @@ SET c.repo = $repo%s`, label, strings.Join(setPairs, ",\n    "), commitClause, c
 
 // importLinkBatch runs one UNWIND batch for a single relationship type.
 // rel is validated via MapRelation's allowlist map before reaching here.
-// repo stamps each edge for repo-scoped sweeps; commit, if non-empty, stamps
-// each edge so sweep can identify stale edges.
+// repo and, when commit is non-empty, last_commit/last_run are stamped on
+// every row unconditionally - same reasoning as importNodeBatch: those stamps
+// are what SweepStale keys staleness on. The weight/confidence/context
+// property rewrite is gated on content hash the same way, bypassed by
+// rewriteAll or an empty commit (no baseline to compare against).
 //
 // MERGE keys on (source, type, target) only, so parallel edges collapse: two
 // distinct call sites between the same pair become ONE edge, and the last
 // row's weight/context wins. This is deliberate - the graph answers "does A
 // call B", not "how many times" - but callers should not read weight as a
 // call-site count.
-func (c *Client) importLinkBatch(ctx context.Context, rel, repo, commit, runID string, batch []map[string]any) error {
+func (c *Client) importLinkBatch(ctx context.Context, rel, repo, commit, runID string, batch []map[string]any, rewriteAll bool) error {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
 	defer session.Close(ctx)
 
-	commitClause := ""
+	stampClause := ""
 	if commit != "" {
-		commitClause = ",\n    last_commit:      $commit,\n    last_run:         $run"
+		stampClause = "SET r.last_commit = $commit, r.last_run = $run"
+	}
+
+	skipGate := "true"
+	if commit != "" && !rewriteAll {
+		skipGate = "coalesce(r.content_hash, '') <> row.hash"
 	}
 
 	query := fmt.Sprintf(`
@@ -401,13 +516,18 @@ UNWIND $batch AS row
 MATCH (a:Entity {node_key: row.s})
 MATCH (b:Entity {node_key: row.t})
 MERGE (a)-[r:%s]->(b)
-SET r += {
+SET r.repo = $repo
+%s
+WITH r, row, (%s) AS needsRewrite
+FOREACH (_ IN CASE WHEN needsRewrite THEN [1] ELSE [] END |
+  SET r += {
     weight:           row.weight,
     confidence:       row.confidence,
     confidence_score: row.cs,
     context:          row.context,
-    repo:             $repo%s
-}`, rel, commitClause)
+    content_hash:     row.hash
+  }
+)`, rel, stampClause, skipGate)
 
 	params := map[string]any{"batch": batch, "repo": repo}
 	if commit != "" {
