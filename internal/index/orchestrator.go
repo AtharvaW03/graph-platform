@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -36,12 +37,17 @@ type Orchestrator struct {
 	// A failed ping is logged but does not abort - the cycle proceeds and
 	// individual stage failures will be recorded per-repo.
 	HealthChecker HealthChecker
+
+	// Lease, if set, is renewed before every repo (in both RunOnce and
+	// RunForever, which shares RunOnce's loop). Unlike HealthChecker, a
+	// failed renewal is fatal to the run - see LeaseRenewer.
+	Lease LeaseRenewer
 }
 
 // ImportRunner is the importer-side interface. The default implementation
 // adapts internal/importer.Run; tests or alternative sinks can swap in.
 type ImportRunner interface {
-	Run(ctx context.Context, repo, commit, graphPath string) (*importer.Summary, error)
+	Run(ctx context.Context, repo, commit, graphPath string, rewriteAll bool) (*importer.Summary, error)
 }
 
 // HealthChecker pings a downstream dependency. The default impl wraps
@@ -49,6 +55,23 @@ type ImportRunner interface {
 type HealthChecker interface {
 	VerifyConnectivity(ctx context.Context) error
 }
+
+// LeaseRenewer extends the writer lease. If Orchestrator.Lease is set,
+// RunOnce calls Renew before every repo - so a long --all run over many
+// repos can't outlive the TTL between the start of the run and whichever
+// repo is indexing when it expires. A failed renewal means another writer
+// claimed the lease, and the run stops immediately before the next repo -
+// a single-writer violation is not something to log and continue past.
+type LeaseRenewer interface {
+	Renew(ctx context.Context) error
+}
+
+// errLeaseLost marks a RunOnce error as a lease renewal failure. RunForever
+// checks for it specifically: unlike other RunOnce errors (which just get
+// logged before the next scheduled cycle retries), losing the lease means
+// someone else is writing now - retrying next cycle would race them, so
+// RunForever stops the daemon instead.
+var errLeaseLost = errors.New("writer lease lost")
 
 // Options modulate a single RunOnce invocation.
 type Options struct {
@@ -63,6 +86,12 @@ type Options struct {
 // flushed before moving on. ctx cancellation aborts the current repo and
 // stops the loop after. RunOnce never panics; any panic in collaborators is
 // recovered, logged, and recorded on the run.
+//
+// When a Lease is configured, it's renewed before every repo, not just once
+// at the top - a long --all run over many repos must not outlive the lease
+// TTL between repo 1 and repo 200. A renewal failure means another writer
+// took over; the loop stops immediately, before that next repo, and RunOnce
+// returns an error alongside whatever results were already collected.
 func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSummary, err error) {
 	summary = RunSummary{StartedAt: o.now()}
 	defer func() { summary.FinishedAt = o.now() }()
@@ -86,6 +115,12 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 			o.Log.Printf("context canceled, stopping after %d/%d repositories", len(summary.Results), len(repos))
 			break
 		}
+		if o.Lease != nil {
+			if err := o.Lease.Renew(ctx); err != nil {
+				o.Log.Printf("writer lease renewal failed before %s, stopping: %v", repo.Name, err)
+				return summary, fmt.Errorf("%w: renewal failed before repo %q: %w", errLeaseLost, repo.Name, err)
+			}
+		}
 		result := o.IndexOne(ctx, repo, opts.Force)
 		summary.Results = append(summary.Results, result)
 	}
@@ -97,13 +132,22 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 // Cycles never overlap: the next pass only starts after the current pass
 // returns AND the Scheduler signals. A panic inside the loop is recovered
 // and the next cycle proceeds - the daemon never dies on a recoverable bug.
+//
+// Lease renewal happens inside RunOnce's per-repo loop, not here - that
+// covers the first repo of every cycle too, so a separate top-of-cycle
+// renewal would only be a redundant extra round-trip. A lost lease, though,
+// must stop the daemon rather than wait for the next cycle to retry -
+// runCycleSafely surfaces that one case and RunForever returns instead of
+// looping.
 func (o *Orchestrator) RunForever(ctx context.Context, opts Options, sched Scheduler) error {
 	if sched == nil {
 		return fmt.Errorf("scheduler is required for continuous mode")
 	}
 	o.Log.Printf("continuous indexing started")
 	for {
-		o.runCycleSafely(ctx, opts)
+		if err := o.runCycleSafely(ctx, opts); err != nil {
+			return fmt.Errorf("stopping continuous indexing: %w", err)
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -113,22 +157,32 @@ func (o *Orchestrator) RunForever(ctx context.Context, opts Options, sched Sched
 	}
 }
 
-func (o *Orchestrator) runCycleSafely(ctx context.Context, opts Options) {
+// runCycleSafely runs one indexing cycle, recovering any panic so the daemon
+// never dies on a recoverable bug. Its return is non-nil only for a lost
+// lease - every other RunOnce failure (including a recovered panic) is
+// logged here and swallowed, same as before, since the next scheduled cycle
+// is the retry.
+func (o *Orchestrator) runCycleSafely(ctx context.Context, opts Options) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			o.Log.Printf("cycle panic recovered: %v", p)
+			err = nil
 		}
 	}()
 	if o.HealthChecker != nil {
-		if err := o.HealthChecker.VerifyConnectivity(ctx); err != nil {
-			o.Log.Printf("WARNING: health check failed (continuing anyway): %v", err)
+		if herr := o.HealthChecker.VerifyConnectivity(ctx); herr != nil {
+			o.Log.Printf("WARNING: health check failed (continuing anyway): %v", herr)
 		}
 	}
-	s, err := o.RunOnce(ctx, opts)
-	if err != nil {
-		o.Log.Printf("run aborted: %v", err)
+	s, runErr := o.RunOnce(ctx, opts)
+	if runErr != nil {
+		o.Log.Printf("run aborted: %v", runErr)
 	}
 	o.LogSummary(s)
+	if errors.Is(runErr, errLeaseLost) {
+		return runErr
+	}
+	return nil
 }
 
 // IndexOne runs the full sync -> change-detect -> graphify -> import
@@ -252,7 +306,7 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	}
 
 	o.Log.Printf("[%s] import %s", repo.Name, importPath)
-	sum, err := o.Importer.Run(ctx, repo.Name, commit, importPath)
+	sum, err := o.Importer.Run(ctx, repo.Name, commit, importPath, force)
 	if o.recordFailure(result, StageImport, err, start, ctx) {
 		return
 	}
@@ -267,6 +321,13 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	if result.Mismatch {
 		o.Log.Printf("[%s] WARNING: node-count mismatch - imported %d, Neo4j holds %d (delta %d). Investigate node_key collisions.",
 			repo.Name, sum.NodesTotal, sum.NodesInGraph, sum.NodesTotal-sum.NodesInGraph)
+	}
+	result.SweepResidueNodes = sum.SweepResidueNodes
+	result.SweepResidueRels = sum.SweepResidueRels
+	result.SweepResidue = sum.HasSweepResidue()
+	if result.SweepResidue {
+		o.Log.Printf("[%s] ERROR: sweep residue - %d stale nodes, %d stale relationships still present after SweepStale. Sweep logic is broken or a concurrent writer raced this run.",
+			repo.Name, result.SweepResidueNodes, result.SweepResidueRels)
 	}
 	result.Duration = o.now().Sub(start)
 }
@@ -319,6 +380,9 @@ func (o *Orchestrator) LogSummary(s RunSummary) {
 			mismatch := ""
 			if r.Mismatch {
 				mismatch = fmt.Sprintf(" [MISMATCH: %d in graph]", r.NodesInGraph)
+			}
+			if r.SweepResidue {
+				mismatch += fmt.Sprintf(" [SWEEP RESIDUE: %d nodes / %d rels]", r.SweepResidueNodes, r.SweepResidueRels)
 			}
 			o.Log.Printf("  + %s @ %s: %d nodes, %d links (%s%s)%s", r.Name, shortSHA(r.Commit), r.Nodes, r.Links, r.Duration.Round(time.Millisecond), swept, mismatch)
 		case StatusSkipped:

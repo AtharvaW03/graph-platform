@@ -48,6 +48,8 @@ func main() {
 			fmt.Println("Importing links")
 		case importer.StageSweep:
 			fmt.Println("Sweeping stale data")
+		case importer.StageVerifySweep:
+			fmt.Println("Verifying sweep left nothing stale")
 		case importer.StageVerify:
 			fmt.Println("Verifying Neo4j count")
 		}
@@ -57,7 +59,11 @@ func main() {
 		Repo:      *repo,
 		Commit:    *commit,
 		GraphPath: *graphPath,
-		Progress:  progress,
+		// This CLI is the manual/repair path - always do a full property
+		// rewrite so its output doesn't depend on content-hash state left by
+		// a previous run.
+		RewriteAll: true,
+		Progress:   progress,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -91,5 +97,10 @@ func main() {
 			summary.NodesTotal, summary.NodesInGraph, summary.Repo,
 			summary.NodesTotal-summary.NodesInGraph)
 		fmt.Println("This indicates silent data loss during import (e.g. node_key collisions). Investigate.")
+	}
+	if summary.HasSweepResidue() {
+		fmt.Printf("\nERROR: sweep left %d stale nodes and %d stale relationships behind for repo %q.\n",
+			summary.SweepResidueNodes, summary.SweepResidueRels, summary.Repo)
+		fmt.Println("SweepStale should have removed these. Investigate the sweep logic or a concurrent writer.")
 	}
 }
