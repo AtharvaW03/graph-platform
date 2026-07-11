@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"graph-platform/internal/extract"
@@ -29,9 +31,16 @@ type Orchestrator struct {
 
 	// Extractors, if non-nil, runs the configured platform extractors after
 	// graphify and merges their fragments into the unified graph.json before
-	// the importer reads it. Extractor failures never block import - they
-	// surface as per-extractor errors on the RepoResult.
+	// the importer reads it. By default an extractor error fails the whole
+	// repo closed (see AllowPartialExtractorErrors); either way, per-extractor
+	// errors are recorded on the RepoResult for triage.
 	Extractors *extract.Runner
+
+	// AllowPartialExtractorErrors, when true, restores the old behavior: an
+	// extractor error is logged but the partial graph imports anyway. Default
+	// false (fail closed) - see ExtractorsConfig.AllowPartial's doc comment
+	// for why that's the safer default.
+	AllowPartialExtractorErrors bool
 
 	// HealthChecker, if set, is pinged before each cycle in continuous mode.
 	// A failed ping is logged but does not abort - the cycle proceeds and
@@ -269,8 +278,11 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	}
 
 	// Run platform extractors and merge their fragments into the file the
-	// importer will read. One extractor failing records an error but never
-	// blocks the others or the import.
+	// importer will read. One extractor failing never blocks the others, but
+	// by default it does block the import (see AllowPartialExtractorErrors):
+	// importing a partial graph would let the sweep delete the failed
+	// extractor's last-known-good data, trading a stale-but-correct graph for
+	// a fresher-but-wrong one.
 	importPath := graphPath
 	if o.Extractors != nil && len(o.Extractors.Extractors) > 0 {
 		o.Log.Printf("[%s] extract (%d extractors)", repo.Name, len(o.Extractors.Extractors))
@@ -280,6 +292,18 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 			for n, e := range extResult.Errors {
 				result.ExtractorErrors[n] = e.Error()
 			}
+			if !o.AllowPartialExtractorErrors {
+				names := make([]string, 0, len(extResult.Errors))
+				for n := range extResult.Errors {
+					names = append(names, n)
+				}
+				sort.Strings(names)
+				err := fmt.Errorf("extractor(s) failed: %s (set extractors.allow_partial: true to import anyway)", strings.Join(names, ", "))
+				if o.recordFailure(result, StageExtract, err, start, ctx) {
+					return
+				}
+			}
+			o.Log.Printf("[%s] WARNING: %d extractor(s) failed, allow_partial is set - importing the partial graph anyway", repo.Name, len(extResult.Errors))
 		}
 		if len(extResult.Fragments) > 0 {
 			result.ExtractorStats = map[string]ExtractorStat{}
@@ -311,7 +335,6 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 		return
 	}
 
-	result.Status = StatusSuccess
 	result.Nodes = sum.NodesTotal
 	result.Links = sum.LinksImported
 	result.NodesSwept = sum.NodesSwept
@@ -328,6 +351,26 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	if result.SweepResidue {
 		o.Log.Printf("[%s] ERROR: sweep residue - %d stale nodes, %d stale relationships still present after SweepStale. Sweep logic is broken or a concurrent writer raced this run.",
 			repo.Name, result.SweepResidueNodes, result.SweepResidueRels)
+	}
+
+	// A mismatch or sweep residue means the graph may not actually reflect
+	// what this run just did - "imported OK" isn't trustworthy anymore. Fail
+	// the repo instead of reporting success: state doesn't advance, so the
+	// next cycle retries against last-known-good data instead of building on
+	// top of a graph that might already be wrong.
+	if result.Mismatch || result.SweepResidue {
+		var reasons []string
+		if result.Mismatch {
+			reasons = append(reasons, fmt.Sprintf("node-count mismatch (imported %d, graph holds %d)", sum.NodesTotal, sum.NodesInGraph))
+		}
+		if result.SweepResidue {
+			reasons = append(reasons, fmt.Sprintf("sweep residue (%d nodes, %d rels)", result.SweepResidueNodes, result.SweepResidueRels))
+		}
+		result.Status = StatusFailed
+		result.Stage = StageImport
+		result.Error = strings.Join(reasons, "; ")
+	} else {
+		result.Status = StatusSuccess
 	}
 	result.Duration = o.now().Sub(start)
 }
@@ -373,18 +416,14 @@ func (o *Orchestrator) LogSummary(s RunSummary) {
 	for _, r := range s.Results {
 		switch r.Status {
 		case StatusSuccess:
+			// A mismatch or sweep residue always fails the repo now (see
+			// runPipeline), so a StatusSuccess result never carries either -
+			// nothing to annotate here.
 			swept := ""
 			if r.NodesSwept > 0 || r.EdgesSwept > 0 {
 				swept = fmt.Sprintf(", swept %d/%d", r.NodesSwept, r.EdgesSwept)
 			}
-			mismatch := ""
-			if r.Mismatch {
-				mismatch = fmt.Sprintf(" [MISMATCH: %d in graph]", r.NodesInGraph)
-			}
-			if r.SweepResidue {
-				mismatch += fmt.Sprintf(" [SWEEP RESIDUE: %d nodes / %d rels]", r.SweepResidueNodes, r.SweepResidueRels)
-			}
-			o.Log.Printf("  + %s @ %s: %d nodes, %d links (%s%s)%s", r.Name, shortSHA(r.Commit), r.Nodes, r.Links, r.Duration.Round(time.Millisecond), swept, mismatch)
+			o.Log.Printf("  + %s @ %s: %d nodes, %d links (%s%s)", r.Name, shortSHA(r.Commit), r.Nodes, r.Links, r.Duration.Round(time.Millisecond), swept)
 		case StatusSkipped:
 			o.Log.Printf("  = %s @ %s: %s", r.Name, shortSHA(r.Commit), r.Reason)
 		case StatusFailed:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -37,6 +38,11 @@ func main() {
 
 	if *all && strings.TrimSpace(*repos) != "" {
 		logger.Fatal("--all and --repo are mutually exclusive")
+	}
+	if *leaseTTL < time.Minute {
+		// time.NewTicker panics on ttl/3 <= 0, and anything sub-minute is
+		// operationally pointless (renewal jitter alone could exceed it).
+		logger.Fatalf("--lease-ttl must be at least 1m, got %s", *leaseTTL)
 	}
 
 	cfg, err := index.LoadConfig(*configPath)
@@ -83,6 +89,15 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Idempotent, and must run before AcquireLease: on a brand-new database
+	// the IndexerLease uniqueness constraint doesn't exist yet, so without
+	// this, two processes racing their very first MERGE on the lease row
+	// could each create one. The importer's own in-pipeline call later is
+	// harmless - this one is what makes the lease itself safe.
+	if err := client.EnsureConstraints(ctx); err != nil {
+		logger.Fatalf("ensure constraints: %v", err)
+	}
 
 	// Runs once, before any repo is touched: a graphify upgraded outside the
 	// pinned Docker image should stop the run, not silently produce a
@@ -139,16 +154,17 @@ func main() {
 	go heartbeat.Run(ctx)
 
 	orch := &index.Orchestrator{
-		Source:        index.NewConfigJobSource(cfg),
-		Syncer:        index.NewGitSyncer(cfg.Git),
-		Graphify:      index.NewExecGraphifier(cfg.Graphify, os.Stderr),
-		Importer:      index.NewDefaultImportRunner(client),
-		Store:         store,
-		WorkDir:       absWorkDir,
-		Log:           logger,
-		HealthChecker: client,
-		Lease:         clientLeaseRenewer{client: client, owner: owner, ttl: *leaseTTL},
-		Extractors:    buildExtractorRunner(cfg, logger),
+		Source:                      index.NewConfigJobSource(cfg),
+		Syncer:                      index.NewGitSyncer(cfg.Git),
+		Graphify:                    index.NewExecGraphifier(cfg.Graphify, os.Stderr),
+		Importer:                    index.NewDefaultImportRunner(client),
+		Store:                       store,
+		WorkDir:                     absWorkDir,
+		Log:                         logger,
+		HealthChecker:               client,
+		Lease:                       clientLeaseRenewer{client: client, owner: owner, ttl: *leaseTTL},
+		Extractors:                  buildExtractorRunner(cfg, logger),
+		AllowPartialExtractorErrors: cfg.Extractors.AllowPartialEnabled(),
 	}
 
 	opts := index.Options{
@@ -162,11 +178,17 @@ func main() {
 			logger.Fatal(err)
 		}
 		logger.Printf("continuous mode: every %s", *interval)
-		// Suppress the error only for an operator-initiated shutdown (signal
-		// cancels ctx). A heartbeat-canceled runCtx must still exit nonzero,
-		// or a fatal lease loss would look like a clean exit to ECS.
-		if err := orch.RunForever(runCtx, opts, sched); err != nil && ctx.Err() == nil {
-			logger.Fatal(err)
+		runErr := orch.RunForever(runCtx, opts, sched)
+		// Checked against the recorded heartbeat error, not ctx state: a
+		// confirmed lease loss must exit nonzero regardless of how RunForever
+		// itself returned. The ctx.Err() check below is a separate, older
+		// mechanism (distinguishing an operator shutdown from any other
+		// RunForever failure) and stays for that.
+		if fatal := exitErr(0, heartbeat.FatalErr()); fatal != nil {
+			logger.Fatal(fatal)
+		}
+		if runErr != nil && ctx.Err() == nil {
+			logger.Fatal(runErr)
 		}
 		return
 	}
@@ -178,9 +200,26 @@ func main() {
 	orch.LogSummary(summary)
 
 	_, _, _, failed := summary.Counts()
-	if failed > 0 {
-		os.Exit(1)
+	if fatal := exitErr(failed, heartbeat.FatalErr()); fatal != nil {
+		logger.Fatal(fatal)
 	}
+}
+
+// exitErr decides whether the process should exit nonzero after a run
+// completes. A confirmed lease-heartbeat loss always wins, even with zero
+// failed repos: RunOnce's own return only covers "stopped before finishing"
+// (ctx.Err() breaks its loop and returns a nil error), not "finished, but a
+// stale write already happened under a lease we no longer held." hbErr should
+// come from LeaseHeartbeat.FatalErr(), which is only set on a genuine
+// give-up - never inferred from context-cancellation state.
+func exitErr(failed int, hbErr error) error {
+	if hbErr != nil {
+		return fmt.Errorf("writer lease heartbeat failed: %w", hbErr)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d repositories failed", failed)
+	}
+	return nil
 }
 
 func splitCSV(s string) []string {

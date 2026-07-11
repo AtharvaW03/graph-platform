@@ -196,3 +196,114 @@ func TestLeaseHeartbeat_DefaultMaxConsecutiveFailures(t *testing.T) {
 		t.Errorf("renew called %d times, want 3 (the documented default)", calls)
 	}
 }
+
+func TestLeaseHeartbeat_FatalErrSetOnGiveUp(t *testing.T) {
+	errLost := errors.New("lease lost (test)")
+	h := &LeaseHeartbeat{
+		Renew:    func(context.Context) error { return errLost },
+		Interval: 5 * time.Millisecond,
+		Log:      discardLogger(),
+		IsLost:   func(err error) bool { return errors.Is(err, errLost) },
+		OnFatal:  func(error) {},
+	}
+
+	if got := h.FatalErr(); got != nil {
+		t.Errorf("FatalErr before Run starts = %v, want nil", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { h.Run(ctx); close(done) }()
+	<-done
+
+	got := h.FatalErr()
+	if !errors.Is(got, errLost) {
+		t.Errorf("FatalErr() = %v, want wrapping the confirmed-loss error", got)
+	}
+}
+
+func TestLeaseHeartbeat_FatalErrNilWhenHealthy(t *testing.T) {
+	h := &LeaseHeartbeat{
+		Renew:    func(context.Context) error { return nil },
+		Interval: 5 * time.Millisecond,
+		Log:      discardLogger(),
+		OnFatal:  func(err error) { t.Errorf("OnFatal should not fire, got %v", err) },
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.Run(ctx); close(done) }()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	<-done
+
+	if got := h.FatalErr(); got != nil {
+		t.Errorf("FatalErr() after clean ctx cancellation = %v, want nil", got)
+	}
+}
+
+func TestLeaseHeartbeat_InvalidIntervalLogsAndReturns(t *testing.T) {
+	h := &LeaseHeartbeat{
+		Renew: func(context.Context) error {
+			t.Error("Renew should never be called with an invalid interval")
+			return nil
+		},
+		Interval: 0,
+		Log:      discardLogger(),
+		OnFatal:  func(err error) { t.Errorf("OnFatal should not fire, got %v", err) },
+	}
+
+	done := make(chan struct{})
+	go func() { h.Run(context.Background()); close(done) }()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return promptly for Interval <= 0")
+	}
+}
+
+func TestLeaseHeartbeat_RenewCallTimesOut(t *testing.T) {
+	// Renew blocks on its ctx instead of returning - simulates a hung call
+	// (dead connection that never errors on its own). The per-call deadline
+	// must cut it off and count it as a transient failure, not hang forever.
+	var mu sync.Mutex
+	calls := 0
+	h := &LeaseHeartbeat{
+		Renew: func(ctx context.Context) error {
+			mu.Lock()
+			calls++
+			mu.Unlock()
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		Interval:               20 * time.Millisecond,
+		Log:                    discardLogger(),
+		IsLost:                 func(err error) bool { return false },
+		MaxConsecutiveFailures: 2,
+	}
+	fatalCh := make(chan error, 1)
+	h.OnFatal = func(err error) { fatalCh <- err }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { h.Run(ctx); close(done) }()
+
+	select {
+	case err := <-fatalCh:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("OnFatal err = %v, want context.DeadlineExceeded", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the hung Renew calls to time out and eventually trip MaxConsecutiveFailures")
+	}
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Errorf("renew called %d times, want 2 (MaxConsecutiveFailures)", calls)
+	}
+}
