@@ -59,9 +59,15 @@ no repo references them anymore.
 Every node and edge is stamped with `last_commit` at import; re-indexing a
 repo sweeps whatever the new commit no longer contains.
 
+Terraform resources flow through graphify as generic AST nodes - there's no
+dedicated label mapping for them yet, so `InferLabel`'s existing heuristics
+bucket them same as any other file-derived symbol.
+
 ## Quickstart
 
-Prerequisites: Go 1.26+, Docker Desktop, a local `git`, Neo4j 5.x, and the `graphify` CLI on PATH.
+Prerequisites: Go 1.26+, Docker Desktop, a local `git`, Neo4j 5.x, and the
+`graphify` CLI (pinned to 0.9.12; install the terraform extra for `.tf`/`.hcl`
+coverage: `uv tool install "graphifyy[terraform]"`) on PATH.
 
 ```powershell
 # 1. Neo4j (e.g. Docker)
