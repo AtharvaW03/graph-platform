@@ -56,7 +56,45 @@ var (
 	bodyUpdateRe = regexp.MustCompile(`(?is)\bUPDATE\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
 	bodyDeleteRe = regexp.MustCompile(`(?is)\bDELETE\s+(?:FROM\s+)?(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
 	bodyExecRe   = regexp.MustCompile(`(?is)\bEXEC(?:UTE)?\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?`)
+
+	// bodyReferencesRe finds FOREIGN KEY ... REFERENCES target(...) inside a
+	// CREATE TABLE body. The trailing "(" is required: it's what distinguishes
+	// an actual FK target from an incidental mention, since real T-SQL FK
+	// syntax always writes REFERENCES table(columns).
+	//
+	// Known non-goal: FKs added later via ALTER TABLE ADD CONSTRAINT aren't
+	// caught - splitObjects only splits on CREATE statements, so a migration
+	// file containing only an ALTER has no hit to anchor the edge to, and its
+	// text is never scanned at all. Common migration-file pattern, not
+	// handled this batch.
+	bodyReferencesRe = regexp.MustCompile(`(?is)\bREFERENCES\s+(?:\[?([A-Za-z0-9_]+)\]?\.)?\[?([A-Za-z0-9_]+)\]?\s*\(`)
 )
+
+// bodyRefSkipNames are identifiers addRef must never turn into a node, keyed
+// lowercase for a case-insensitive match. Two unrelated sources feed this one
+// list because both are the same failure shape: a regex captured something
+// that reads like a table/procedure name but isn't one.
+//
+//   - AS/SET/WHERE/SELECT/FROM/INTO/VALUES/JOIN/ON: a trigger header like
+//     "AFTER UPDATE\nAS" backtracks past the (optional) schema-qualifier group
+//     and captures the next keyword as if it were the table name (e.g.
+//     "UPDATE AS" -> table "AS"). Blocklisting the keyword is simpler and more
+//     robust than tightening every regex that could hit the same backtrack.
+//   - inserted/deleted: T-SQL's trigger pseudo-tables, not real objects.
+//     Filtered globally, not just inside trigger bodies - a real table named
+//     inserted is vanishingly rare, and the noise cost of missing that edge
+//     everywhere else is worse than the (very unlikely) miss.
+//   - sp_executesql: the standard dynamic-SQL entry point; it shows up in EXEC
+//     position constantly and is never a real procedure. Exact-match only -
+//     the sp_ prefix is NOT blocklisted generally, because real shops
+//     (especially older MSSQL codebases) name their own procedures
+//     sp_Whatever, and prefix-filtering would silently drop those.
+var bodyRefSkipNames = map[string]bool{
+	"as": true, "set": true, "where": true, "select": true, "from": true,
+	"into": true, "values": true, "join": true, "on": true,
+	"inserted": true, "deleted": true,
+	"sp_executesql": true,
+}
 
 // objectStmt is one CREATE statement. body is the text after the header, so
 // the dependency regexes scan only this object's definition.
@@ -276,7 +314,9 @@ func emitBodyRefs(frag *extract.Fragment, sourceID string, s objectStmt) {
 		deleteFroms[m[2]] = true // offset of the FROM keyword (group 1 start)
 	}
 
-	addRef := func(re *regexp.Regexp, relation string) {
+	// targetKind defaults every caller to kindTable except the EXEC scan,
+	// which targets a procedure - see the bodyExecRe call site below.
+	addRef := func(re *regexp.Regexp, relation string, targetKind objectKind) {
 		seen := map[string]bool{}
 		for _, idx := range re.FindAllStringSubmatchIndex(s.body, -1) {
 			if re == bodySelectRe && deleteFroms[idx[0]] {
@@ -292,10 +332,10 @@ func emitBodyRefs(frag *extract.Fragment, sourceID string, s objectStmt) {
 			if group(1) != "" {
 				tSchema = group(1)
 			}
-			if tName == "" {
+			if tName == "" || bodyRefSkipNames[strings.ToLower(tName)] {
 				continue
 			}
-			tid := fmt.Sprintf("sql::%s::%s.%s", kindTable, tSchema, tName)
+			tid := fmt.Sprintf("sql::%s::%s.%s", targetKind, tSchema, tName)
 			if seen[relation+":"+tid] {
 				continue
 			}
@@ -303,7 +343,7 @@ func emitBodyRefs(frag *extract.Fragment, sourceID string, s objectStmt) {
 			frag.AddNode(extract.FragmentNode{
 				ID:    tid,
 				Label: tSchema + "." + tName,
-				Type:  string(kindTable),
+				Type:  string(targetKind),
 				Metadata: map[string]any{
 					"schema":      tSchema,
 					"object_name": tName,
@@ -319,21 +359,23 @@ func emitBodyRefs(frag *extract.Fragment, sourceID string, s objectStmt) {
 		}
 	}
 	switch s.kind {
+	case kindTable:
+		addRef(bodyReferencesRe, "depends_on_object", kindTable)
 	case kindView:
-		addRef(bodySelectRe, "depends_on_object")
-		addRef(bodyJoinRe, "depends_on_object")
+		addRef(bodySelectRe, "depends_on_object", kindTable)
+		addRef(bodyJoinRe, "depends_on_object", kindTable)
 	case kindProcedure, kindFunction:
-		addRef(bodySelectRe, "reads_table")
-		addRef(bodyJoinRe, "reads_table")
-		addRef(bodyInsertRe, "writes_table")
-		addRef(bodyUpdateRe, "writes_table")
-		addRef(bodyDeleteRe, "writes_table")
-		addRef(bodyExecRe, "depends_on_object")
+		addRef(bodySelectRe, "reads_table", kindTable)
+		addRef(bodyJoinRe, "reads_table", kindTable)
+		addRef(bodyInsertRe, "writes_table", kindTable)
+		addRef(bodyUpdateRe, "writes_table", kindTable)
+		addRef(bodyDeleteRe, "writes_table", kindTable)
+		addRef(bodyExecRe, "depends_on_object", kindProcedure)
 	case kindTrigger:
-		addRef(bodyInsertRe, "writes_table")
-		addRef(bodyUpdateRe, "writes_table")
-		addRef(bodyDeleteRe, "writes_table")
-		addRef(bodySelectRe, "reads_table")
+		addRef(bodyInsertRe, "writes_table", kindTable)
+		addRef(bodyUpdateRe, "writes_table", kindTable)
+		addRef(bodyDeleteRe, "writes_table", kindTable)
+		addRef(bodySelectRe, "reads_table", kindTable)
 	}
 }
 

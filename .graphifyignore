@@ -4,3 +4,7 @@ workdir-test/
 graphify-how-it-works.md
 graphify-readme.md
 architecture.md
+
+# tfvars carry environment values and occasionally secrets - keep them out of
+# the graph by default.
+*.tfvars

@@ -45,7 +45,7 @@ graphify:
     - "{repo_path}"
   output_file: graphify-out/graph.json
   timeout: 20m
-  expected_version: "0.9.9" # must match the graphifyy version pinned in the Docker image
+  expected_version: "0.9.12" # must match the graphifyy version pinned in the Docker image
 
 extractors:
   deps: true

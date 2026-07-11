@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -47,8 +48,16 @@ type sqlGraph struct {
 
 func runExtract(t *testing.T) sqlGraph {
 	t.Helper()
+	return runExtractSQL(t, fixtureSQL)
+}
+
+// runExtractSQL writes sql as the sole schema.sql in a fresh temp repo and
+// extracts it. The per-bug tests below use this directly with minimal inline
+// fixtures instead of fixtureSQL.
+func runExtractSQL(t *testing.T, sql string) sqlGraph {
+	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "schema.sql"), []byte(fixtureSQL), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "schema.sql"), []byte(sql), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	frag, err := New().Extract(context.Background(), dir, "db-repo")
@@ -71,12 +80,12 @@ func runExtract(t *testing.T) sqlGraph {
 func TestObjectsExtracted(t *testing.T) {
 	g := runExtract(t)
 	wantNodes := map[string]string{
-		"sql::schema::trade":                  "sql_schema",
-		"sql::sql_table::trade.orders":        "sql_table",
+		"sql::schema::trade":                    "sql_schema",
+		"sql::sql_table::trade.orders":          "sql_table",
 		"sql::sql_procedure::trade.usp_cleanup": "sql_procedure",
 		"sql::sql_procedure::trade.usp_report":  "sql_procedure",
-		"sql::sql_view::trade.v_open":         "sql_view",
-		"sql::sql_trigger::trade.trg_orders":  "sql_trigger",
+		"sql::sql_view::trade.v_open":           "sql_view",
+		"sql::sql_trigger::trade.trg_orders":    "sql_trigger",
 	}
 	for id, typ := range wantNodes {
 		if g.nodes[id] != typ {
@@ -126,5 +135,175 @@ func TestViewAndTriggerEdges(t *testing.T) {
 	}
 	if !g.edges["in_schema"]["sql::sql_table::trade.orders|sql::schema::trade"] {
 		t.Errorf("in_schema missing; got %v", g.edges["in_schema"])
+	}
+}
+
+// TestExecTargetIsProcedureNotTable is the repro for bug (a): an EXEC target
+// is a procedure, not a table. Also covers the sp_executesql blocklist entry
+// from delta 3 - dynamic SQL's standard entry point must not create a node at
+// all, since "sp_executesql" is never a real object name.
+func TestExecTargetIsProcedureNotTable(t *testing.T) {
+	const sql = `CREATE PROCEDURE billing.SettleInvoice AS
+BEGIN
+    SELECT 1
+END
+GO
+
+CREATE PROCEDURE billing.MonthlyStatement AS
+BEGIN
+    EXEC billing.SettleInvoice
+    EXEC sp_executesql @sql
+END
+GO
+`
+	g := runExtractSQL(t, sql)
+	target := "sql::sql_procedure::billing.SettleInvoice"
+	source := "sql::sql_procedure::billing.MonthlyStatement"
+
+	if got := g.nodes[target]; got != "sql_procedure" {
+		t.Errorf("EXEC target node type = %q, want sql_procedure (bug: was sql_table)", got)
+	}
+	if !g.edges["depends_on_object"][source+"|"+target] {
+		t.Errorf("missing depends_on_object %s -> %s; got %v", source, target, g.edges["depends_on_object"])
+	}
+	for id := range g.nodes {
+		if strings.Contains(strings.ToLower(id), "sp_executesql") {
+			t.Errorf("sp_executesql must never produce a node, got %s", id)
+		}
+	}
+}
+
+// TestTriggerHeaderUpdateNotMisreadAsTable is the repro for bug (b): the
+// trigger header "AFTER UPDATE\nAS" must not be misread as "UPDATE AS" (a
+// table named AS).
+func TestTriggerHeaderUpdateNotMisreadAsTable(t *testing.T) {
+	const sql = `CREATE TABLE billing.Orders (id INT)
+GO
+
+CREATE TRIGGER billing.trg_orders ON billing.Orders AFTER UPDATE
+AS
+BEGIN
+    SELECT 1
+END
+GO
+`
+	g := runExtractSQL(t, sql)
+	for id := range g.nodes {
+		if strings.HasSuffix(strings.ToLower(id), ".as") {
+			t.Errorf("trigger header must not produce a table named AS, got node %s", id)
+		}
+	}
+	for pair := range g.edges["writes_table"] {
+		if strings.HasSuffix(strings.ToLower(pair), ".as") {
+			t.Errorf("trigger header must not produce a writes_table edge to a table named AS, got %s", pair)
+		}
+	}
+}
+
+// TestTriggerPseudoTablesFiltered is the repro for bug (c): inserted/deleted
+// are T-SQL pseudo-tables inside trigger bodies, not real tables. Filtered
+// globally (not just in trigger bodies), per team-lead's call: a real table
+// named inserted is vanishingly rare and the noise cost is higher than the
+// miss cost.
+func TestTriggerPseudoTablesFiltered(t *testing.T) {
+	const sql = `CREATE TABLE billing.Orders (id INT)
+GO
+
+CREATE TABLE billing.AuditLog (id INT)
+GO
+
+CREATE TRIGGER billing.trg_orders ON billing.Orders AFTER INSERT AS
+BEGIN
+    INSERT INTO billing.AuditLog (id) SELECT id FROM inserted
+END
+GO
+`
+	g := runExtractSQL(t, sql)
+	for id := range g.nodes {
+		lower := strings.ToLower(id)
+		if strings.HasSuffix(lower, ".inserted") || strings.HasSuffix(lower, ".deleted") {
+			t.Errorf("pseudo-table must not produce a node, got %s", id)
+		}
+	}
+	// Regression safety: the blocklist must not swallow a real edge in the
+	// same body.
+	trg := "sql::sql_trigger::billing.trg_orders"
+	audit := "sql::sql_table::billing.AuditLog"
+	if !g.edges["writes_table"][trg+"|"+audit] {
+		t.Errorf("real writes_table edge to AuditLog should survive the pseudo-table filter; got %v", g.edges["writes_table"])
+	}
+}
+
+// TestForeignKeyReferencesExtracted is the repro for bug (d): FOREIGN KEY
+// REFERENCES inside a CREATE TABLE body produced nothing. Covers bracketed +
+// schema-qualified and unbracketed + unqualified (defaults to dbo, same as
+// every other regex in this file) forms.
+func TestForeignKeyReferencesExtracted(t *testing.T) {
+	const sql = `CREATE TABLE billing.Customers (
+    CustomerID INT PRIMARY KEY
+)
+GO
+
+CREATE TABLE billing.Invoices (
+    InvoiceID INT PRIMARY KEY,
+    CustomerID INT,
+    CONSTRAINT FK_Invoices_Customers FOREIGN KEY (CustomerID)
+        REFERENCES [billing].[Customers](CustomerID)
+)
+GO
+
+CREATE TABLE billing.Orders (
+    id INT,
+    CustomerID INT,
+    FOREIGN KEY (CustomerID) REFERENCES Customers(id)
+)
+GO
+`
+	g := runExtractSQL(t, sql)
+	if !g.edges["depends_on_object"]["sql::sql_table::billing.Invoices|sql::sql_table::billing.Customers"] {
+		t.Errorf("bracketed, schema-qualified FK missing; got %v", g.edges["depends_on_object"])
+	}
+	if !g.edges["depends_on_object"]["sql::sql_table::billing.Orders|sql::sql_table::dbo.Customers"] {
+		t.Errorf("unbracketed, unqualified FK missing; got %v", g.edges["depends_on_object"])
+	}
+}
+
+// TestALTERTableForeignKeysNotCaptured documents a known non-goal (delta 2):
+// FKs added via ALTER TABLE ADD CONSTRAINT are not attached to any CREATE
+// TABLE body - splitObjects only splits on CREATE statements, so a
+// migration file containing only ALTER statements has no hits at all, and
+// its text is never scanned. A common migration-file pattern, deliberately
+// not handled this batch.
+func TestALTERTableForeignKeysNotCaptured(t *testing.T) {
+	dir := t.TempDir()
+	createSQL := `CREATE TABLE billing.Customers (CustomerID INT PRIMARY KEY)
+GO
+
+CREATE TABLE billing.Orders (id INT, CustomerID INT)
+GO
+`
+	// Realistic separate migration file: only an ALTER, no CREATE TABLE hit
+	// to anchor it to - this is what actually makes it invisible, not just
+	// proximity to its own table's CREATE statement.
+	alterSQL := `ALTER TABLE billing.Orders ADD CONSTRAINT FK_Orders_Customers
+    FOREIGN KEY (CustomerID) REFERENCES billing.Customers(CustomerID)
+GO
+`
+	if err := os.WriteFile(filepath.Join(dir, "001_create.sql"), []byte(createSQL), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "002_alter.sql"), []byte(alterSQL), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	frag, err := New().Extract(context.Background(), dir, "db-repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range frag.Edges {
+		if e.Relation == "depends_on_object" &&
+			e.Source == "sql::sql_table::billing.Orders" &&
+			e.Target == "sql::sql_table::billing.Customers" {
+			t.Error("ALTER TABLE ADD CONSTRAINT FK should not be captured this batch (documented non-goal)")
+		}
 	}
 }
