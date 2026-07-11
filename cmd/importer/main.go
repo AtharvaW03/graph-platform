@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"graph-platform/internal/importer"
 	"graph-platform/internal/neo4j"
@@ -15,6 +17,7 @@ func main() {
 	repo := flag.String("repo", "", "repository name to scope the imported graph (required)")
 	graphPath := flag.String("graph", "", "path to the graph.json to import (required)")
 	commit := flag.String("commit", "", "source commit SHA to stamp on imported nodes/edges; non-empty enables sweep of stale data from prior commits")
+	leaseTTL := flag.Duration("lease-ttl", 15*time.Minute, "writer lease TTL for this run; released on exit")
 	flag.Parse()
 
 	if *repo == "" || *graphPath == "" {
@@ -35,6 +38,27 @@ func main() {
 	fmt.Println("Connected to Neo4j")
 
 	ctx := context.Background()
+
+	// This CLI writes with the same credentials as the indexer, so it must
+	// take the same lease - otherwise it's a side door around the dual-writer
+	// protection. No --steal-lease here: recovering a stuck lease is the
+	// indexer's job, not a one-off import's.
+	owner := neo4j.LeaseOwner()
+	if err := client.AcquireLease(ctx, owner, *leaseTTL); err != nil {
+		var held *neo4j.ErrLeaseHeld
+		if errors.As(err, &held) {
+			log.Fatalf("writer lease held by %q until %s; stop the indexer first, then re-run.",
+				held.Owner, held.Expires.Format(time.RFC3339))
+		}
+		log.Fatalf("acquire writer lease: %v", err)
+	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := client.ReleaseLease(releaseCtx, owner); err != nil {
+			log.Printf("WARNING: release lease failed: %v", err)
+		}
+	}()
 
 	progress := func(stage string) {
 		switch stage {

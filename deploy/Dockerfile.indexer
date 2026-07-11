@@ -15,6 +15,23 @@ COPY --from=builder /out/indexer /usr/local/bin/indexer
 COPY deploy/indexer-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Pinned GitHub SSH host keys - see deploy/github-known-hosts for the source
+# and fingerprints. /etc/ssh/ssh_known_hosts is OpenSSH's default
+# system-wide known-hosts file, so git.go's existing
+# StrictHostKeyChecking=accept-new checks against this automatically with no
+# extra flags: a pinned host's key must match, unpinned hosts still TOFU.
+RUN mkdir -p /etc/ssh
+COPY deploy/github-known-hosts /etc/ssh/ssh_known_hosts
+
+# Nonroot: the entrypoint runs `git config --global` and writes
+# ~/.git-credentials, so HOME must be a real, writable home directory owned
+# by the user the process actually runs as - not root's.
+RUN groupadd -r appuser && useradd -r -g appuser -m -d /home/appuser appuser
+ENV HOME=/home/appuser
+
 WORKDIR /app
+RUN mkdir -p /app/workdir && chown -R appuser:appuser /app /home/appuser
+USER appuser
+
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/usr/local/bin/indexer", "--all"]

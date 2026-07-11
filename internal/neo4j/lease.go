@@ -2,12 +2,33 @@ package neo4j
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
+
+// LeaseOwner builds a writer-lease identity for the calling process:
+// hostname and pid so an operator can tell at a glance which machine/process
+// holds a lease, plus a short random suffix so two processes racing to start
+// on the same host don't collide on identity. Shared by cmd/indexer and
+// cmd/importer so both build owner strings the same way.
+func LeaseOwner() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown-host"
+	}
+	var b [4]byte
+	suffix := "????"
+	if _, err := rand.Read(b[:]); err == nil {
+		suffix = hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("%s-%d-%s", host, os.Getpid(), suffix)
+}
 
 // leaseLabel is deliberately not :Entity - the lease row must be invisible to
 // every Entity-scoped query (sweep, count, search) so it never gets deleted

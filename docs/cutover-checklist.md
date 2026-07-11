@@ -20,7 +20,10 @@ state; only one indexer may ever point at it at a time (see warning below).
 - [ ] EFS volumes provisioned and mounted in the task defs:
       - neo4j data volume -> `/data` on the neo4j task
       - indexer workdir volume -> `/app/workdir` on the indexer task
-- [ ] Internal ALB target group healthy on `GET /health` (query-service)
+- [ ] Internal ALB target group health check points at `GET /ready`, not
+      `/health` - `/ready` checks Neo4j connectivity, so the ALB stops
+      routing here if the database is unreachable; `/health` is pure liveness
+      and stays "ok" even then.
       ```
       aws elbv2 describe-target-health --target-group-arn <tg-arn>
       ```

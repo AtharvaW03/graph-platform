@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,8 +19,8 @@ func TestParseRepos(t *testing.T) {
 		{"", nil},
 		{"repos=orders-service", []string{"orders-service"}},
 		{"repos=a,b,c", []string{"a", "b", "c"}},
-		{"repos=a,%20b%20,", []string{"a", "b"}},           // trims and drops empties
-		{"repo=legacy", []string{"legacy"}},                // legacy single-repo param
+		{"repos=a,%20b%20,", []string{"a", "b"}},                // trims and drops empties
+		{"repo=legacy", []string{"legacy"}},                     // legacy single-repo param
 		{"repos=a,b&repo=legacy", []string{"a", "b", "legacy"}}, // both merge
 	}
 	for _, c := range cases {
@@ -54,6 +56,7 @@ func TestWithAuth(t *testing.T) {
 		{"token without Bearer prefix rejected", token, "/search", token, http.StatusUnauthorized},
 		{"correct token passes", token, "/search", "Bearer " + token, http.StatusOK},
 		{"health bypasses auth", token, "/health", "", http.StatusOK},
+		{"ready bypasses auth", token, "/ready", "", http.StatusOK},
 	}
 
 	for _, tc := range cases {
@@ -133,4 +136,41 @@ func TestWithRequestTimeout(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got status %d, want 200", rec.Code)
 	}
+}
+
+// fakeReadiness lets tests control /ready's outcome without a live Neo4j.
+type fakeReadiness struct{ err error }
+
+func (f fakeReadiness) VerifyConnectivity(context.Context) error { return f.err }
+
+func TestReadyCheck(t *testing.T) {
+	t.Run("ready when the dependency check passes", func(t *testing.T) {
+		s := NewServer(nil, fakeReadiness{})
+		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+		rec := httptest.NewRecorder()
+		s.Routes().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("got status %d, want 200", rec.Code)
+		}
+	})
+
+	t.Run("not ready when the dependency check fails", func(t *testing.T) {
+		s := NewServer(nil, fakeReadiness{err: errors.New("neo4j unreachable")})
+		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+		rec := httptest.NewRecorder()
+		s.Routes().ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("got status %d, want 503", rec.Code)
+		}
+	})
+
+	t.Run("nil Readiness always reports ready", func(t *testing.T) {
+		s := NewServer(nil, nil)
+		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+		rec := httptest.NewRecorder()
+		s.Routes().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("got status %d, want 200", rec.Code)
+		}
+	})
 }
