@@ -133,11 +133,11 @@ func TestIntegration_ImportNodesAndLinks_CountMatches(t *testing.T) {
 		{Source: "n1", Target: "n3", Relation: "references"},
 	}
 
-	idToKey, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", nodes, false)
+	idToKey, sharedKeys, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", nodes, false)
 	if err != nil {
 		t.Fatalf("import nodes: %v", err)
 	}
-	if _, _, _, err := c.ImportLinks(ctx, repo, "commit1", "run1", links, idToKey, false); err != nil {
+	if _, _, _, err := c.ImportLinks(ctx, repo, "commit1", "run1", links, idToKey, sharedKeys, false); err != nil {
 		t.Fatalf("import links: %v", err)
 	}
 
@@ -169,11 +169,11 @@ func TestIntegration_SweepStale_RemovesDroppedSubsetAndVerifiesClean(t *testing.
 		{Source: "n1", Target: "n2", Relation: "calls"},
 		{Source: "n2", Target: "n3", Relation: "calls"},
 	}
-	idToKey, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", all, false)
+	idToKey, sharedKeys, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", all, false)
 	if err != nil {
 		t.Fatalf("import nodes (run1): %v", err)
 	}
-	if _, _, _, err := c.ImportLinks(ctx, repo, "commit1", "run1", allLinks, idToKey, false); err != nil {
+	if _, _, _, err := c.ImportLinks(ctx, repo, "commit1", "run1", allLinks, idToKey, sharedKeys, false); err != nil {
 		t.Fatalf("import links (run1): %v", err)
 	}
 
@@ -182,11 +182,11 @@ func TestIntegration_SweepStale_RemovesDroppedSubsetAndVerifiesClean(t *testing.
 		astNode("n1", "a()", "a.go"),
 		astNode("n3", "c()", "c.go"),
 	}
-	idToKey2, _, err := c.ImportNodes(ctx, repo, "commit2", "run2", subset, false)
+	idToKey2, sharedKeys2, _, err := c.ImportNodes(ctx, repo, "commit2", "run2", subset, false)
 	if err != nil {
 		t.Fatalf("import nodes (run2): %v", err)
 	}
-	if _, _, _, err := c.ImportLinks(ctx, repo, "commit2", "run2", nil, idToKey2, false); err != nil {
+	if _, _, _, err := c.ImportLinks(ctx, repo, "commit2", "run2", nil, idToKey2, sharedKeys2, false); err != nil {
 		t.Fatalf("import links (run2): %v", err)
 	}
 
@@ -197,11 +197,11 @@ func TestIntegration_SweepStale_RemovesDroppedSubsetAndVerifiesClean(t *testing.
 	if nodesDeleted != 1 {
 		t.Errorf("nodesDeleted = %d, want 1 (n2)", nodesDeleted)
 	}
-	// n2's CONTAINS edge from :Repository is stamped with repo/last_run too
-	// (importNodeBatch stamps every CONTAINS edge, not just CALLS edges), so
-	// three relationships go stale: CONTAINS(repo->n2), CALLS(n1->n2), CALLS(n2->n3).
+	// n2's HAS_ENTITY edge from :Repository is stamped with repo/last_run too
+	// (importNodeBatch stamps every HAS_ENTITY edge, not just CALLS edges), so
+	// three relationships go stale: HAS_ENTITY(repo->n2), CALLS(n1->n2), CALLS(n2->n3).
 	if relsDeleted != 3 {
-		t.Errorf("relsDeleted = %d, want 3 (CONTAINS + both CALLS edges touching n2)", relsDeleted)
+		t.Errorf("relsDeleted = %d, want 3 (HAS_ENTITY + both CALLS edges touching n2)", relsDeleted)
 	}
 
 	if nodeExists(t, c, idToKey["n2"]) {
@@ -239,23 +239,23 @@ func TestIntegration_SweepStale_SharedNodeAcrossRepos(t *testing.T) {
 
 	// repoA: one own node depending on the shared package.
 	ownA := astNode("ownA", "svcA", "svcA.go")
-	idToKeyA, _, err := c.ImportNodes(ctx, repoA, "c1", "runA1", []graphify.Node{ownA, shared}, false)
+	idToKeyA, sharedKeysA, _, err := c.ImportNodes(ctx, repoA, "c1", "runA1", []graphify.Node{ownA, shared}, false)
 	if err != nil {
 		t.Fatalf("import nodes A: %v", err)
 	}
 	linksA := []graphify.Link{{Source: "ownA", Target: sharedID, Relation: "depends_on"}}
-	if _, _, _, err := c.ImportLinks(ctx, repoA, "c1", "runA1", linksA, idToKeyA, false); err != nil {
+	if _, _, _, err := c.ImportLinks(ctx, repoA, "c1", "runA1", linksA, idToKeyA, sharedKeysA, false); err != nil {
 		t.Fatalf("import links A: %v", err)
 	}
 
 	// repoB: same shared package, different own node.
 	ownB := astNode("ownB", "svcB", "svcB.go")
-	idToKeyB, _, err := c.ImportNodes(ctx, repoB, "c1", "runB1", []graphify.Node{ownB, shared}, false)
+	idToKeyB, sharedKeysB, _, err := c.ImportNodes(ctx, repoB, "c1", "runB1", []graphify.Node{ownB, shared}, false)
 	if err != nil {
 		t.Fatalf("import nodes B: %v", err)
 	}
 	linksB := []graphify.Link{{Source: "ownB", Target: sharedID, Relation: "depends_on"}}
-	if _, _, _, err := c.ImportLinks(ctx, repoB, "c1", "runB1", linksB, idToKeyB, false); err != nil {
+	if _, _, _, err := c.ImportLinks(ctx, repoB, "c1", "runB1", linksB, idToKeyB, sharedKeysB, false); err != nil {
 		t.Fatalf("import links B: %v", err)
 	}
 
@@ -265,7 +265,7 @@ func TestIntegration_SweepStale_SharedNodeAcrossRepos(t *testing.T) {
 	}
 
 	// Sweep repoA down to empty (re-import with no nodes, new runID).
-	if _, _, err := c.ImportNodes(ctx, repoA, "c2", "runA2", nil, false); err != nil {
+	if _, _, _, err := c.ImportNodes(ctx, repoA, "c2", "runA2", nil, false); err != nil {
 		t.Fatalf("import nodes A (empty): %v", err)
 	}
 	if _, _, err := c.SweepStale(ctx, repoA, "c2", "runA2"); err != nil {
@@ -277,7 +277,7 @@ func TestIntegration_SweepStale_SharedNodeAcrossRepos(t *testing.T) {
 	}
 
 	// Sweep repoB down to empty too - now nothing references the shared node.
-	if _, _, err := c.ImportNodes(ctx, repoB, "c2", "runB2", nil, false); err != nil {
+	if _, _, _, err := c.ImportNodes(ctx, repoB, "c2", "runB2", nil, false); err != nil {
 		t.Fatalf("import nodes B (empty): %v", err)
 	}
 	if _, _, err := c.SweepStale(ctx, repoB, "c2", "runB2"); err != nil {
@@ -299,7 +299,7 @@ func TestIntegration_SweepStale_RefusesEmptyCommitOrRun(t *testing.T) {
 		t.Fatalf("merge repository: %v", err)
 	}
 	nodes := []graphify.Node{astNode("n1", "a()", "a.go")}
-	if _, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", nodes, false); err != nil {
+	if _, _, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", nodes, false); err != nil {
 		t.Fatalf("import nodes: %v", err)
 	}
 
@@ -331,14 +331,14 @@ func TestIntegration_SweepStale_EvictsLegacyUnstampedNodes(t *testing.T) {
 
 	// Legacy unstamped import: empty commit skips last_run/last_commit entirely.
 	legacy := []graphify.Node{astNode("old1", "old()", "old.go")}
-	idToKeyLegacy, _, err := c.ImportNodes(ctx, repo, "", "", legacy, false)
+	idToKeyLegacy, _, _, err := c.ImportNodes(ctx, repo, "", "", legacy, false)
 	if err != nil {
 		t.Fatalf("legacy import: %v", err)
 	}
 
 	// A real stamped run follows, with a disjoint node set.
 	fresh := []graphify.Node{astNode("new1", "new()", "new.go")}
-	idToKeyFresh, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", fresh, false)
+	idToKeyFresh, _, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", fresh, false)
 	if err != nil {
 		t.Fatalf("stamped import: %v", err)
 	}

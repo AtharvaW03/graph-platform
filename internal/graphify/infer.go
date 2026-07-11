@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -108,6 +109,35 @@ var relationMap = map[string]string{
 func MapRelation(relation string) (string, bool) {
 	r, ok := relationMap[relation]
 	return r, ok
+}
+
+// allRelationTypes is every Neo4j relationship type ImportLinks can write,
+// computed once. It deliberately does NOT include HAS_ENTITY - that's the
+// platform's own repo-ownership edge (internal/neo4j importNodeBatch), never
+// a value in relationMap, so it's excluded from this list automatically
+// rather than by filtering.
+var allRelationTypes = sortedRelationValues()
+
+func sortedRelationValues() []string {
+	seen := make(map[string]bool, len(relationMap))
+	out := make([]string, 0, len(relationMap))
+	for _, v := range relationMap {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// AllRelationTypes returns every Neo4j relationship type graphify/extractors
+// can produce, sorted. Callers that need a traversal allowlist (e.g. a
+// shortestPath query that must not route through the Repository hub) use
+// this instead of hand-maintaining a duplicate list.
+func AllRelationTypes() []string {
+	return allRelationTypes
 }
 
 // sharedIDPrefixes mark org-global entities - a topic, package, SQL object, or

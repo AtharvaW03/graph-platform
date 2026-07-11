@@ -48,6 +48,23 @@ var labelAllowlist = map[string]bool{
 	"GlueSchedule":  true,
 }
 
+// removeAllLabelsClause is a static `REMOVE n:A:B:C...` over every allowlisted
+// label, built once. importNodeBatch runs it before re-adding a node's
+// current label so a kind change (Function -> Class, say) replaces the label
+// instead of accumulating both - StableKey doesn't change when a node's kind
+// does, so the node itself is never re-created, only re-labeled. :Entity is
+// never in labelAllowlist, so it's never removed.
+var removeAllLabelsClause = buildRemoveAllLabelsClause()
+
+func buildRemoveAllLabelsClause() string {
+	names := make([]string, 0, len(labelAllowlist))
+	for l := range labelAllowlist {
+		names = append(names, l)
+	}
+	sort.Strings(names)
+	return "REMOVE n:" + strings.Join(names, ":")
+}
+
 // metadataProps are the metadata keys promoted to node properties at import;
 // every other metadata key is dropped. Add a key here only if the query layer
 // reads it.
@@ -119,14 +136,19 @@ func (c *Client) EnsureConstraints(ctx context.Context) error {
 // CountEntitiesForRepo returns the :Entity count for repo, used to check the
 // import against the input count.
 //
-// It counts via the repo's CONTAINS edges rather than the node repo property:
-// shared nodes carry no repo property, so a property filter would under-report
-// by the number of shared nodes. Every node gets a CONTAINS edge from the repo,
-// so the edge count matches what this run wrote.
+// It counts via the repo's HAS_ENTITY edges rather than the node repo
+// property: shared nodes carry no repo property, so a property filter would
+// under-report by the number of shared nodes. Every node gets a HAS_ENTITY
+// edge from the repo, so the edge count matches what this run wrote.
+//
+// HAS_ENTITY is the platform's own repo-ownership edge, separate from
+// graphify's structural CONTAINS (file contains function, etc) - the two used
+// to share the CONTAINS type, which let shortestPath traversals route through
+// the Repository hub. See ImportNodes/importNodeBatch.
 func (c *Client) CountEntitiesForRepo(ctx context.Context, repo string) (int, error) {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{AccessMode: driver.AccessModeRead})
 	defer session.Close(ctx)
-	res, err := session.Run(ctx, `MATCH (:Repository {name: $repo})-[:CONTAINS]->(n:Entity) RETURN count(DISTINCT n) AS c`, map[string]any{"repo": repo})
+	res, err := session.Run(ctx, `MATCH (:Repository {name: $repo})-[:HAS_ENTITY]->(n:Entity) RETURN count(DISTINCT n) AS c`, map[string]any{"repo": repo})
 	if err != nil {
 		return 0, fmt.Errorf("count entities: %w", err)
 	}
@@ -150,9 +172,11 @@ func (c *Client) MergeRepository(ctx context.Context, repo string) error {
 // are stamped on each node for the sweep; pass "" to skip stamping. rewriteAll
 // forces a full property rewrite on every node regardless of content hash -
 // the --force repair path for manual property drift. Returns the graphify-ID
-// to node_key map and per-label counts.
-func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, nodes []graphify.Node, rewriteAll bool) (map[string]string, map[string]int, error) {
+// to node_key map, a node_key->shared map (true only for shared nodes, used
+// by ImportLinks to detect shared-shared edges), and per-label counts.
+func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, nodes []graphify.Node, rewriteAll bool) (map[string]string, map[string]bool, map[string]int, error) {
 	idToKey := make(map[string]string, len(nodes))
+	sharedKeys := make(map[string]bool, len(nodes))
 	labelGroups := make(map[string][]map[string]any)
 	labelCounts := make(map[string]int)
 
@@ -170,6 +194,7 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, no
 		var repoProp, sharedProp any
 		if graphify.IsShared(n) {
 			sharedProp = true
+			sharedKeys[key] = true
 		} else {
 			repoProp = repo
 		}
@@ -198,7 +223,12 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, no
 				row[k] = v
 			}
 		}
-		row["hash"] = rowContentHash(row, nodeProps)
+		// label is hashed (so a kind change invalidates the rewrite gate, see
+		// importNodeBatch) but is not a node property - it must never be added
+		// to nodeProps/setPairs, or `SET n += {...}` would create a literal
+		// "label" property instead of a Neo4j label.
+		row["label"] = label
+		row["hash"] = rowContentHash(row, nodeHashProps)
 		labelGroups[label] = append(labelGroups[label], row)
 	}
 
@@ -209,12 +239,12 @@ func (c *Client) ImportNodes(ctx context.Context, repo, commit, runID string, no
 				end = len(rows)
 			}
 			if err := c.importNodeBatch(ctx, label, repo, commit, runID, rows[i:end], rewriteAll); err != nil {
-				return nil, nil, fmt.Errorf("import nodes (%s): %w", label, err)
+				return nil, nil, nil, fmt.Errorf("import nodes (%s): %w", label, err)
 			}
 		}
 	}
 
-	return idToKey, labelCounts, nil
+	return idToKey, sharedKeys, labelCounts, nil
 }
 
 // rowContentHash hashes exactly the properties a batch write's SET map would
@@ -243,8 +273,17 @@ var linkHashProps = []string{"weight", "confidence", "cs", "context"}
 // deletion per repo. rewriteAll forces a full property rewrite regardless of
 // content hash. Returns per-relation, skipped-unknown, and skipped-dangling
 // counts.
-func (c *Client) ImportLinks(ctx context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string, rewriteAll bool) (map[string]int, int, int, error) {
+//
+// sharedKeys (from ImportNodes) marks which endpoints are shared. When BOTH
+// endpoints of an edge are shared (e.g. two SQL objects both org-global),
+// repo is folded into the MERGE key so each repo that emits the edge gets its
+// own parallel relationship instance instead of all repos fighting over one
+// shared instance's repo/last_run stamps - see importLinkBatch. An edge with
+// at least one repo-owned endpoint keeps today's shape unchanged; that
+// endpoint's own repo-scoping already makes the edge repo-specific.
+func (c *Client) ImportLinks(ctx context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string, sharedKeys map[string]bool, rewriteAll bool) (map[string]int, int, int, error) {
 	relGroups := make(map[string][]map[string]any)
+	sharedRelGroups := make(map[string][]map[string]any)
 	relCounts := make(map[string]int)
 	skippedUnknown := 0
 	skippedDangling := 0
@@ -271,19 +310,32 @@ func (c *Client) ImportLinks(ctx context.Context, repo, commit, runID string, li
 			"context":    l.Context,
 		}
 		row["hash"] = rowContentHash(row, linkHashProps)
-		relGroups[rel] = append(relGroups[rel], row)
+		if sharedKeys[srcKey] && sharedKeys[tgtKey] {
+			sharedRelGroups[rel] = append(sharedRelGroups[rel], row)
+		} else {
+			relGroups[rel] = append(relGroups[rel], row)
+		}
 	}
 
-	for rel, rows := range relGroups {
-		for i := 0; i < len(rows); i += batchSize {
-			end := i + batchSize
-			if end > len(rows) {
-				end = len(rows)
-			}
-			if err := c.importLinkBatch(ctx, rel, repo, commit, runID, rows[i:end], rewriteAll); err != nil {
-				return nil, 0, 0, fmt.Errorf("import links (%s): %w", rel, err)
+	importGroups := func(groups map[string][]map[string]any, sharedShared bool) error {
+		for rel, rows := range groups {
+			for i := 0; i < len(rows); i += batchSize {
+				end := i + batchSize
+				if end > len(rows) {
+					end = len(rows)
+				}
+				if err := c.importLinkBatch(ctx, rel, repo, commit, runID, rows[i:end], rewriteAll, sharedShared); err != nil {
+					return fmt.Errorf("import links (%s): %w", rel, err)
+				}
 			}
 		}
+		return nil
+	}
+	if err := importGroups(relGroups, false); err != nil {
+		return nil, 0, 0, err
+	}
+	if err := importGroups(sharedRelGroups, true); err != nil {
+		return nil, 0, 0, err
 	}
 
 	return relCounts, skippedUnknown, skippedDangling, nil
@@ -348,8 +400,8 @@ RETURN count(n) AS deleted`, params, "sweep stale nodes")
 		return 0, 0, err
 	}
 
-	// Step 3: reap shared nodes with no remaining Entity edges. CONTAINS edges
-	// from a Repository don't count as references. This is an unscoped
+	// Step 3: reap shared nodes with no remaining Entity edges. HAS_ENTITY
+	// edges from a Repository don't count as references. This is an unscoped
 	// full-graph scan, so only run it when this sweep actually deleted
 	// something - in a single-writer world, a shared node can only become
 	// orphaned as the direct result of a node or edge deletion, never by
@@ -421,23 +473,39 @@ var nodeProps = append([]string{
 	"file_type", "community", "community_name", "ecosystem", "repo", "shared",
 }, metadataProps...)
 
+// nodeHashProps is nodeProps plus "label" - the content hash must reflect a
+// kind change (Function -> Class) even though "label" is never one of the SET
+// properties. Keeping this list separate from nodeProps is what keeps a
+// Neo4j label from also being written as a literal node property.
+var nodeHashProps = append(append([]string(nil), nodeProps...), "label")
+
 // importNodeBatch runs one UNWIND batch for a single label.
 //
 // label is validated against labelAllowlist before reaching here, so
 // interpolating it into the query string is safe. commit, if non-empty, is
-// stamped on every node and CONTAINS edge as last_commit/last_run,
+// stamped on every node and HAS_ENTITY edge as last_commit/last_run,
 // unconditionally for every row in the batch - that stamp is what SweepStale
 // keys staleness on, so it must never be skipped for a live row. An empty
 // commit preserves legacy behavior for the static-graph importer CLI: no
 // stamps, and always a full property rewrite (there's no content_hash
 // baseline to gate against without a run to compare against).
 //
-// The full `SET n += {...}` (and content_hash refresh) only runs for rows
-// whose hash differs from the stored one, or when rewriteAll forces it. The
-// label set and CONTAINS edge stay unconditional so every row still gets
-// those regardless of whether its properties were rewritten - a FOREACH/CASE
-// gate is used instead of a WITH...WHERE filter so unchanged rows aren't
-// dropped from the query's row stream before reaching the CONTAINS step.
+// The full property rewrite (SET n += {...}, content_hash refresh) only runs
+// for rows whose hash differs from the stored one, or when rewriteAll forces
+// it. Label maintenance (REMOVE every allowlisted label, then SET the
+// current one) runs inside that same gate: since row.hash includes the
+// current label (see ImportNodes), a kind change always trips the gate, so
+// REMOVE+SET always fires when the label actually needs to change - the node
+// never accumulates a stale label from a prior kind. The HAS_ENTITY edge
+// stays unconditional so every row still gets it regardless of whether its
+// properties were rewritten - a FOREACH/CASE gate is used instead of a
+// WITH...WHERE filter so unchanged rows aren't dropped from the query's row
+// stream before reaching the HAS_ENTITY step.
+//
+// HAS_ENTITY is the platform's repo-ownership edge, deliberately not named
+// CONTAINS: graphify's own AST relation ("file contains function") uses
+// CONTAINS too, and sharing one type let path queries route through the
+// Repository hub as if it were a real 2-hop structural relationship.
 func (c *Client) importNodeBatch(ctx context.Context, label, repo, commit, runID string, batch []map[string]any, rewriteAll bool) error {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
 	defer session.Close(ctx)
@@ -448,10 +516,10 @@ func (c *Client) importNodeBatch(ctx context.Context, label, repo, commit, runID
 	}
 
 	stampClause := ""
-	containsCommit := ""
+	hasEntityCommit := ""
 	if commit != "" {
 		stampClause = "SET n.last_commit = $commit, n.last_run = $run"
-		containsCommit = ", c.last_commit = $commit, c.last_run = $run"
+		hasEntityCommit = ", c.last_commit = $commit, c.last_run = $run"
 	}
 
 	skipGate := "true"
@@ -463,17 +531,18 @@ func (c *Client) importNodeBatch(ctx context.Context, label, repo, commit, runID
 MATCH (repo:Repository {name: $repo})
 UNWIND $batch AS row
 MERGE (n:Entity {node_key: row.key})
-SET n:%s
 %s
 WITH repo, n, row, (%s) AS needsRewrite
 FOREACH (_ IN CASE WHEN needsRewrite THEN [1] ELSE [] END |
+  %s
+  SET n:%s
   SET n += {
     %s,
     content_hash: row.hash
   }
 )
-MERGE (repo)-[c:CONTAINS]->(n)
-SET c.repo = $repo%s`, label, stampClause, skipGate, strings.Join(setPairs, ",\n    "), containsCommit)
+MERGE (repo)-[c:HAS_ENTITY]->(n)
+SET c.repo = $repo%s`, stampClause, skipGate, removeAllLabelsClause, label, strings.Join(setPairs, ",\n    "), hasEntityCommit)
 
 	params := map[string]any{"repo": repo, "batch": batch}
 	if commit != "" {
@@ -486,20 +555,40 @@ SET c.repo = $repo%s`, label, stampClause, skipGate, strings.Join(setPairs, ",\n
 
 // importLinkBatch runs one UNWIND batch for a single relationship type.
 // rel is validated via MapRelation's allowlist map before reaching here.
-// repo and, when commit is non-empty, last_commit/last_run are stamped on
-// every row unconditionally - same reasoning as importNodeBatch: those stamps
-// are what SweepStale keys staleness on. The weight/confidence/context
-// property rewrite is gated on content hash the same way, bypassed by
-// rewriteAll or an empty commit (no baseline to compare against).
+// commit, when non-empty, stamps last_commit/last_run on every row
+// unconditionally - same reasoning as importNodeBatch: those stamps are what
+// SweepStale keys staleness on. The weight/confidence/context property
+// rewrite is gated on content hash the same way, bypassed by rewriteAll or an
+// empty commit (no baseline to compare against).
 //
 // MERGE keys on (source, type, target) only, so parallel edges collapse: two
 // distinct call sites between the same pair become ONE edge, and the last
 // row's weight/context wins. This is deliberate - the graph answers "does A
 // call B", not "how many times" - but callers should not read weight as a
 // call-site count.
-func (c *Client) importLinkBatch(ctx context.Context, rel, repo, commit, runID string, batch []map[string]any, rewriteAll bool) error {
+//
+// sharedShared changes that collapsing for one specific case: an edge whose
+// BOTH endpoints are shared nodes (e.g. two org-global SQL objects). Without
+// it, two repos independently emitting the same shared-to-shared edge fight
+// over one relationship's repo/last_run stamps - whichever repo imports last
+// "owns" it, and that repo's sweep can delete the edge out from under the
+// other repo's still-valid reference. With it, repo is folded into the MERGE
+// key, so each repo gets its own parallel edge instance, each with its own
+// stamps, so one repo's sweep only ever touches its own instance. An edge
+// with at least one repo-owned endpoint doesn't need this: that endpoint's
+// own repo scoping already makes the edge unambiguous.
+func (c *Client) importLinkBatch(ctx context.Context, rel, repo, commit, runID string, batch []map[string]any, rewriteAll, sharedShared bool) error {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
 	defer session.Close(ctx)
+
+	mergeClause := fmt.Sprintf("MERGE (a)-[r:%s]->(b)\nSET r.repo = $repo", rel)
+	if sharedShared {
+		// repo is part of the merge pattern itself, not a separate SET: MERGE
+		// only matches an existing edge whose repo already equals this one, so
+		// a different repo's edge is left untouched and a new parallel edge is
+		// created instead of being overwritten.
+		mergeClause = fmt.Sprintf("MERGE (a)-[r:%s {repo: $repo}]->(b)", rel)
+	}
 
 	stampClause := ""
 	if commit != "" {
@@ -515,8 +604,7 @@ func (c *Client) importLinkBatch(ctx context.Context, rel, repo, commit, runID s
 UNWIND $batch AS row
 MATCH (a:Entity {node_key: row.s})
 MATCH (b:Entity {node_key: row.t})
-MERGE (a)-[r:%s]->(b)
-SET r.repo = $repo
+%s
 %s
 WITH r, row, (%s) AS needsRewrite
 FOREACH (_ IN CASE WHEN needsRewrite THEN [1] ELSE [] END |
@@ -527,7 +615,7 @@ FOREACH (_ IN CASE WHEN needsRewrite THEN [1] ELSE [] END |
     context:          row.context,
     content_hash:     row.hash
   }
-)`, rel, stampClause, skipGate)
+)`, mergeClause, stampClause, skipGate)
 
 	params := map[string]any{"batch": batch, "repo": repo}
 	if commit != "" {

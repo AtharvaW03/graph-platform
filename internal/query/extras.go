@@ -283,7 +283,7 @@ func (s *Service) FindGlueJobs(ctx context.Context, source, target string) ([]Gl
 MATCH (j:GlueJob)
 OPTIONAL MATCH (j)-[:READS_SOURCE]->(s:Entity)
 OPTIONAL MATCH (j)-[:WRITES_DESTINATION]->(t:Entity)
-OPTIONAL MATCH (r:Repository)-[:CONTAINS]->(j)
+OPTIONAL MATCH (r:Repository)-[:HAS_ENTITY]->(j)
 WITH j, r, collect(DISTINCT s.name) AS sources, collect(DISTINCT t.name) AS targets
 WHERE ($source = '' OR $source IN sources)
   AND ($target = '' OR $target IN targets)
