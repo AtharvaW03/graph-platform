@@ -51,7 +51,7 @@ func TestIntegration_ReimportSameContent_HashAndPropertiesUnchanged(t *testing.T
 	}
 
 	node := astNode("n1", "a()", "a.go")
-	idToKey1, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", []graphify.Node{node}, false)
+	idToKey1, _, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", []graphify.Node{node}, false)
 	if err != nil {
 		t.Fatalf("import (run1): %v", err)
 	}
@@ -62,7 +62,7 @@ func TestIntegration_ReimportSameContent_HashAndPropertiesUnchanged(t *testing.T
 	}
 
 	// Re-import identical content, new runID.
-	idToKey2, _, err := c.ImportNodes(ctx, repo, "commit2", "run2", []graphify.Node{node}, false)
+	idToKey2, _, _, err := c.ImportNodes(ctx, repo, "commit2", "run2", []graphify.Node{node}, false)
 	if err != nil {
 		t.Fatalf("import (run2): %v", err)
 	}
@@ -98,7 +98,7 @@ func TestIntegration_ManualDrift_SurvivesHashSkip_RepairedByRewriteAll(t *testin
 	}
 
 	node := astNode("n1", "a()", "a.go")
-	idToKey, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", []graphify.Node{node}, false)
+	idToKey, _, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", []graphify.Node{node}, false)
 	if err != nil {
 		t.Fatalf("import (run1): %v", err)
 	}
@@ -110,7 +110,7 @@ func TestIntegration_ManualDrift_SurvivesHashSkip_RepairedByRewriteAll(t *testin
 
 	// Re-import normally (rewriteAll=false): hash still matches the original
 	// node content, so the full SET is skipped and the tampered value survives.
-	if _, _, err := c.ImportNodes(ctx, repo, "commit2", "run2", []graphify.Node{node}, false); err != nil {
+	if _, _, _, err := c.ImportNodes(ctx, repo, "commit2", "run2", []graphify.Node{node}, false); err != nil {
 		t.Fatalf("import (run2, no rewrite): %v", err)
 	}
 	if got := nodeProp(t, c, key, "name"); got != "TAMPERED" {
@@ -118,7 +118,7 @@ func TestIntegration_ManualDrift_SurvivesHashSkip_RepairedByRewriteAll(t *testin
 	}
 
 	// Re-import with rewriteAll=true: bypasses the hash skip, repairs the value.
-	if _, _, err := c.ImportNodes(ctx, repo, "commit3", "run3", []graphify.Node{node}, true); err != nil {
+	if _, _, _, err := c.ImportNodes(ctx, repo, "commit3", "run3", []graphify.Node{node}, true); err != nil {
 		t.Fatalf("import (run3, rewriteAll): %v", err)
 	}
 	if got := nodeProp(t, c, key, "name"); got != "a()" {
@@ -137,7 +137,7 @@ func TestIntegration_ContentChange_UpdatesPropertyAndHash(t *testing.T) {
 	}
 
 	node := astNode("n1", "a()", "a.go")
-	idToKey, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", []graphify.Node{node}, false)
+	idToKey, _, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", []graphify.Node{node}, false)
 	if err != nil {
 		t.Fatalf("import (run1): %v", err)
 	}
@@ -151,7 +151,7 @@ func TestIntegration_ContentChange_UpdatesPropertyAndHash(t *testing.T) {
 	// the SAME node - the case this test needs.
 	changed := node
 	changed.SourceLocation = "42"
-	if _, _, err := c.ImportNodes(ctx, repo, "commit2", "run2", []graphify.Node{changed}, false); err != nil {
+	if _, _, _, err := c.ImportNodes(ctx, repo, "commit2", "run2", []graphify.Node{changed}, false); err != nil {
 		t.Fatalf("import (run2, changed content): %v", err)
 	}
 

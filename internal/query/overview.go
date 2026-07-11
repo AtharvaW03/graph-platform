@@ -206,9 +206,9 @@ RETURN count(DISTINCT n) AS nodes, count(r) AS rels
 }
 
 func (s *Service) overviewLabelCounts(ctx context.Context, repo string) ([]LabeledCount, error) {
-	// Scoped via CONTAINS so shared entities (topics, packages, SQL) count too.
+	// Scoped via HAS_ENTITY so shared entities (topics, packages, SQL) count too.
 	const cypher = `
-MATCH (:Repository {name: $repo})-[:CONTAINS]->(n:Entity)
+MATCH (:Repository {name: $repo})-[:HAS_ENTITY]->(n:Entity)
 UNWIND labels(n) AS l
 WITH l WHERE l <> 'Entity'
 RETURN l AS name, count(*) AS c
@@ -364,11 +364,11 @@ LIMIT $limit
 }
 
 // overviewKafka returns the topics the repo references with their producers
-// and consumers. Topics are shared nodes, scoped via CONTAINS; the producer
+// and consumers. Topics are shared nodes, scoped via HAS_ENTITY; the producer
 // and consumer lists span all repos to show the full topology.
 func (s *Service) overviewKafka(ctx context.Context, repo string) (KafkaSummary, error) {
 	const cypher = `
-MATCH (:Repository {name: $repo})-[:CONTAINS]->(t:KafkaTopic)
+MATCH (:Repository {name: $repo})-[:HAS_ENTITY]->(t:KafkaTopic)
 OPTIONAL MATCH (p:Entity)-[:PRODUCES]->(t)
 OPTIONAL MATCH (c:Entity)-[:CONSUMES]->(t)
 RETURN t.name AS topic,
@@ -401,10 +401,10 @@ ORDER BY topic
 }
 
 // overviewSQL groups the SQL objects the repo references by kind (scoped via
-// CONTAINS, since SQL objects are shared nodes).
+// HAS_ENTITY, since SQL objects are shared nodes).
 func (s *Service) overviewSQL(ctx context.Context, repo string) (SQLSummary, error) {
 	const cypher = `
-MATCH (:Repository {name: $repo})-[:CONTAINS]->(o:Entity)
+MATCH (:Repository {name: $repo})-[:HAS_ENTITY]->(o:Entity)
 WHERE any(l IN labels(o) WHERE l IN
       ['SqlSchema','SqlTable','SqlView','SqlProcedure','SqlFunction','SqlTrigger'])
 RETURN DISTINCT head([l IN labels(o) WHERE l STARTS WITH 'Sql']) AS kind,

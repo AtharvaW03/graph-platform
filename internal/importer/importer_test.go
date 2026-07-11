@@ -36,19 +36,24 @@ func (f *fakeClient) MergeRepository(_ context.Context, repo string) error {
 	return nil
 }
 
-func (f *fakeClient) ImportNodes(_ context.Context, repo, commit, runID string, nodes []graphify.Node, rewriteAll bool) (map[string]string, map[string]int, error) {
+func (f *fakeClient) ImportNodes(_ context.Context, repo, commit, runID string, nodes []graphify.Node, rewriteAll bool) (map[string]string, map[string]bool, map[string]int, error) {
 	f.calls = append(f.calls, "nodes")
 	f.nodesRepo, f.nodesCommit, f.nodesRun, f.nodesRewriteAll = repo, commit, runID, rewriteAll
 	idToKey := map[string]string{}
+	sharedKeys := map[string]bool{}
 	counts := map[string]int{}
 	for _, n := range nodes {
-		idToKey[n.ID] = graphify.StableKey(repo, n)
+		key := graphify.StableKey(repo, n)
+		idToKey[n.ID] = key
+		if graphify.IsShared(n) {
+			sharedKeys[key] = true
+		}
 		counts[graphify.InferLabel(n)]++
 	}
-	return idToKey, counts, nil
+	return idToKey, sharedKeys, counts, nil
 }
 
-func (f *fakeClient) ImportLinks(_ context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string, rewriteAll bool) (map[string]int, int, int, error) {
+func (f *fakeClient) ImportLinks(_ context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string, sharedKeys map[string]bool, rewriteAll bool) (map[string]int, int, int, error) {
 	f.calls = append(f.calls, "links")
 	f.linksRepo, f.linksCommit, f.linksRun, f.linksRewriteAll = repo, commit, runID, rewriteAll
 	counts := map[string]int{}

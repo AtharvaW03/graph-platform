@@ -37,6 +37,38 @@ func TestMapRelation(t *testing.T) {
 	}
 }
 
+func TestAllRelationTypes(t *testing.T) {
+	types := AllRelationTypes()
+	if len(types) == 0 {
+		t.Fatal("AllRelationTypes returned nothing")
+	}
+	seen := map[string]bool{}
+	for _, r := range types {
+		if seen[r] {
+			t.Errorf("duplicate relation type %q", r)
+		}
+		seen[r] = true
+		if r == "HAS_ENTITY" {
+			t.Error("HAS_ENTITY is the platform's own ownership edge, must never appear here")
+		}
+	}
+	// CONTAINS is graphify's real file->symbol relation, distinct from the
+	// platform's HAS_ENTITY ownership edge - it belongs in the traversal
+	// allowlist.
+	if !seen["CONTAINS"] {
+		t.Error("CONTAINS (graphify's structural relation) should be included")
+	}
+	if !seen["CALLS"] {
+		t.Error("CALLS should be included")
+	}
+	// Sorted, so callers get a stable, diffable list.
+	for i := 1; i < len(types); i++ {
+		if types[i-1] >= types[i] {
+			t.Errorf("not sorted: %q before %q", types[i-1], types[i])
+		}
+	}
+}
+
 func TestStableKeyPlatformNodesUseGlobalID(t *testing.T) {
 	topic := Node{ID: "topic::trade_executed", Label: "trade_executed", Origin: "platform"}
 	keyA := StableKey("repo-a", topic)

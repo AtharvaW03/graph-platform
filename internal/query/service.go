@@ -7,16 +7,33 @@ import (
 	"strings"
 	"time"
 
+	"graph-platform/internal/graphify"
 	"graph-platform/internal/neo4j"
 
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
 
+// shortestPathRelTypes is the traversal allowlist for ShortestPath: every
+// relation graphify/extractors can emit, pipe-joined for a Cypher type
+// disjunction. HAS_ENTITY (the platform's repo-ownership edge) is not in
+// this list because it's not a value graphify.AllRelationTypes returns -
+// without this, a bare [*..N] pattern would route paths through the
+// Repository hub, since every entity has one HAS_ENTITY edge back to it.
+var shortestPathRelTypes = strings.Join(graphify.AllRelationTypes(), "|")
+
 const (
 	defaultBlastDepth   = 3
 	maxBlastDepth       = 10
 	shortestPathHopsMax = 15
-	searchLimit         = 100
+	// shortestPathCandidatePairs bounds how many (src, dst) name-matches are
+	// tried when a name is ambiguous (multiple repos define the same symbol
+	// name). Picking a shortest path across all of them beats grabbing an
+	// arbitrary pair that might not even be connected. Which pairs land in
+	// the first 25 is non-deterministic when more than 25 match - acceptable
+	// since the match itself is exact-equality, so every candidate pair is an
+	// equally legitimate match with nothing to rank between them.
+	shortestPathCandidatePairs = 25
+	searchLimit                = 100
 
 	// symbolLimit caps result sets so a hub symbol can't return tens of
 	// thousands of rows.
@@ -306,6 +323,17 @@ LIMIT $limit
 // type used to reach it from the previous node (empty on the first).
 // repos non-empty scopes which nodes can anchor the endpoints; the path
 // itself may traverse any repo.
+//
+// The traversal is restricted to shortestPathRelTypes (every real graphify/
+// extractor relation) - it deliberately excludes HAS_ENTITY, the platform's
+// repo-ownership edge, so a path can't take a nonsense 2-hop shortcut through
+// the Repository hub that owns both endpoints.
+//
+// A name can match several entities (same symbol name in different repos),
+// and an arbitrary pick among them might not even be connected while another
+// pair is. So this tries up to shortestPathCandidatePairs (src, dst) pairs
+// and keeps the shortest path found across all of them, rather than
+// committing to one arbitrary pair up front.
 func (s *Service) ShortestPath(ctx context.Context, source, target string, repos []string) ([]PathNode, error) {
 	if source == "" || target == "" {
 		return []PathNode{}, nil
@@ -316,8 +344,11 @@ MATCH (src:Entity), (dst:Entity)
 WHERE (src.name_lower = $src OR src.norm_name_lower = $src)
   AND (dst.name_lower = $dst OR dst.norm_name_lower = $dst)
   AND (size($repos) = 0 OR (src.repo IN $repos AND dst.repo IN $repos))
-WITH src, dst LIMIT 1
-MATCH p = shortestPath((src)-[*..%d]-(dst))
+WITH src, dst LIMIT %d
+OPTIONAL MATCH p = shortestPath((src)-[:%s*..%d]-(dst))
+WITH p WHERE p IS NOT NULL
+ORDER BY length(p) ASC
+LIMIT 1
 WITH nodes(p) AS ns, relationships(p) AS rs
 UNWIND range(0, size(ns)-1) AS i
 RETURN ns[i].name  AS name,
@@ -327,7 +358,7 @@ RETURN ns[i].name  AS name,
        CASE WHEN i = 0 THEN '' ELSE type(rs[i-1]) END AS relationship,
        i AS idx
 ORDER BY idx
-`, shortestPathHopsMax)
+`, shortestPathCandidatePairs, shortestPathRelTypes, shortestPathHopsMax)
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
 		res, err := tx.Run(ctx, cypher, map[string]any{"src": strings.ToLower(source), "dst": strings.ToLower(target), "repos": orEmpty(repos)})

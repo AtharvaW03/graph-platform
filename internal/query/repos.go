@@ -18,7 +18,7 @@ func (s *Service) ListRepositories(ctx context.Context) ([]RepoInfo, error) {
 	const cypher = `
 MATCH (r:Repository)
 RETURN r.name AS name,
-       count { (r)-[:CONTAINS]->(:Entity) } AS nodes
+       count { (r)-[:HAS_ENTITY]->(:Entity) } AS nodes
 ORDER BY name
 `
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {

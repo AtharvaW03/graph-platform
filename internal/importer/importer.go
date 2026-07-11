@@ -30,8 +30,8 @@ func newRunID() string {
 type Neo4jClient interface {
 	EnsureConstraints(ctx context.Context) error
 	MergeRepository(ctx context.Context, repo string) error
-	ImportNodes(ctx context.Context, repo, commit, runID string, nodes []graphify.Node, rewriteAll bool) (map[string]string, map[string]int, error)
-	ImportLinks(ctx context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string, rewriteAll bool) (map[string]int, int, int, error)
+	ImportNodes(ctx context.Context, repo, commit, runID string, nodes []graphify.Node, rewriteAll bool) (idToKey map[string]string, sharedKeys map[string]bool, labelCounts map[string]int, err error)
+	ImportLinks(ctx context.Context, repo, commit, runID string, links []graphify.Link, idToKey map[string]string, sharedKeys map[string]bool, rewriteAll bool) (map[string]int, int, int, error)
 	SweepStale(ctx context.Context, repo, commit, runID string) (int, int, error)
 	VerifySweepClean(ctx context.Context, repo, runID string) (staleNodes, staleRels int, err error)
 	CountEntitiesForRepo(ctx context.Context, repo string) (int, error)
@@ -169,13 +169,13 @@ func RunWithGraph(ctx context.Context, client Neo4jClient, repo, commit string, 
 	}
 
 	progress(StageNodes)
-	idToKey, labelCounts, err := client.ImportNodes(ctx, repo, commit, runID, g.Nodes, rewriteAll)
+	idToKey, sharedKeys, labelCounts, err := client.ImportNodes(ctx, repo, commit, runID, g.Nodes, rewriteAll)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", StageNodes, err)
 	}
 
 	progress(StageLinks)
-	relCounts, skippedUnknown, skippedDangling, err := client.ImportLinks(ctx, repo, commit, runID, g.Links, idToKey, rewriteAll)
+	relCounts, skippedUnknown, skippedDangling, err := client.ImportLinks(ctx, repo, commit, runID, g.Links, idToKey, sharedKeys, rewriteAll)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", StageLinks, err)
 	}
