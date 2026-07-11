@@ -7,6 +7,7 @@ import (
 	"log"
 	"testing"
 
+	"graph-platform/internal/extract"
 	"graph-platform/internal/importer"
 )
 
@@ -55,6 +56,37 @@ func (f *fakeLeaseRenewer) Renew(context.Context) error {
 		return errors.New("lease stolen by another owner")
 	}
 	return nil
+}
+
+// fakeExtractor always fails - used to drive the extractor fail-closed gate.
+type fakeExtractor struct {
+	name string
+	err  error
+}
+
+func (f fakeExtractor) Name() string { return f.name }
+func (f fakeExtractor) Extract(context.Context, string, string) (*extract.Fragment, error) {
+	return nil, f.err
+}
+
+// configurableImportRunner lets a test control what the import stage returns
+// (including a mismatch or sweep residue) and counts calls, so a test can
+// assert the importer was never reached (the fail-closed extractor gate).
+type configurableImportRunner struct {
+	summary *importer.Summary
+	err     error
+	calls   int
+}
+
+func (r *configurableImportRunner) Run(context.Context, string, string, string, bool) (*importer.Summary, error) {
+	r.calls++
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.summary != nil {
+		return r.summary, nil
+	}
+	return &importer.Summary{}, nil
 }
 
 func testOrchestrator(repos []Repository, lease LeaseRenewer) *Orchestrator {
@@ -131,5 +163,174 @@ func TestRunOnce_NoLeaseConfigured_NeverCallsRenew(t *testing.T) {
 	}
 	if len(summary.Results) != 3 {
 		t.Fatalf("got %d results, want 3", len(summary.Results))
+	}
+}
+
+func oneRepo() Repository {
+	return Repository{Name: "repo-x", URL: "file:///x", Branch: "main"}
+}
+
+func TestIndexOne_ExtractorErrorFailsClosedByDefault(t *testing.T) {
+	importRunner := &configurableImportRunner{}
+	store := newFakeStore()
+	o := &Orchestrator{
+		Source:   fakeSource{},
+		Syncer:   fakeSyncer{},
+		Graphify: fakeGraphifier{},
+		Importer: importRunner,
+		Store:    store,
+		WorkDir:  ".",
+		Log:      log.New(io.Discard, "", 0),
+		Extractors: &extract.Runner{
+			Extractors: []extract.Extractor{fakeExtractor{name: "deps", err: errors.New("manifest parse failed")}},
+			Log:        log.New(io.Discard, "", 0),
+		},
+		// AllowPartialExtractorErrors left false: default fail-closed.
+	}
+
+	result := o.IndexOne(context.Background(), oneRepo(), false)
+
+	if result.Status != StatusFailed {
+		t.Fatalf("status = %s, want failed", result.Status)
+	}
+	if result.Stage != StageExtract {
+		t.Errorf("stage = %s, want %s", result.Stage, StageExtract)
+	}
+	if result.ExtractorErrors["deps"] == "" {
+		t.Error("ExtractorErrors[\"deps\"] should be recorded even though the run failed closed")
+	}
+	if importRunner.calls != 0 {
+		t.Errorf("importer.Run called %d times, want 0 - fail-closed must never import", importRunner.calls)
+	}
+
+	st, ok := store.Get("repo-x")
+	if !ok {
+		t.Fatal("state should have been persisted (failure, not cancellation)")
+	}
+	if st.LastIndexedCommit != "" {
+		t.Errorf("LastIndexedCommit = %q, want empty - state must not advance on a failed-closed run", st.LastIndexedCommit)
+	}
+	if st.ConsecutiveFails != 1 {
+		t.Errorf("ConsecutiveFails = %d, want 1", st.ConsecutiveFails)
+	}
+}
+
+func TestIndexOne_ExtractorErrorAllowPartialImportsAnyway(t *testing.T) {
+	importRunner := &configurableImportRunner{}
+	store := newFakeStore()
+	o := &Orchestrator{
+		Source:   fakeSource{},
+		Syncer:   fakeSyncer{},
+		Graphify: fakeGraphifier{},
+		Importer: importRunner,
+		Store:    store,
+		WorkDir:  ".",
+		Log:      log.New(io.Discard, "", 0),
+		Extractors: &extract.Runner{
+			Extractors: []extract.Extractor{fakeExtractor{name: "deps", err: errors.New("manifest parse failed")}},
+			Log:        log.New(io.Discard, "", 0),
+		},
+		AllowPartialExtractorErrors: true,
+	}
+
+	result := o.IndexOne(context.Background(), oneRepo(), false)
+
+	if result.Status != StatusSuccess {
+		t.Fatalf("status = %s, want success (allow_partial preserves the old behavior)", result.Status)
+	}
+	if result.ExtractorErrors["deps"] == "" {
+		t.Error("ExtractorErrors[\"deps\"] should still be recorded")
+	}
+	if importRunner.calls != 1 {
+		t.Errorf("importer.Run called %d times, want 1 - allow_partial must still import", importRunner.calls)
+	}
+
+	st, ok := store.Get("repo-x")
+	if !ok || st.LastIndexedCommit != "deadbeef" {
+		t.Errorf("state should have advanced to commit deadbeef, got %+v (ok=%v)", st, ok)
+	}
+}
+
+func TestIndexOne_MismatchFailsRepoAndDoesNotAdvanceState(t *testing.T) {
+	importRunner := &configurableImportRunner{summary: &importer.Summary{
+		Commit:       "deadbeef",
+		NodesTotal:   10,
+		NodesInGraph: 7, // mismatch
+	}}
+	store := newFakeStore()
+	o := &Orchestrator{
+		Source:   fakeSource{},
+		Syncer:   fakeSyncer{},
+		Graphify: fakeGraphifier{},
+		Importer: importRunner,
+		Store:    store,
+		WorkDir:  ".",
+		Log:      log.New(io.Discard, "", 0),
+	}
+
+	result := o.IndexOne(context.Background(), oneRepo(), false)
+
+	if result.Status != StatusFailed {
+		t.Fatalf("status = %s, want failed", result.Status)
+	}
+	if result.Stage != StageImport {
+		t.Errorf("stage = %s, want %s", result.Stage, StageImport)
+	}
+	if !result.Mismatch {
+		t.Error("Mismatch should be true")
+	}
+	if result.Error == "" {
+		t.Error("Error should describe the mismatch")
+	}
+
+	st, ok := store.Get("repo-x")
+	if !ok {
+		t.Fatal("state should have been persisted (failure, not cancellation)")
+	}
+	if st.LastIndexedCommit != "" {
+		t.Errorf("LastIndexedCommit = %q, want empty - a mismatch must not advance state", st.LastIndexedCommit)
+	}
+}
+
+func TestIndexOne_SweepResidueFailsRepoAndDoesNotAdvanceState(t *testing.T) {
+	importRunner := &configurableImportRunner{summary: &importer.Summary{
+		Commit:            "deadbeef",
+		NodesTotal:        10,
+		NodesInGraph:      10, // no mismatch
+		SweepResidueNodes: 2,
+		SweepResidueRels:  1,
+	}}
+	store := newFakeStore()
+	o := &Orchestrator{
+		Source:   fakeSource{},
+		Syncer:   fakeSyncer{},
+		Graphify: fakeGraphifier{},
+		Importer: importRunner,
+		Store:    store,
+		WorkDir:  ".",
+		Log:      log.New(io.Discard, "", 0),
+	}
+
+	result := o.IndexOne(context.Background(), oneRepo(), false)
+
+	if result.Status != StatusFailed {
+		t.Fatalf("status = %s, want failed", result.Status)
+	}
+	if result.Stage != StageImport {
+		t.Errorf("stage = %s, want %s", result.Stage, StageImport)
+	}
+	if !result.SweepResidue {
+		t.Error("SweepResidue should be true")
+	}
+	if result.Mismatch {
+		t.Error("Mismatch should be false - only sweep residue is set in this case")
+	}
+
+	st, ok := store.Get("repo-x")
+	if !ok {
+		t.Fatal("state should have been persisted (failure, not cancellation)")
+	}
+	if st.LastIndexedCommit != "" {
+		t.Errorf("LastIndexedCommit = %q, want empty - sweep residue must not advance state", st.LastIndexedCommit)
 	}
 }

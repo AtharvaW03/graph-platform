@@ -99,8 +99,9 @@ curl -H "Authorization: Bearer dev-token" "http://localhost:8080/overview/my-rep
 
 ### REST endpoints
 
-All JSON. With `QUERY_AUTH_TOKEN` set, every endpoint except `/health`
-requires `Authorization: Bearer <token>`. All read-only except `/feedback`.
+All JSON. With `QUERY_AUTH_TOKEN` set, every endpoint except `/health` and
+`/ready` requires `Authorization: Bearer <token>`. All read-only except
+`/feedback`.
 
 Symbol-level endpoints (`/search`, `/symbol`, `/callers`, `/callees`,
 `/blast-radius`, `/path`, `/routes`, `/hotspots`) accept an optional
@@ -206,10 +207,13 @@ fallback for a cross-origin API, set `QUERY_CORS_ORIGIN` on query-service.
 ### Operational invariants
 
 - **One indexer per workdir.** Enforced by flock on unix; convention on Windows.
-- **One indexer per Neo4j database.** The flock only covers one host's workdir.
-  Two indexers on different hosts can race: the orphaned-shared-node sweep of
-  one can delete a shared node the other has imported but not yet linked,
-  silently dropping edges until the next re-index.
+- **One indexer per Neo4j database.** Enforced in the database itself: each
+  indexer (and `cmd/importer`) acquires a writer lease (`IndexerLease` node)
+  on startup and a background heartbeat renews it every `ttl/3`. A second
+  writer either refuses to start while the lease is held, or - if it started
+  because the lease had genuinely expired - gets forced to stop the moment
+  its own renewal is refused. `--steal-lease` (indexer only) is the operator
+  recovery path for a stuck lease left by a crash; use it deliberately.
 - `workdir/` is disposable *except* `state.json` (and even that self-heals -
   deleting it just forces a full re-index).
 - The importer is idempotent: re-importing the same commit is a no-op upsert.

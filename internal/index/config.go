@@ -40,6 +40,14 @@ type ExtractorsConfig struct {
 	// MaxParallel caps concurrent extractors per repo. Zero or negative means
 	// run all configured extractors at once.
 	MaxParallel int `yaml:"max_parallel"`
+	// AllowPartial changes what happens when an enabled extractor errors for a
+	// repo. Default (false, fail-closed): the repo's whole indexing run fails,
+	// nothing imports, state doesn't advance - last-known-good graph data for
+	// that repo is left untouched and the next cycle retries. Set true to
+	// restore the old behavior (import the partial graph.json anyway, which
+	// lets the sweep delete the failed extractor's last-known-good data) if
+	// availability matters more than completeness for your deployment.
+	AllowPartial *bool `yaml:"allow_partial"`
 }
 
 // OrgConfig captures org-wide conventions used by extractors. When a
@@ -64,6 +72,11 @@ func (c ExtractorsConfig) HTTPAPIEnabled() bool { return boolDefault(c.HTTPAPI, 
 func (c ExtractorsConfig) KafkaEnabled() bool   { return boolDefault(c.Kafka, true) }
 func (c ExtractorsConfig) MSSQLEnabled() bool   { return boolDefault(c.MSSQL, true) }
 func (c ExtractorsConfig) GlueEnabled() bool    { return boolDefault(c.Glue, true) }
+
+// AllowPartialEnabled reports whether an extractor error should be tolerated
+// (import the partial graph anyway) rather than failing the repo closed.
+// Defaults to false: fail closed.
+func (c ExtractorsConfig) AllowPartialEnabled() bool { return boolDefault(c.AllowPartial, false) }
 
 // GitConfig tunes the GitSyncer.
 type GitConfig struct {

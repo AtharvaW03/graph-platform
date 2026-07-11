@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"graph-platform/internal/importer"
+	"graph-platform/internal/index"
 	"graph-platform/internal/neo4j"
 )
 
@@ -17,12 +18,15 @@ func main() {
 	repo := flag.String("repo", "", "repository name to scope the imported graph (required)")
 	graphPath := flag.String("graph", "", "path to the graph.json to import (required)")
 	commit := flag.String("commit", "", "source commit SHA to stamp on imported nodes/edges; non-empty enables sweep of stale data from prior commits")
-	leaseTTL := flag.Duration("lease-ttl", 15*time.Minute, "writer lease TTL for this run; released on exit")
+	leaseTTL := flag.Duration("lease-ttl", 15*time.Minute, "writer lease TTL for this run; a background heartbeat renews it every ttl/3, so this just needs headroom over a missed heartbeat or two")
 	flag.Parse()
 
 	if *repo == "" || *graphPath == "" {
 		flag.Usage()
 		log.Fatal("both --repo and --graph are required")
+	}
+	if *leaseTTL < time.Minute {
+		log.Fatalf("--lease-ttl must be at least 1m, got %s", *leaseTTL)
 	}
 
 	password := os.Getenv("NEO4J_PASSWORD")
@@ -38,6 +42,14 @@ func main() {
 	fmt.Println("Connected to Neo4j")
 
 	ctx := context.Background()
+
+	// Idempotent, and must run before AcquireLease: on a brand-new database
+	// the IndexerLease uniqueness constraint doesn't exist yet, so two
+	// processes racing their very first MERGE on the lease row could each
+	// create one. The in-pipeline call inside importer.Run later is harmless.
+	if err := client.EnsureConstraints(ctx); err != nil {
+		log.Fatalf("ensure constraints: %v", err)
+	}
 
 	// This CLI writes with the same credentials as the indexer, so it must
 	// take the same lease - otherwise it's a side door around the dual-writer
@@ -60,6 +72,25 @@ func main() {
 		}
 	}()
 
+	// runCtx is what the import actually runs under, separate from ctx so the
+	// heartbeat can cut it off the moment it gives up on the lease. A single
+	// graph.json import is usually well inside the TTL, but nothing stops a
+	// very large one from running long - same reasoning as the indexer.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
+	heartbeat := &index.LeaseHeartbeat{
+		Renew:    func(hbCtx context.Context) error { return client.RenewLease(hbCtx, owner, *leaseTTL) },
+		Interval: *leaseTTL / 3,
+		Log:      log.Default(),
+		IsLost:   func(err error) bool { return errors.Is(err, neo4j.ErrLeaseLost) },
+		OnFatal: func(err error) {
+			log.Printf("FATAL: writer lease heartbeat gave up (%v); canceling the import", err)
+			cancelRun()
+		},
+	}
+	go heartbeat.Run(ctx)
+
 	progress := func(stage string) {
 		switch stage {
 		case importer.StageLoad:
@@ -79,7 +110,7 @@ func main() {
 		}
 	}
 
-	summary, err := importer.Run(ctx, client, importer.Options{
+	summary, err := importer.Run(runCtx, client, importer.Options{
 		Repo:      *repo,
 		Commit:    *commit,
 		GraphPath: *graphPath,
@@ -91,6 +122,14 @@ func main() {
 	})
 	if err != nil {
 		log.Fatal(err)
+	}
+	// A canceled runCtx from a plain ctx.Err() check wouldn't say why; check
+	// the heartbeat's own recorded error instead, same reasoning as the
+	// indexer. A lease lost partway through must fail the run even though
+	// importer.Run above may have returned without an error before the loss
+	// was noticed.
+	if hbErr := heartbeat.FatalErr(); hbErr != nil {
+		log.Fatalf("writer lease heartbeat failed: %v", hbErr)
 	}
 
 	fmt.Printf("Loaded graph: %d nodes, %d links\n", summary.NodesTotal, summary.LinksTotal)

@@ -36,8 +36,14 @@ Stop the laptop/Mac from writing before ECS writes anything.
       ```
       # find it
       ps aux | grep '[i]ndexer --interval'
-      kill <pid>          # SIGTERM, orchestrator finishes the in-flight run then exits
+      kill <pid>          # SIGTERM
       ```
+      This is an immediate cancellation, not a graceful drain: SIGTERM cancels
+      the working context right away, and any in-flight subprocess (git,
+      graphify) is killed mid-command, not waited on. Whatever repo was
+      indexing when the signal landed does not have its state advanced (it's
+      recorded as canceled, not success or failure), so re-running later is
+      safe - it just re-does that one repo from scratch.
 - [ ] Confirm no indexer process still holds the workdir lock
       ```
       lsof workdir/state.json    # empty output = clear
@@ -50,6 +56,9 @@ Stop the laptop/Mac from writing before ECS writes anything.
 Take the on-demand backup before ECS's first write. The sweep step deletes
 graph nodes that no longer match the current commit and has no test coverage
 for the ECS path yet - this snapshot is the undo button if it deletes wrong.
+This step's snapshot is taken with Neo4j idle (nothing has written yet), which
+is what makes it trustworthy - see the crash-consistency note in step E before
+relying on any *later* snapshot the same way.
 
 - [ ] On-demand AWS Backup of the Neo4j EFS volume
       ```
@@ -103,7 +112,12 @@ Small blast radius first: 10-20 repos, not the whole org.
       ```
 - [ ] Enable the CloudWatch index-lag alarm
 - [ ] Enable the daily EFS backup schedule (AWS Backup plan, not just the
-      on-demand snapshot from step B)
+      on-demand snapshot from step B). Note: unlike step B's snapshot (taken
+      with Neo4j idle), these daily snapshots are taken while the database is
+      live and writing - EFS snapshots of a running Neo4j are not guaranteed
+      crash-consistent. Treat them as best-effort, not a guaranteed restore
+      point; the real recovery path for a corrupted graph is a clean
+      re-index from source (repos + extractors), not a live snapshot restore.
 - [ ] Widen the repo set gradually - not the full org in one step. Re-run
       step D's mismatch check after each widening.
 
@@ -126,10 +140,11 @@ Small blast radius first: 10-20 repos, not the whole org.
 > **Single writer only.** At no point may two indexers point at the same
 > Neo4j instance. Two writers racing silently deletes nodes the other writer
 > still needs. This is now enforced in the database: each indexer acquires a
-> writer lease (`IndexerLease` node, `--lease-ttl`, default 15m) on startup
-> and renews it before every repo, in both one-shot and `--interval` mode; a
-> second indexer refuses to start (or stops immediately on its next renewal)
-> while the lease is held.
+> writer lease (`IndexerLease` node, `--lease-ttl`, default 15m) on startup,
+> renews it before every repo (both one-shot and `--interval` mode), and a
+> background heartbeat renews it every `ttl/3` as well so a single long repo
+> can't outlive the TTL between renewals; a second indexer refuses to start
+> (or stops immediately on its next renewal) while the lease is held.
 > The freeze step below remains as belt-and-braces - don't rely on the lease
 > alone to skip it. If a crashed indexer leaves a stuck lease (rare - it
 > self-expires after the TTL), `--steal-lease` takes it unconditionally for

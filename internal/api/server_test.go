@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -155,12 +156,18 @@ func TestReadyCheck(t *testing.T) {
 	})
 
 	t.Run("not ready when the dependency check fails", func(t *testing.T) {
-		s := NewServer(nil, fakeReadiness{err: errors.New("neo4j unreachable")})
+		s := NewServer(nil, fakeReadiness{err: errors.New("neo4j unreachable at 10.0.4.12:7687")})
 		req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 		rec := httptest.NewRecorder()
 		s.Routes().ServeHTTP(rec, req)
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("got status %d, want 503", rec.Code)
+		}
+		// /ready is unauthenticated (same as /health) - the body must never
+		// carry driver error detail (hostnames, ports) out to the network.
+		body := rec.Body.String()
+		if strings.Contains(body, "10.0.4.12") || strings.Contains(body, "reason") {
+			t.Errorf("response body leaks internal detail: %s", body)
 		}
 	})
 

@@ -136,7 +136,10 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 
 // readyCheck is dependency-aware: it pings Neo4j with a short timeout so a
 // load balancer can stop routing traffic here while the database is down,
-// without waiting out a full request timeout to find out.
+// without waiting out a full request timeout to find out. The failure detail
+// (driver error text can carry internal hostnames) is logged server-side
+// only - /ready is unauthenticated, same as /health, so the response body
+// stays generic.
 func (s *Server) readyCheck(w http.ResponseWriter, r *http.Request) {
 	if s.ready == nil {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
@@ -145,7 +148,8 @@ func (s *Server) readyCheck(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), readyTimeout)
 	defer cancel()
 	if err := s.ready.VerifyConnectivity(ctx); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "reason": err.Error()})
+		log.Printf("readiness check failed: %v", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
