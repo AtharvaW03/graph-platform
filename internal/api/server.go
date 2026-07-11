@@ -16,7 +16,7 @@ import (
 )
 
 // WithAuth wraps h with static bearer-token authentication. An empty token
-// disables auth (open mode, for local development). /health stays
+// disables auth (open mode, for local development). /health and /ready stay
 // unauthenticated so load balancers and uptime probes work without
 // credentials.
 func WithAuth(h http.Handler, token string) http.Handler {
@@ -25,7 +25,7 @@ func WithAuth(h http.Handler, token string) http.Handler {
 	}
 	expected := []byte("Bearer " + token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
+		if r.URL.Path == "/health" || r.URL.Path == "/ready" {
 			h.ServeHTTP(w, r)
 			return
 		}
@@ -76,18 +76,34 @@ func WithCORS(h http.Handler, origin string) http.Handler {
 	})
 }
 
-type Server struct {
-	svc *query.Service
+// Readiness pings a downstream dependency for GET /ready. *neo4j.Client
+// already implements this (same shape as internal/index's HealthChecker);
+// tests can swap in a fake.
+type Readiness interface {
+	VerifyConnectivity(ctx context.Context) error
 }
 
-func NewServer(svc *query.Service) *Server {
-	return &Server{svc: svc}
+// readyTimeout bounds the /ready connectivity check independent of the
+// caller's request timeout - a readiness probe should fail fast, not hang
+// for the full request budget.
+const readyTimeout = 2 * time.Second
+
+type Server struct {
+	svc   *query.Service
+	ready Readiness
+}
+
+// NewServer wires the query routes. ready is used by GET /ready; pass nil to
+// make it always report ready (e.g. a test server with no real dependency).
+func NewServer(svc *query.Service, ready Readiness) *Server {
+	return &Server{svc: svc, ready: ready}
 }
 
 // Routes returns the HTTP handler with all read-only query routes mounted.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
+	mux.HandleFunc("GET /ready", s.readyCheck)
 	mux.HandleFunc("GET /repos", s.listRepos)
 	mux.HandleFunc("GET /search", s.search)
 	mux.HandleFunc("GET /symbol/{name}", s.findSymbol)
@@ -112,8 +128,27 @@ func (s *Server) Routes() http.Handler {
 	return mux
 }
 
+// health is pure liveness: it never touches Neo4j, so it answers even while
+// the database is unreachable. Use /ready to check the dependency.
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// readyCheck is dependency-aware: it pings Neo4j with a short timeout so a
+// load balancer can stop routing traffic here while the database is down,
+// without waiting out a full request timeout to find out.
+func (s *Server) readyCheck(w http.ResponseWriter, r *http.Request) {
+	if s.ready == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), readyTimeout)
+	defer cancel()
+	if err := s.ready.VerifyConnectivity(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "reason": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 // parseRepos reads the optional repository scope from a request: `repos` is

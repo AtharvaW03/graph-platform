@@ -1,11 +1,14 @@
+# Local stack is loopback-only by design (every published port binds
+# 127.0.0.1); ECS does not use this file, so this has no bearing on the
+# real deployment's network exposure.
 services:
   neo4j:
     image: neo4j:5
     environment:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
     volumes:
       - neo4j-data:/data
     healthcheck:
@@ -26,7 +29,7 @@ services:
       QUERY_BIND: 0.0.0.0
       QUERY_AUTH_TOKEN: ${QUERY_AUTH_TOKEN:-}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       neo4j:
         condition: service_healthy
@@ -58,7 +61,7 @@ services:
       QUERY_SERVICE_URL: http://query-service:8080
       QUERY_AUTH_TOKEN: ${QUERY_AUTH_TOKEN:-}
     ports:
-      - "5173:80"
+      - "127.0.0.1:5173:80"
     depends_on:
       - query-service
 

@@ -2,11 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -32,7 +29,7 @@ func main() {
 	all := flag.Bool("all", false, "explicit all-repositories mode; mutually exclusive with --repo")
 	force := flag.Bool("force", false, "re-index even if HEAD matches the previously-indexed commit")
 	interval := flag.Duration("interval", 0, "if > 0, run continuously every interval (e.g. 15m); otherwise one-shot")
-	leaseTTL := flag.Duration("lease-ttl", 15*time.Minute, "writer lease TTL; must exceed the longest expected single-repo indexing time (the lease renews between repos, not just between cycles) - a crashed indexer's lease self-expires after this")
+	leaseTTL := flag.Duration("lease-ttl", 15*time.Minute, "writer lease TTL; a background heartbeat renews it every ttl/3, so the TTL just needs headroom over a missed heartbeat or two, not the whole run - a crashed indexer's lease self-expires after this")
 	stealLease := flag.Bool("steal-lease", false, "take the writer lease unconditionally at startup; operator recovery for a stuck lease")
 	flag.Parse()
 
@@ -94,7 +91,7 @@ func main() {
 		logger.Fatal(err)
 	}
 
-	owner := leaseOwner()
+	owner := neo4j.LeaseOwner()
 	if *stealLease {
 		logger.Printf("WARNING: --steal-lease set, taking writer lease unconditionally (owner=%s)", owner)
 		if err := client.StealLease(ctx, owner, *leaseTTL); err != nil {
@@ -116,6 +113,30 @@ func main() {
 			logger.Printf("WARNING: release lease failed: %v", err)
 		}
 	}()
+
+	// runCtx is what the orchestrator actually runs under. It's separate from
+	// ctx (which only the OS signal cancels) so the lease heartbeat can cut
+	// off in-flight work the moment it gives up on the lease, without that
+	// also looking like an operator-initiated shutdown.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
+
+	// The orchestrator only renews between repos (see Orchestrator.Lease in
+	// internal/index/orchestrator.go), which leaves a gap: one repo whose
+	// graphify run alone outlives the TTL. This heartbeat renews on a fixed
+	// tick independent of repo boundaries to close that gap. Both renewal
+	// paths call the same owner-guarded RenewLease, so they never conflict.
+	heartbeat := &index.LeaseHeartbeat{
+		Renew:    func(hbCtx context.Context) error { return client.RenewLease(hbCtx, owner, *leaseTTL) },
+		Interval: *leaseTTL / 3,
+		Log:      logger,
+		IsLost:   func(err error) bool { return errors.Is(err, neo4j.ErrLeaseLost) },
+		OnFatal: func(err error) {
+			logger.Printf("FATAL: writer lease heartbeat gave up (%v); canceling all in-flight work", err)
+			cancelRun()
+		},
+	}
+	go heartbeat.Run(ctx)
 
 	orch := &index.Orchestrator{
 		Source:        index.NewConfigJobSource(cfg),
@@ -141,13 +162,16 @@ func main() {
 			logger.Fatal(err)
 		}
 		logger.Printf("continuous mode: every %s", *interval)
-		if err := orch.RunForever(ctx, opts, sched); err != nil && ctx.Err() == nil {
+		// Suppress the error only for an operator-initiated shutdown (signal
+		// cancels ctx). A heartbeat-canceled runCtx must still exit nonzero,
+		// or a fatal lease loss would look like a clean exit to ECS.
+		if err := orch.RunForever(runCtx, opts, sched); err != nil && ctx.Err() == nil {
 			logger.Fatal(err)
 		}
 		return
 	}
 
-	summary, err := orch.RunOnce(ctx, opts)
+	summary, err := orch.RunOnce(runCtx, opts)
 	if err != nil {
 		logger.Fatal(err)
 	}
@@ -172,23 +196,6 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
-}
-
-// leaseOwner builds this process's writer-lease identity: hostname and pid so
-// an operator can tell at a glance which machine/process holds it, plus a
-// short random suffix so two processes racing to start on the same host
-// (shouldn't happen, but) don't collide on identity.
-func leaseOwner() string {
-	host, err := os.Hostname()
-	if err != nil || host == "" {
-		host = "unknown-host"
-	}
-	var b [4]byte
-	suffix := "????"
-	if _, err := rand.Read(b[:]); err == nil {
-		suffix = hex.EncodeToString(b[:])
-	}
-	return fmt.Sprintf("%s-%d-%s", host, os.Getpid(), suffix)
 }
 
 // clientLeaseRenewer adapts *neo4j.Client.RenewLease to index.LeaseRenewer,

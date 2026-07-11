@@ -38,7 +38,7 @@ func main() {
 	defer client.Close()
 
 	svc := query.NewService(client)
-	server := api.NewServer(svc)
+	server := api.NewServer(svc, client)
 
 	token := os.Getenv("QUERY_AUTH_TOKEN")
 
@@ -52,6 +52,16 @@ func main() {
 		} else {
 			log.Printf("auth enabled, listening on all interfaces")
 		}
+	}
+
+	// An operator who sets QUERY_BIND directly can still end up unauthenticated
+	// on a non-loopback address (the default-to-127.0.0.1 above only covers the
+	// unset case). That's a legitimate setup behind a network boundary - an
+	// internal ALB doing its own auth, say - so this warns rather than
+	// refusing to start, but it has to be loud: it's easy to reach by setting
+	// QUERY_BIND without also setting QUERY_AUTH_TOKEN.
+	if token == "" && !isLoopbackBind(bind) {
+		log.Printf("WARNING: serving unauthenticated on %s; anyone with network access can read the graph", net.JoinHostPort(bind, port))
 	}
 
 	corsOrigin := os.Getenv("QUERY_CORS_ORIGIN")
@@ -107,4 +117,17 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// isLoopbackBind reports whether host refers to this machine only. An empty
+// host means "all interfaces" in net.Listen - never loopback.
+func isLoopbackBind(host string) bool {
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
