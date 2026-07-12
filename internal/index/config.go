@@ -95,6 +95,12 @@ type GraphifyConfig struct {
 	// processed. Empty means "log whatever's detected and continue" - useful
 	// while a fleet is still converging on one pinned version.
 	ExpectedVersion string `yaml:"expected_version"`
+	// IgnorePatterns are appended to every checkout's .graphifyignore before
+	// extraction, since graphify only reads ignore files from the corpus root
+	// and most target repos won't carry their own. Defaults to *.tfvars
+	// (environment values, occasionally secrets). Omitting the field keeps
+	// the default; an explicit empty list ([]) disables injection.
+	IgnorePatterns []string `yaml:"ignore_patterns"`
 }
 
 // DefaultConfig returns defaults for fields ApplyDefaults fills in on a
@@ -105,10 +111,17 @@ func DefaultConfig() Config {
 			Timeout: 10 * time.Minute,
 		},
 		Graphify: GraphifyConfig{
-			Command:    "graphify",
-			Args:       []string{"update", "{repo_path}"},
-			OutputFile: "graphify-out/graph.json",
-			Timeout:    20 * time.Minute,
+			Command: "graphify",
+			// extract --code-only (0.9.11+) is the dedicated headless code
+			// path: local AST only, no LLM key, docs/papers skipped with a
+			// report. --force matters: without it graphify's anti-shrink
+			// guard keeps ghost nodes when a repo legitimately shrinks and
+			// we'd import stale data. graph.json is a disposable per-run
+			// artifact here - the importer owns correctness.
+			Args:           []string{"extract", "{repo_path}", "--code-only", "--force"},
+			OutputFile:     "graphify-out/graph.json",
+			Timeout:        20 * time.Minute,
+			IgnorePatterns: []string{"*.tfvars"},
 		},
 	}
 }
@@ -148,6 +161,11 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Graphify.Timeout == 0 {
 		c.Graphify.Timeout = d.Graphify.Timeout
+	}
+	// nil = field omitted, take the default; a non-nil empty list is an
+	// explicit opt-out of ignore injection and is preserved.
+	if c.Graphify.IgnorePatterns == nil {
+		c.Graphify.IgnorePatterns = d.Graphify.IgnorePatterns
 	}
 }
 

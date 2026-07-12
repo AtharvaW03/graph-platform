@@ -17,12 +17,12 @@ import (
 )
 
 // ExecGraphifier runs an external extractor command (by default the
-// `graphify` CLI, invoked as `graphify update <repo_path>`) and resolves the
-// produced graph.json inside the repository's own graphify-out/ directory.
+// `graphify` CLI, invoked as `graphify extract <repo_path> --code-only
+// --force`) and resolves the produced graph.json inside the repository's own
+// graphify-out/ directory.
 //
 // The {repo_path} placeholder is substituted into Args; the command runs
-// with repoPath as its working directory. Prior output is never deleted -
-// `update` consumes it to do an incremental run - and the post-run file must
+// with repoPath as its working directory. The post-run output file must
 // exist and be non-empty for the run to count as successful.
 type ExecGraphifier struct {
 	Command    string
@@ -30,22 +30,31 @@ type ExecGraphifier struct {
 	OutputFile string // relative to repoPath; default graphify-out/graph.json
 	Timeout    time.Duration
 	Stderr     io.Writer
+
+	// IgnorePatterns are written into each repo's .graphifyignore before the
+	// extractor runs. graphify only reads ignore files from the corpus root,
+	// so a platform-wide exclusion (tfvars, most importantly) has to be
+	// injected into every checkout - a pattern committed to THIS repo's
+	// ignore file protects nothing but this repo. Repo-owned ignore entries
+	// are preserved; injection is append-only and idempotent.
+	IgnorePatterns []string
 }
 
 func NewExecGraphifier(cfg GraphifyConfig, stderr io.Writer) *ExecGraphifier {
 	return &ExecGraphifier{
-		Command:    cfg.Command,
-		Args:       cfg.Args,
-		OutputFile: cfg.OutputFile,
-		Timeout:    cfg.Timeout,
-		Stderr:     stderr,
+		Command:        cfg.Command,
+		Args:           cfg.Args,
+		OutputFile:     cfg.OutputFile,
+		Timeout:        cfg.Timeout,
+		Stderr:         stderr,
+		IgnorePatterns: cfg.IgnorePatterns,
 	}
 }
 
 // Generate runs the configured extractor command for the repo at repoPath
 // and returns the absolute path of the resulting graph.json. The output
 // path is OutputFile resolved relative to the absolute repoPath - graphify
-// `update` writes into the repo, so there is no separate out directory.
+// writes into the repo, so there is no separate out directory.
 //
 // Subprocess stdout and stderr are routed to the configured Stderr writer
 // so the daemon's protocol streams (the MCP stdio transport, in particular)
@@ -54,6 +63,10 @@ func (g *ExecGraphifier) Generate(ctx context.Context, repoPath string) (string,
 	absRepo, err := filepath.Abs(repoPath)
 	if err != nil {
 		return "", fmt.Errorf("abs repo path: %w", err)
+	}
+
+	if err := ensureIgnorePatterns(absRepo, g.IgnorePatterns); err != nil {
+		return "", fmt.Errorf("inject ignore patterns: %w", err)
 	}
 
 	args := make([]string, len(g.Args))
@@ -105,16 +118,30 @@ func (g *ExecGraphifier) Generate(ctx context.Context, repoPath string) (string,
 
 // graphifyVersionRe extracts a lenient semver token from `graphify --version`
 // output, which varies between "graphify 0.9.9" and a bare "0.9.9".
-var graphifyVersionRe = regexp.MustCompile(`\d+\.\d+(?:\.\d+)?`)
+var (
+	// graphifyVersionLineRe matches the canonical version statement
+	// ("graphify 0.9.12"). It must be tried before the loose match: the CLI
+	// can print a stale-skill warning FIRST that contains a different,
+	// older version ("warning: skill is from graphify 0.8.44, package is
+	// 0.9.12."), and grabbing the first semver in the output would read the
+	// warning's version, not the binary's.
+	graphifyVersionLineRe = regexp.MustCompile(`(?m)^graphify\s+(\d+\.\d+(?:\.\d+)?)\s*$`)
+	graphifyVersionRe     = regexp.MustCompile(`\d+\.\d+(?:\.\d+)?`)
+)
 
-// parseGraphifyVersion pulls the version substring out of --version output.
+// parseGraphifyVersion pulls the version substring out of --version output:
+// the canonical "graphify X.Y.Z" line when present, else the LAST
+// version-shaped token (later output supersedes warnings printed before it).
 // Returns ("", false) when nothing version-shaped is found.
 func parseGraphifyVersion(output string) (string, bool) {
-	m := graphifyVersionRe.FindString(output)
-	if m == "" {
+	if m := graphifyVersionLineRe.FindStringSubmatch(output); m != nil {
+		return m[1], true
+	}
+	all := graphifyVersionRe.FindAllString(output, -1)
+	if len(all) == 0 {
 		return "", false
 	}
-	return m, true
+	return all[len(all)-1], true
 }
 
 // checkGraphifyVersion is the pure decision step for CheckGraphifyVersion,
@@ -158,6 +185,47 @@ func CheckGraphifyVersion(ctx context.Context, cfg GraphifyConfig, log *log.Logg
 	cmd := exec.CommandContext(ctx, cfg.Command, "--version")
 	out, err := cmd.CombinedOutput()
 	return checkGraphifyVersion(cfg.ExpectedVersion, string(out), err, log)
+}
+
+// ensureIgnorePatterns appends any missing patterns to <repo>/.graphifyignore
+// so platform-wide exclusions apply to every indexed checkout, not just repos
+// that committed their own ignore file. Existing repo-owned content is
+// preserved (graphify merges ignore semantics, extra patterns only ever
+// exclude more). Idempotent: patterns already present are not duplicated.
+// The syncer's fetch+reset wipes the appended lines each cycle, so this runs
+// before every extraction.
+func ensureIgnorePatterns(repoPath string, patterns []string) error {
+	if len(patterns) == 0 {
+		return nil
+	}
+	path := filepath.Join(repoPath, ".graphifyignore")
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	present := make(map[string]bool)
+	for _, line := range strings.Split(string(existing), "\n") {
+		present[strings.TrimSpace(line)] = true
+	}
+	var missing []string
+	for _, p := range patterns {
+		if p = strings.TrimSpace(p); p != "" && !present[p] {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	b.Write(existing)
+	if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("# added by the indexer (platform-wide exclusions)\n")
+	for _, p := range missing {
+		b.WriteString(p + "\n")
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 // graphifyEnv returns the daemon's environment plus headless-indexer

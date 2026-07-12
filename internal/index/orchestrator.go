@@ -14,6 +14,16 @@ import (
 	"graph-platform/internal/importer"
 )
 
+// GraphSchemaVersion identifies the shape of what the pipeline writes to
+// Neo4j. Bump it whenever a change means previously-indexed repos must be
+// re-imported even though their source hasn't moved: the unchanged-HEAD skip
+// only applies when a repo's recorded SchemaVersion matches, so a bump rolls
+// the migration out automatically on the next cycle.
+//
+//	v2: HAS_ENTITY ownership edges (replacing repo-membership CONTAINS),
+//	    label folded into the content hash, graphify extract --code-only.
+const GraphSchemaVersion = 2
+
 // Orchestrator drives the per-repo pipeline for a configured set of
 // repositories. Every step is delegated to a pluggable component (Source,
 // Syncer, Graphifier, Importer, Store, optional Scheduler and
@@ -260,10 +270,15 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	}
 
 	if !force && prev.LastStatus == StatusSuccess && prev.LastIndexedCommit == commit {
-		result.Status = StatusSkipped
-		result.Reason = fmt.Sprintf("HEAD %s unchanged since %s", commit, prev.LastIndexedAt.Format(time.RFC3339))
-		result.Duration = o.now().Sub(start)
-		return
+		if prev.SchemaVersion != GraphSchemaVersion {
+			o.Log.Printf("[%s] graph schema changed (v%d -> v%d), re-indexing despite unchanged HEAD",
+				repo.Name, prev.SchemaVersion, GraphSchemaVersion)
+		} else {
+			result.Status = StatusSkipped
+			result.Reason = fmt.Sprintf("HEAD %s unchanged since %s", commit, prev.LastIndexedAt.Format(time.RFC3339))
+			result.Duration = o.now().Sub(start)
+			return
+		}
 	}
 
 	o.Log.Printf("[%s] graphify %s", repo.Name, commit)
@@ -471,6 +486,7 @@ func toState(r RepoResult, store StateStore) RepoState {
 	case StatusSuccess:
 		out.LastIndexedAt = now
 		out.LastIndexedCommit = r.Commit
+		out.SchemaVersion = GraphSchemaVersion
 		out.LastNodes = r.Nodes
 		out.LastLinks = r.Links
 		out.LastError = ""

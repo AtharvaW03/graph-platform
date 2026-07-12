@@ -190,13 +190,20 @@ func (s *Service) each(ctx context.Context, cypher string, params map[string]any
 	return err
 }
 
-// overviewCounts returns the repo's node count and its internal relationship
-// count in a single query.
+// overviewCounts returns the repo's node count and relationship count in a
+// single query. Nodes are counted via the ownership edge - the same
+// population the label/kafka/SQL sections count - because a repo-property
+// filter would exclude shared nodes and make the top-line number disagree
+// with the sections below it. Relationships are counted by their repo stamp,
+// which includes edges this repo wrote to shared endpoints.
 func (s *Service) overviewCounts(ctx context.Context, repo string) (nodes, rels int, err error) {
 	const cypher = `
-MATCH (n:Entity {repo: $repo})
-OPTIONAL MATCH (n)-[r]->(:Entity {repo: $repo})
-RETURN count(DISTINCT n) AS nodes, count(r) AS rels
+MATCH (rep:Repository {name: $repo})
+OPTIONAL MATCH (rep)-[:HAS_ENTITY]->(n:Entity)
+WITH rep, count(DISTINCT n) AS nodes
+OPTIONAL MATCH (rep)-[:HAS_ENTITY]->(a:Entity)-[r]->(:Entity)
+WHERE r.repo = $repo
+RETURN nodes, count(r) AS rels
 `
 	err = s.each(ctx, cypher, map[string]any{"repo": repo}, func(m map[string]any) {
 		nodes = asInt(m["nodes"])

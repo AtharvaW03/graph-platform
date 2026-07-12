@@ -18,7 +18,7 @@ func main() {
 	repo := flag.String("repo", "", "repository name to scope the imported graph (required)")
 	graphPath := flag.String("graph", "", "path to the graph.json to import (required)")
 	commit := flag.String("commit", "", "source commit SHA to stamp on imported nodes/edges; non-empty enables sweep of stale data from prior commits")
-	leaseTTL := flag.Duration("lease-ttl", 15*time.Minute, "writer lease TTL for this run; a background heartbeat renews it every ttl/3, so this just needs headroom over a missed heartbeat or two")
+	leaseTTL := flag.Duration("lease-ttl", 15*time.Minute, "writer lease TTL for this run; a background heartbeat renews it every ttl/4 and gives up after 3 consecutive failures, strictly before expiry")
 	flag.Parse()
 
 	if *repo == "" || *graphPath == "" {
@@ -64,13 +64,16 @@ func main() {
 		}
 		log.Fatalf("acquire writer lease: %v", err)
 	}
-	defer func() {
+	// Named so the integrity-failure path below can release before os.Exit,
+	// which skips defers.
+	releaseLease := func() {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := client.ReleaseLease(releaseCtx, owner); err != nil {
 			log.Printf("WARNING: release lease failed: %v", err)
 		}
-	}()
+	}
+	defer releaseLease()
 
 	// runCtx is what the import actually runs under, separate from ctx so the
 	// heartbeat can cut it off the moment it gives up on the lease. A single
@@ -81,7 +84,7 @@ func main() {
 
 	heartbeat := &index.LeaseHeartbeat{
 		Renew:    func(hbCtx context.Context) error { return client.RenewLease(hbCtx, owner, *leaseTTL) },
-		Interval: *leaseTTL / 3,
+		Interval: *leaseTTL / 4,
 		Log:      log.Default(),
 		IsLost:   func(err error) bool { return errors.Is(err, neo4j.ErrLeaseLost) },
 		OnFatal: func(err error) {
@@ -165,5 +168,11 @@ func main() {
 		fmt.Printf("\nERROR: sweep left %d stale nodes and %d stale relationships behind for repo %q.\n",
 			summary.SweepResidueNodes, summary.SweepResidueRels, summary.Repo)
 		fmt.Println("SweepStale should have removed these. Investigate the sweep logic or a concurrent writer.")
+	}
+	// Integrity failures exit nonzero - same standard as the indexer, which
+	// marks the repo failed on either condition.
+	if summary.NodesMismatch() || summary.HasSweepResidue() {
+		releaseLease()
+		os.Exit(1)
 	}
 }
