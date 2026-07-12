@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"graph-platform/internal/extract/httpapi"
 	"graph-platform/internal/extract/kafka"
 	"graph-platform/internal/extract/mssql"
+	"graph-platform/internal/githubapp"
 	"graph-platform/internal/index"
 	"graph-platform/internal/neo4j"
 )
@@ -103,6 +105,12 @@ func main() {
 	// pinned Docker image should stop the run, not silently produce a
 	// differently-shaped graph partway through a batch.
 	if err := index.CheckGraphifyVersion(ctx, cfg.Graphify, logger); err != nil {
+		logger.Fatal(err)
+	}
+
+	// Also before any repo is touched: whichever git auth mode is configured
+	// must be in place before the first clone, not discovered mid-run.
+	if err := setupGitAuth(ctx, logger); err != nil {
 		logger.Fatal(err)
 	}
 
@@ -254,6 +262,83 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// setupGitAuth configures how GitSyncer's git subprocess authenticates
+// against private HTTPS remotes. When GITHUB_APP_ID,
+// GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY_PATH are all set, it
+// mints a GitHub App installation token and writes it to the git credential
+// store, then starts a background goroutine that re-mints and re-writes it
+// before each hourly token expires. With any of the three unset, this is a
+// no-op: git auth stays exactly as deploy/indexer-entrypoint.sh configured it
+// (GIT_TOKEN, or none for public repos).
+func setupGitAuth(ctx context.Context, logger *log.Logger) error {
+	appID := os.Getenv("GITHUB_APP_ID")
+	installationID := os.Getenv("GITHUB_APP_INSTALLATION_ID")
+	keyPath := os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH")
+	if appID == "" && installationID == "" && keyPath == "" {
+		logger.Printf("git auth: GIT_TOKEN (personal access token), if set")
+		return nil
+	}
+	if appID == "" || installationID == "" || keyPath == "" {
+		return fmt.Errorf("GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY_PATH must all be set together to enable GitHub App auth")
+	}
+
+	pemBytes, err := os.ReadFile(keyPath)
+	if err != nil {
+		return fmt.Errorf("read github app private key: %w", err)
+	}
+	ghClient, err := githubapp.New(appID, installationID, pemBytes)
+	if err != nil {
+		return fmt.Errorf("build github app client: %w", err)
+	}
+	logger.Printf("git auth: GitHub App (installation %s)", installationID)
+
+	if out, err := exec.CommandContext(ctx, "git", "config", "--global", "credential.helper", "store").CombinedOutput(); err != nil {
+		return fmt.Errorf("git config credential.helper: %w: %s", err, out)
+	}
+	if err := writeGitCredential(ctx, ghClient); err != nil {
+		return fmt.Errorf("write initial github app credential: %w", err)
+	}
+
+	go func() {
+		// Installation tokens last 1h; refreshing at 50m leaves 10 minutes of
+		// margin even if a refresh attempt is briefly delayed or retried.
+		ticker := time.NewTicker(50 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := writeGitCredential(ctx, ghClient); err != nil {
+					logger.Printf("WARNING: github app token refresh failed: %v", err)
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+// writeGitCredential mints a fresh installation token and writes it to the
+// git credential store in the same "https://x-access-token:TOKEN@github.com"
+// format deploy/indexer-entrypoint.sh writes for GIT_TOKEN, so GitSyncer picks
+// it up identically regardless of which auth mode produced it. Never logs the
+// token itself.
+func writeGitCredential(ctx context.Context, ghClient *githubapp.Client) error {
+	token, err := ghClient.InstallationToken(ctx)
+	if err != nil {
+		return fmt.Errorf("mint installation token: %w", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home directory: %w", err)
+	}
+	line := fmt.Sprintf("https://x-access-token:%s@github.com\n", token)
+	if err := os.WriteFile(filepath.Join(home, ".git-credentials"), []byte(line), 0o600); err != nil {
+		return fmt.Errorf("write git credentials: %w", err)
+	}
+	return nil
 }
 
 // buildExtractorRunner constructs the extract.Runner from the platform's

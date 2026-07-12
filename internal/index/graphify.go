@@ -95,6 +95,17 @@ func (g *ExecGraphifier) Generate(ctx context.Context, repoPath string) (string,
 	cmd.Stdout = io.MultiWriter(stderrSink, tail)
 	cmd.Stderr = io.MultiWriter(stderrSink, tail)
 
+	// graphify can sit silent for minutes on a big repo; without this an
+	// operator watching the terminal can't tell it apart from a hang. Args
+	// carries {repo_path} already substituted, not the repo's platform name,
+	// so this derives a short label from the checkout dir instead of adding a
+	// repo-name parameter to the Graphifier interface.
+	repoLabel := filepath.Base(absRepo)
+	stopTicker := startProgressTicker(progressTickInterval, func(elapsed time.Duration) {
+		fmt.Fprintf(stderrSink, "[%s] graphify still running (%s elapsed)\n", repoLabel, elapsed)
+	})
+	defer stopTicker()
+
 	if err := cmd.Run(); err != nil {
 		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
 			return "", fmt.Errorf("%s timed out after %s\n--- output tail ---\n%s", g.Command, g.Timeout, tail.String())

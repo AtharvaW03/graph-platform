@@ -22,7 +22,12 @@ import (
 //
 //	v2: HAS_ENTITY ownership edges (replacing repo-membership CONTAINS),
 //	    label folded into the content hash, graphify extract --code-only.
-const GraphSchemaVersion = 2
+//	v3: graphify 0.9.13 output shape - markdown quick-scan/semantic twin
+//	    nodes now merge into one, and cross-module reference stubs now
+//	    rewire onto their definitions. Both change what a repo's nodes
+//	    look like without changing its source, so unchanged-HEAD repos
+//	    need one forced re-extract to converge on the new shape.
+const GraphSchemaVersion = 3
 
 // Orchestrator drives the per-repo pipeline for a configured set of
 // repositories. Every step is delegated to a pluggable component (Source,
@@ -301,7 +306,14 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	importPath := graphPath
 	if o.Extractors != nil && len(o.Extractors.Extractors) > 0 {
 		o.Log.Printf("[%s] extract (%d extractors)", repo.Name, len(o.Extractors.Extractors))
+		// extract.Runner only logs a failure or a warning, never progress - on
+		// a huge repo this stage can go silent for minutes the same way
+		// graphify's subprocess can, so it gets the same still-running ticker.
+		stopTicker := startProgressTicker(progressTickInterval, func(elapsed time.Duration) {
+			o.Log.Printf("[%s] extract still running (%s elapsed)", repo.Name, elapsed)
+		})
 		extResult := o.Extractors.Run(ctx, repoPath, repo.Name)
+		stopTicker()
 		if len(extResult.Errors) > 0 {
 			result.ExtractorErrors = map[string]string{}
 			for n, e := range extResult.Errors {

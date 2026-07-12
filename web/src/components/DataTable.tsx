@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Badge } from "./ui";
 
 export interface Column<T> {
   header: string;
@@ -114,47 +115,50 @@ export function DataTable<T>({ columns, rows, keyFn, note }: Props<T>) {
           : ""}
         {note ? ` · ${note}` : ""}
       </p>
-      <table className="data-table">
-        <thead>
-          <tr>
-            {columns.map((c, i) => (
-              <th
-                key={c.header}
-                aria-sort={
-                  sortCol === i
-                    ? dir === "asc"
-                      ? "ascending"
-                      : "descending"
-                    : undefined
-                }
-              >
-                {sortable(i) ? (
-                  <button
-                    type="button"
-                    className="th-sort"
-                    onClick={() => onSort(i)}
-                    title={`sort by ${c.header}`}
-                  >
-                    {c.header}
-                    {sortCol === i ? (dir === "asc" ? " ▲" : " ▼") : ""}
-                  </button>
-                ) : (
-                  c.header
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {visible.map((row, i) => (
-            <tr key={keyFn(row, start + i)}>
-              {columns.map((c) => (
-                <td key={c.header}>{c.render(row)}</td>
+      <div className="table-wrap" role="region" aria-label="Results table">
+        <table className="table">
+          <thead>
+            <tr>
+              {columns.map((c, i) => (
+                <th
+                  key={c.header}
+                  scope="col"
+                  aria-sort={
+                    sortCol === i
+                      ? dir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : undefined
+                  }
+                >
+                  {sortable(i) ? (
+                    <button
+                      type="button"
+                      className="th-sort"
+                      onClick={() => onSort(i)}
+                      title={`sort by ${c.header}`}
+                    >
+                      {c.header}
+                      {sortCol === i ? (dir === "asc" ? " ▲" : " ▼") : ""}
+                    </button>
+                  ) : (
+                    c.header
+                  )}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {visible.map((row, i) => (
+              <tr key={keyFn(row, start + i)}>
+                {columns.map((c) => (
+                  <td key={c.header}>{c.render(row)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {totalPages > 1 && (
         <nav className="pager" aria-label="Result pages">
           <button
@@ -203,9 +207,7 @@ export function LabelBadges({ labels }: { labels: string[] }) {
       {labels
         .filter((l) => l !== "Entity")
         .map((l) => (
-          <span key={l} className="badge">
-            {l}
-          </span>
+          <Badge key={l}>{l}</Badge>
         ))}
     </>
   );

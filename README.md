@@ -76,7 +76,7 @@ so migrations roll out without anyone remembering `--force`.
 ## Quickstart
 
 Prerequisites: Go 1.26+, Docker Desktop, a local `git`, Neo4j 5.x, and the
-`graphify` CLI (pinned to 0.9.12; install the terraform extra for `.tf`/`.hcl`
+`graphify` CLI (pinned to 0.9.13; install the terraform extra for `.tf`/`.hcl`
 coverage: `uv tool install "graphifyy[terraform]"`) on PATH.
 
 ```powershell
@@ -112,6 +112,8 @@ curl -H "Authorization: Bearer dev-token" "http://localhost:8080/overview/my-rep
 | `QUERY_CORS_ORIGIN` | query-service | *(empty = CORS disabled)* | single trusted origin for a cross-origin web UI |
 | `QUERY_SERVICE_URL` | mcp-server | `http://localhost:8080` | query-service base URL |
 | `QUERY_TIMEOUT` | mcp-server | `30s` | per-request timeout |
+| `GIT_TOKEN` | indexer | *(empty = public repos only)* | PAT for cloning private repos over HTTPS; ignored if the `GITHUB_APP_*` vars below are set |
+| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_PATH` | indexer | *(empty = fall back to `GIT_TOKEN`)* | GitHub App auth, all three required together; short-lived installation tokens instead of a long-lived PAT, minted at startup and refreshed automatically before each hourly expiry |
 
 ### REST endpoints
 

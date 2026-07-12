@@ -1,3 +1,5 @@
+import { Alert, EmptyState, Skeleton } from "./ui";
+
 interface Props {
   loading: boolean;
   error: string | null;
@@ -8,23 +10,19 @@ interface Props {
 }
 
 export function StatusBox({ loading, error, empty, emptyText }: Props) {
-  if (loading)
-    return (
-      <p className="status" role="status">
-        Loading…
-      </p>
-    );
+  if (loading) return <Skeleton rows={5} />;
   if (error)
     return (
-      <p className="status status-error" role="alert">
-        Error: {error}
-      </p>
+      <Alert tone="danger" title="Request failed">
+        {error}
+      </Alert>
     );
   if (empty)
     return (
-      <p className="status" role="status">
-        {emptyText ?? "No results."}
-      </p>
+      <EmptyState
+        title="No results"
+        description={emptyText ?? "No results."}
+      />
     );
   return null;
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -60,16 +61,76 @@ func (s *Service) read(ctx context.Context, fn func(tx driver.ManagedTransaction
 	return sess.ExecuteRead(ctx, fn, driver.WithTxTimeout(txTimeout))
 }
 
-// Search returns nodes whose name or norm_name contains q (case-insensitive),
-// ordered by match quality (exact > prefix > contains) then name length. It
-// matches the indexed name_lower/norm_name_lower columns; the term is
-// lowercased here. repos, when non-empty, scopes to those repos - shared nodes
-// carry no repo and drop out of scoped results.
+// Search returns nodes matching q, ranked by relevance. It tries the
+// entity_search fulltext index first (whole-token/stem matching, scored by
+// Lucene relevance) and only falls back to the exact/prefix/CONTAINS scan
+// below when the fulltext tier comes back empty or errors - a fulltext hit on
+// a bare mid-identifier substring (Lucene tokenizes on word boundaries, so it
+// won't match a partial token) is exactly the case the fallback still
+// catches. repos, when non-empty, scopes to those repos - shared nodes carry
+// no repo and drop out of scoped results.
 func (s *Service) Search(ctx context.Context, q string, repos []string) ([]SearchResult, error) {
 	if q == "" {
 		return []SearchResult{}, nil
 	}
+	if results, err := s.searchFulltext(ctx, q, repos); err != nil {
+		log.Printf("search: fulltext tier failed, using fallback: %v", err)
+	} else if len(results) > 0 {
+		return results, nil
+	}
+	return s.searchFallback(ctx, q, repos)
+}
 
+// searchFulltext queries the entity_search fulltext index (name, norm_name,
+// path), score-ordered. The term is Lucene-escaped so a stray `*`, `AND`, or
+// other reserved character from user input can't turn into a wildcard scan
+// or a syntax error.
+func (s *Service) searchFulltext(ctx context.Context, q string, repos []string) ([]SearchResult, error) {
+	ftq := luceneEscape(q)
+	if ftq == "" {
+		return nil, nil
+	}
+
+	const cypher = `
+CALL db.index.fulltext.queryNodes('entity_search', $ftq) YIELD node, score
+WHERE node:Entity AND (size($repos) = 0 OR node.repo IN $repos)
+RETURN node.node_key    AS node_key,
+       node.graphify_id AS graphify_id,
+       node.name        AS name,
+       labels(node)     AS labels,
+       node.repo        AS repo,
+       node.path        AS path,
+       node.line        AS line
+ORDER BY score DESC
+LIMIT $limit
+`
+
+	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
+		res, err := tx.Run(ctx, cypher, map[string]any{"ftq": ftq, "limit": searchLimit, "repos": orEmpty(repos)})
+		if err != nil {
+			return nil, err
+		}
+		records, err := res.Collect(ctx)
+		if err != nil {
+			return nil, err
+		}
+		results := make([]SearchResult, 0, len(records))
+		for _, r := range records {
+			results = append(results, searchResultFromRecord(r))
+		}
+		return results, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out.([]SearchResult), nil
+}
+
+// searchFallback is the original exact/prefix/CONTAINS scan, unchanged: it
+// matches the indexed name_lower/norm_name_lower columns (the term is
+// lowercased here), ordered by match quality (exact > prefix > contains) then
+// name length.
+func (s *Service) searchFallback(ctx context.Context, q string, repos []string) ([]SearchResult, error) {
 	const cypher = `
 MATCH (n:Entity)
 WHERE (n.name_lower CONTAINS $q OR n.norm_name_lower CONTAINS $q)
@@ -103,15 +164,7 @@ LIMIT $limit
 		}
 		results := make([]SearchResult, 0, len(records))
 		for _, r := range records {
-			results = append(results, SearchResult{
-				NodeKey:    asString(r.AsMap()["node_key"]),
-				GraphifyID: asString(r.AsMap()["graphify_id"]),
-				Name:       asString(r.AsMap()["name"]),
-				Labels:     asStringSlice(r.AsMap()["labels"]),
-				Repo:       asString(r.AsMap()["repo"]),
-				Path:       asString(r.AsMap()["path"]),
-				Line:       asString(r.AsMap()["line"]),
-			})
+			results = append(results, searchResultFromRecord(r))
 		}
 		return results, nil
 	})
@@ -119,6 +172,21 @@ LIMIT $limit
 		return nil, err
 	}
 	return out.([]SearchResult), nil
+}
+
+// searchResultFromRecord maps the node_key/graphify_id/name/labels/repo/
+// path/line columns both Search tiers return into a SearchResult.
+func searchResultFromRecord(r *driver.Record) SearchResult {
+	m := r.AsMap()
+	return SearchResult{
+		NodeKey:    asString(m["node_key"]),
+		GraphifyID: asString(m["graphify_id"]),
+		Name:       asString(m["name"]),
+		Labels:     asStringSlice(m["labels"]),
+		Repo:       asString(m["repo"]),
+		Path:       asString(m["path"]),
+		Line:       asString(m["line"]),
+	}
 }
 
 // FindSymbol returns every node whose name (or norm_name) exactly matches the

@@ -200,3 +200,97 @@ func TestIntegration_ShortestPath_FindsConnectedPairAmongAmbiguousNames(t *testi
 		t.Errorf("expected both nodes from repoY, got %+v", path)
 	}
 }
+
+// TestIntegration_Search_FulltextRanksExactNameFirst seeds one node whose
+// name is exactly the query term (matching in both the short name and
+// norm_name fields) alongside one that only matches through a long,
+// multi-segment path - Lucene's field-length normalization should rank the
+// exact short-field match above the diluted long-field one.
+func TestIntegration_Search_FulltextRanksExactNameFirst(t *testing.T) {
+	svc, c := testService(t)
+	ctx := context.Background()
+	repo := uniqueQueryRepo(t, "ftrank")
+	t.Cleanup(func() { wipeQueryRepo(t, c, repo) })
+
+	if err := c.MergeRepository(ctx, repo); err != nil {
+		t.Fatalf("merge repository: %v", err)
+	}
+
+	nodes := []graphify.Node{
+		queryAstNode("exact", "ProcessPayment", "a/short.go"),
+		queryAstNode("diluted", "Other", "src/deep/legacy/module/ProcessPayment/handler/file.go"),
+	}
+	if _, _, _, err := c.ImportNodes(ctx, repo, "c1", "r1", nodes, false); err != nil {
+		t.Fatalf("import nodes: %v", err)
+	}
+
+	results, err := svc.Search(ctx, "ProcessPayment", []string{repo})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least one result, got none")
+	}
+	if results[0].Name != "ProcessPayment" {
+		t.Errorf("top result = %q, want the exact-name match ranked first; got %+v", results[0].Name, results)
+	}
+}
+
+// TestIntegration_Search_FallsBackForMidIdentifierSubstring covers the case
+// the fulltext tier structurally cannot handle: Lucene's tokenizer treats
+// "ProcessPayment" as one whole token, so a bare substring query like
+// "ProcessPay" matches no token at all. Search must still find it via the
+// CONTAINS fallback.
+func TestIntegration_Search_FallsBackForMidIdentifierSubstring(t *testing.T) {
+	svc, c := testService(t)
+	ctx := context.Background()
+	repo := uniqueQueryRepo(t, "ftfallback")
+	t.Cleanup(func() { wipeQueryRepo(t, c, repo) })
+
+	if err := c.MergeRepository(ctx, repo); err != nil {
+		t.Fatalf("merge repository: %v", err)
+	}
+
+	nodes := []graphify.Node{queryAstNode("n1", "ProcessPayment", "a.go")}
+	if _, _, _, err := c.ImportNodes(ctx, repo, "c1", "r1", nodes, false); err != nil {
+		t.Fatalf("import nodes: %v", err)
+	}
+
+	results, err := svc.Search(ctx, "ProcessPay", []string{repo})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	found := false
+	for _, r := range results {
+		if r.Name == "ProcessPayment" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected ProcessPayment via the CONTAINS fallback for the mid-identifier substring %q, got %+v", "ProcessPay", results)
+	}
+}
+
+// TestIntegration_Search_LuceneReservedInputReturnsCleanly makes sure a
+// query built entirely from Lucene syntax characters can't reach the
+// fulltext index unescaped and blow up as a parse error or an unintended
+// wildcard scan; it must return normally, error or not.
+func TestIntegration_Search_LuceneReservedInputReturnsCleanly(t *testing.T) {
+	svc, c := testService(t)
+	ctx := context.Background()
+	repo := uniqueQueryRepo(t, "ftreserved")
+	t.Cleanup(func() { wipeQueryRepo(t, c, repo) })
+
+	if err := c.MergeRepository(ctx, repo); err != nil {
+		t.Fatalf("merge repository: %v", err)
+	}
+
+	nodes := []graphify.Node{queryAstNode("n1", "Unrelated", "a.go")}
+	if _, _, _, err := c.ImportNodes(ctx, repo, "c1", "r1", nodes, false); err != nil {
+		t.Fatalf("import nodes: %v", err)
+	}
+
+	if _, err := svc.Search(ctx, `foo*bar(baz) AND "unterminated`, []string{repo}); err != nil {
+		t.Errorf("Search with Lucene-reserved input returned an error, want it to return cleanly: %v", err)
+	}
+}

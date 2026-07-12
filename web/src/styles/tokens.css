@@ -1,0 +1,135 @@
+:root {
+  /* Color - light (premium SaaS, restrained) */
+  --color-bg: #f6f7f9;
+  --color-bg-elevated: #ffffff;
+  --color-bg-muted: #eef0f4;
+  --color-bg-subtle: #f0f2f6;
+  --color-border: #e2e5eb;
+  --color-border-strong: #c8cdd8;
+  --color-text: #0f1419;
+  --color-text-secondary: #5a6472;
+  --color-text-muted: #8b93a1;
+  --color-text-inverse: #ffffff;
+
+  --color-brand: #0b5fff;
+  --color-brand-hover: #094ed6;
+  --color-brand-soft: #e8f0ff;
+  --color-brand-text: #0a4ad4;
+
+  --color-success: #0d7a4f;
+  --color-success-soft: #e6f6ef;
+  --color-warning: #9a6700;
+  --color-warning-soft: #fff6e0;
+  --color-danger: #c62828;
+  --color-danger-soft: #fdecea;
+  --color-info: #0b6e99;
+  --color-info-soft: #e6f5fb;
+
+  --color-focus: #0b5fff;
+  --color-overlay: rgba(15, 20, 25, 0.45);
+
+  /* Persona accents (not sole meaning - always with labels) */
+  --color-persona-eng: #0b5fff;
+  --color-persona-pm: #6b4eff;
+  --color-persona-sec: #c45c00;
+
+  /* Spacing scale (4px base) */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Typography */
+  --font-sans: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 9999px;
+
+  /* Shadow */
+  --shadow-xs: 0 1px 2px rgba(15, 20, 25, 0.04);
+  --shadow-sm: 0 1px 3px rgba(15, 20, 25, 0.06), 0 1px 2px rgba(15, 20, 25, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 20, 25, 0.08);
+  --shadow-lg: 0 12px 32px rgba(15, 20, 25, 0.12);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 220ms;
+
+  /* Layout */
+  --sidebar-width: 15.5rem;
+  --header-height: 3.5rem;
+  --content-max: 72rem;
+  --z-header: 40;
+  --z-sidebar: 50;
+  --z-modal: 100;
+  --z-toast: 110;
+}
+
+[data-theme="dark"] {
+  --color-bg: #0c0e12;
+  --color-bg-elevated: #141820;
+  --color-bg-muted: #1a1f2a;
+  --color-bg-subtle: #12161e;
+  --color-border: #2a3140;
+  --color-border-strong: #3d4659;
+  --color-text: #eef1f6;
+  --color-text-secondary: #a8b0c0;
+  --color-text-muted: #6f788a;
+  --color-text-inverse: #0c0e12;
+
+  --color-brand: #5b8fff;
+  --color-brand-hover: #7aa3ff;
+  --color-brand-soft: #1a2744;
+  --color-brand-text: #9bb8ff;
+
+  --color-success: #3dbe8c;
+  --color-success-soft: #143528;
+  --color-warning: #e0b040;
+  --color-warning-soft: #3a2e12;
+  --color-danger: #f07171;
+  --color-danger-soft: #3a1a1a;
+  --color-info: #5eb8e0;
+  --color-info-soft: #142a36;
+
+  --color-focus: #5b8fff;
+  --color-overlay: rgba(0, 0, 0, 0.6);
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-normal: 0ms;
+  }
+}

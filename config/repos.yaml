@@ -6,11 +6,12 @@
 # as the key in state.json, so renaming a repo forces a re-index from
 # scratch.
 #
-# `graphify` controls how the AST extractor is invoked. The default is
-# `graphify update <repo_path>` - graphify's incremental, AST-only
-# workflow (per docs/graphify/architecture.md). It writes inside the repo at
-# `<repo_path>/graphify-out/graph.json`, so there is no --out flag and no
-# {out_dir} placeholder. The only supported placeholder in args is
+# `graphify` controls how the AST extractor is invoked. Invocation settings
+# (command, args, output_file, timeout) default from the code - currently
+# `graphify extract <repo_path> --code-only --force`, a 20m timeout, and
+# output at `<repo_path>/graphify-out/graph.json` - and belong in this file
+# only to OVERRIDE a default. Don't mirror the defaults here: a stale copy
+# silently wins over the code. The only supported placeholder in args is
 # {repo_path}; output_file is resolved relative to it.
 #
 # `extractors` enables/disables the platform's domain extractors. They run
@@ -39,13 +40,8 @@ git:
   timeout: 10m
 
 graphify:
-  command: graphify
-  args:
-    - update
-    - "{repo_path}"
-  output_file: graphify-out/graph.json
-  timeout: 20m
-  expected_version: "0.9.12" # must match the graphifyy version pinned in the Docker image
+  expected_version: "0.9.13" # must match the graphifyy version pinned in the Docker image
+  # ignore_patterns: ["*.tfvars"]  # appended to every checkout's .graphifyignore; this is the default
 
 extractors:
   deps: true

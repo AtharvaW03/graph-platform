@@ -3,6 +3,7 @@ module graph-platform
 go 1.26.4
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	gopkg.in/yaml.v3 v3.0.1
