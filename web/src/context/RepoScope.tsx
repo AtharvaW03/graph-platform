@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useState,
@@ -15,6 +16,9 @@ import type { RepoInfo } from "../types";
 interface RepoScope {
   // available is the list of indexed repos (from GET /repos).
   available: RepoInfo[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
   // selected repo names; empty = no scoping.
   selected: string[];
   setSelected: (repos: string[]) => void;
@@ -22,6 +26,9 @@ interface RepoScope {
 
 const Ctx = createContext<RepoScope>({
   available: [],
+  loading: false,
+  error: null,
+  refresh: () => {},
   selected: [],
   setSelected: () => {},
 });
@@ -35,6 +42,8 @@ const STORAGE_KEY = "repo-scope";
 
 export function RepoScopeProvider({ children }: { children: ReactNode }) {
   const [available, setAvailable] = useState<RepoInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selected, setSelectedState] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -47,12 +56,25 @@ export function RepoScopeProvider({ children }: { children: ReactNode }) {
     }
   });
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setError(null);
     api
       .listRepos()
-      .then(setAvailable)
-      .catch(() => setAvailable([]));
+      .then((repos) => {
+        setAvailable(repos);
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        setAvailable([]);
+        setError(err instanceof Error ? err.message : "Failed to load repos");
+        setLoading(false);
+      });
   }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const setSelected = (repos: string[]) => {
     setSelectedState(repos);
@@ -60,7 +82,9 @@ export function RepoScopeProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ available, selected, setSelected }}>
+    <Ctx.Provider
+      value={{ available, loading, error, refresh, selected, setSelected }}
+    >
       {children}
     </Ctx.Provider>
   );

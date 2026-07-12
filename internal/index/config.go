@@ -114,10 +114,16 @@ func DefaultConfig() Config {
 			Command: "graphify",
 			// extract --code-only (0.9.11+) is the dedicated headless code
 			// path: local AST only, no LLM key, docs/papers skipped with a
-			// report. --force matters: without it graphify's anti-shrink
-			// guard keeps ghost nodes when a repo legitimately shrinks and
-			// we'd import stale data. graph.json is a disposable per-run
-			// artifact here - the importer owns correctness.
+			// report. --force matters for two reasons: without it graphify's
+			// anti-shrink guard keeps ghost nodes when a repo legitimately
+			// shrinks and we'd import stale data, and (upstream #1795) 0.9.13's
+			// incremental `update` started preserving nodes for files newly
+			// matched by an ignore pattern still on disk - which would fight
+			// our injected .graphifyignore (*.tfvars) exclusion under `update`.
+			// `extract --force` purges deliberately-excluded files per the
+			// 0.9.13 changelog, so this invocation is immune; don't "simplify"
+			// this back to `update` without re-checking that. graph.json is a
+			// disposable per-run artifact here - the importer owns correctness.
 			Args:           []string{"extract", "{repo_path}", "--code-only", "--force"},
 			OutputFile:     "graphify-out/graph.json",
 			Timeout:        20 * time.Minute,

@@ -77,6 +77,9 @@ export interface FeedbackInput {
 }
 
 export const api = {
+  // /health is unauthenticated (see internal/api/server.go), so this never
+  // needs the token the rest of this client deliberately doesn't have.
+  health: () => get<{ status: string }>("/health"),
   listRepos: () => get<RepoInfo[]>("/repos"),
   search: (q: string, repos?: string[]) =>
     get<SearchResult[]>("/search", { q, repos: scopeParam(repos) }),

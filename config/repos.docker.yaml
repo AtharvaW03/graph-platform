@@ -7,14 +7,10 @@ repositories:
     url: https://github.com/fatih/color.git
     branch: main
 
+# Invocation settings (command/args/output_file/timeout) default from the
+# code (extract --code-only --force); set them here only to override.
 graphify:
-  command: graphify
-  args:
-    - update
-    - "{repo_path}"
-  output_file: graphify-out/graph.json
-  timeout: 20m
-  expected_version: "0.9.12" # must match the graphifyy version pinned in the Docker image
+  expected_version: "0.9.13" # must match the graphifyy version pinned in the Docker image
 
 extractors:
   deps: true

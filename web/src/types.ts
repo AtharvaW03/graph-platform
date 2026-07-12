@@ -81,6 +81,13 @@ export interface HTTPRoute {
   labels: string[];
   file: string;
   line: string;
+  // Source is "openapi" for routes read from a committed spec or "code" for
+  // routes inferred by source scanning. Documented mirrors it as a bool.
+  // Classification is "business" or "infra". Tags carries OpenAPI tags.
+  source?: string;
+  documented: boolean;
+  classification?: string;
+  tags?: string[];
 }
 
 export interface KafkaTopicInfo {

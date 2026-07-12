@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { Button } from "./ui";
+import "./FeedbackWidget.css";
 
 // One rating per browser session is enough for the quality metric (the
 // brief measures "sessions rated relevant", not queries), so after the
@@ -105,21 +107,22 @@ export function FeedbackWidget({
         👎
       </button>
       <input
+        className="feedback-note"
         value={note}
         onChange={(e) => setNote(e.target.value)}
         placeholder="optional note"
         aria-label="Feedback note"
         maxLength={2000}
       />
-      <button
-        type="button"
-        className="feedback-send"
+      <Button
+        size="sm"
         onClick={send}
         disabled={choice === null || state === "sending"}
+        loading={state === "sending"}
         title={choice === null ? "pick a thumb first" : "send feedback"}
       >
         Send
-      </button>
+      </Button>
       {state === "failed" && (
         <span className="feedback-error">couldn't record, try again</span>
       )}

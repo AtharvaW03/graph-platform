@@ -102,8 +102,8 @@ func (c *Client) VerifyConnectivity(ctx context.Context) error {
 }
 
 // EnsureConstraints creates the node_key/Repository.name uniqueness
-// constraints, the repo index, and TEXT indexes on the pre-lowercased name
-// columns. All idempotent.
+// constraints, the repo index, TEXT indexes on the pre-lowercased name
+// columns, and the entity_search fulltext index. All idempotent.
 //
 // The name_lower / norm_name_lower indexes back case-insensitive lookups:
 // toLower(n.name) can't use an index, so the importer stores a lowercased
@@ -124,11 +124,23 @@ func (c *Client) EnsureConstraints(ctx context.Context) error {
 		// concurrent first-ever AcquireLease race safe (MERGE alone can still
 		// double-create without it).
 		`CREATE CONSTRAINT indexer_lease_id IF NOT EXISTS FOR (l:IndexerLease) REQUIRE l.id IS UNIQUE`,
+		// Backs Service.Search's fulltext tier (token/stem matching, relevance
+		// scoring) ahead of the exact/prefix/CONTAINS fallback below it.
+		`CREATE FULLTEXT INDEX entity_search IF NOT EXISTS FOR (n:Entity) ON EACH [n.name, n.norm_name, n.path]`,
 	}
 	for _, q := range stmts {
 		if _, err := session.Run(ctx, q, nil); err != nil {
 			return fmt.Errorf("constraint %q: %w", q, err)
 		}
+	}
+
+	// Schema commands above return as soon as the index/constraint is
+	// created, not once it's populated. Waiting here (idempotent, cheap once
+	// everything is already online) means a freshly created entity_search
+	// index can't be queried by Service.Search before it has any data in it,
+	// which would look like every search silently falling back to CONTAINS.
+	if _, err := session.Run(ctx, `CALL db.awaitIndexes()`, nil); err != nil {
+		return fmt.Errorf("await indexes: %w", err)
 	}
 	return nil
 }

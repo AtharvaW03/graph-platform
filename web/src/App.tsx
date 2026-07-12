@@ -1,81 +1,29 @@
-import { NavLink, Route, Routes, Navigate } from "react-router-dom";
-import { SearchPage } from "./pages/SearchPage";
-import { SymbolPage } from "./pages/SymbolPage";
-import { PathPage } from "./pages/PathPage";
-import { OverviewPage } from "./pages/OverviewPage";
-import { DependenciesPage } from "./pages/DependenciesPage";
-import { RoutesPage } from "./pages/RoutesPage";
-import { KafkaPage } from "./pages/KafkaPage";
-import { SqlPage } from "./pages/SqlPage";
-import { GluePage } from "./pages/GluePage";
-import { HotspotsPage } from "./pages/HotspotsPage";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { AppShell } from "./layout/AppShell";
 import { RepoScopeProvider } from "./context/RepoScope";
-
-// Navigation grouped by what the entities are: "Code" pages query repo-owned
-// symbols (and support the repo scope picker); "Platform" pages query
-// org-global inventories or pick their own single repo.
-const navGroups = [
-  {
-    title: "Code",
-    items: [
-      { to: "/overview", label: "Repository Overview" },
-      { to: "/search", label: "Search" },
-      { to: "/symbol", label: "Symbol Explorer" },
-      { to: "/path", label: "Shortest Path" },
-      { to: "/hotspots", label: "Hotspots" },
-    ],
-  },
-  {
-    title: "Platform",
-    items: [
-      { to: "/dependencies", label: "Dependencies" },
-      { to: "/routes", label: "HTTP Routes" },
-      { to: "/kafka", label: "Kafka Topics" },
-      { to: "/sql", label: "SQL Objects" },
-      { to: "/glue", label: "Glue Jobs" },
-    ],
-  },
-];
+import { Home } from "./pages/Home";
+import { Search } from "./pages/Search";
+import { Explore } from "./pages/Explore";
+import { Impact } from "./pages/Impact";
+import { Hotspots } from "./pages/Hotspots";
+import { Security } from "./pages/Security";
+import { Repos } from "./pages/Repos";
 
 export default function App() {
   return (
     <RepoScopeProvider>
-      <div className="layout">
-        <nav className="sidebar" aria-label="Main navigation">
-          <div className="brand">graph-platform</div>
-          {navGroups.map((g) => (
-            <div key={g.title} className="nav-section">
-              <div className="nav-group">{g.title}</div>
-              {g.items.map((n) => (
-                <NavLink
-                  key={n.to}
-                  to={n.to}
-                  className={({ isActive }) =>
-                    isActive ? "nav-link active" : "nav-link"
-                  }
-                >
-                  {n.label}
-                </NavLink>
-              ))}
-            </div>
-          ))}
-        </nav>
-        <main className="content">
-          <Routes>
-            <Route path="/" element={<Navigate to="/overview" replace />} />
-            <Route path="/overview" element={<OverviewPage />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/symbol" element={<SymbolPage />} />
-            <Route path="/path" element={<PathPage />} />
-            <Route path="/dependencies" element={<DependenciesPage />} />
-            <Route path="/routes" element={<RoutesPage />} />
-            <Route path="/kafka" element={<KafkaPage />} />
-            <Route path="/sql" element={<SqlPage />} />
-            <Route path="/glue" element={<GluePage />} />
-            <Route path="/hotspots" element={<HotspotsPage />} />
-          </Routes>
-        </main>
-      </div>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route index element={<Home />} />
+          <Route path="/search" element={<Search />} />
+          <Route path="/explore" element={<Explore />} />
+          <Route path="/impact" element={<Impact />} />
+          <Route path="/hotspots" element={<Hotspots />} />
+          <Route path="/security" element={<Security />} />
+          <Route path="/repos" element={<Repos />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
     </RepoScopeProvider>
   );
 }
