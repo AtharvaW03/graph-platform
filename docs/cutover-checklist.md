@@ -76,6 +76,10 @@ relying on any *later* snapshot the same way.
 
 Small blast radius first: 10-20 repos, not the whole org.
 
+> Note: if this deploy carries a graph schema bump (see `GraphSchemaVersion`),
+> every repo re-indexes automatically on its first cycle even where HEAD is
+> unchanged - expect the first pass to take as long as a full `--force` run.
+
 - [ ] Point the ECS indexer task's config at a trimmed repo list (10-20 repos)
 - [ ] Run one-shot (no `--interval` yet)
       ```
@@ -142,7 +146,7 @@ Small blast radius first: 10-20 repos, not the whole org.
 > still needs. This is now enforced in the database: each indexer acquires a
 > writer lease (`IndexerLease` node, `--lease-ttl`, default 15m) on startup,
 > renews it before every repo (both one-shot and `--interval` mode), and a
-> background heartbeat renews it every `ttl/3` as well so a single long repo
+> background heartbeat renews it every `ttl/4` (giving up after 3 straight failures, before expiry) so a single long repo
 > can't outlive the TTL between renewals; a second indexer refuses to start
 > (or stops immediately on its next renewal) while the lease is held.
 > The freeze step below remains as belt-and-braces - don't rely on the lease

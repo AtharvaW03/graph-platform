@@ -334,3 +334,52 @@ func TestIndexOne_SweepResidueFailsRepoAndDoesNotAdvanceState(t *testing.T) {
 		t.Errorf("LastIndexedCommit = %q, want empty - sweep residue must not advance state", st.LastIndexedCommit)
 	}
 }
+
+// TestIndexOne_SchemaVersionMismatchForcesReindex: an unchanged HEAD is only
+// skippable when the recorded schema version matches - a version bump must
+// roll the migration out without --force.
+func TestIndexOne_SchemaVersionMismatchForcesReindex(t *testing.T) {
+	imp := &configurableImportRunner{}
+	o := testOrchestrator(threeRepos()[:1], nil)
+	o.Importer = imp
+	o.Store.Set(RepoState{
+		Name:              "repo-a",
+		LastStatus:        StatusSuccess,
+		LastIndexedCommit: "deadbeef", // matches fakeSyncer
+		SchemaVersion:     GraphSchemaVersion - 1,
+	})
+
+	res := o.IndexOne(context.Background(), threeRepos()[0], false)
+	if res.Status == StatusSkipped {
+		t.Fatalf("repo was skipped despite stale schema version")
+	}
+	if imp.calls != 1 {
+		t.Fatalf("importer calls = %d, want 1 (schema bump must re-import)", imp.calls)
+	}
+	st, _ := o.Store.Get("repo-a")
+	if st.SchemaVersion != GraphSchemaVersion {
+		t.Fatalf("persisted SchemaVersion = %d, want %d", st.SchemaVersion, GraphSchemaVersion)
+	}
+}
+
+// TestIndexOne_MatchingSchemaVersionSkipsUnchangedHead: with commit and
+// schema both current, the unchanged-HEAD skip still applies.
+func TestIndexOne_MatchingSchemaVersionSkipsUnchangedHead(t *testing.T) {
+	imp := &configurableImportRunner{}
+	o := testOrchestrator(threeRepos()[:1], nil)
+	o.Importer = imp
+	o.Store.Set(RepoState{
+		Name:              "repo-a",
+		LastStatus:        StatusSuccess,
+		LastIndexedCommit: "deadbeef",
+		SchemaVersion:     GraphSchemaVersion,
+	})
+
+	res := o.IndexOne(context.Background(), threeRepos()[0], false)
+	if res.Status != StatusSkipped {
+		t.Fatalf("status = %s, want skipped (commit and schema both unchanged)", res.Status)
+	}
+	if imp.calls != 0 {
+		t.Fatalf("importer calls = %d, want 0", imp.calls)
+	}
+}

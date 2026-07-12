@@ -30,7 +30,7 @@ func main() {
 	all := flag.Bool("all", false, "explicit all-repositories mode; mutually exclusive with --repo")
 	force := flag.Bool("force", false, "re-index even if HEAD matches the previously-indexed commit")
 	interval := flag.Duration("interval", 0, "if > 0, run continuously every interval (e.g. 15m); otherwise one-shot")
-	leaseTTL := flag.Duration("lease-ttl", 15*time.Minute, "writer lease TTL; a background heartbeat renews it every ttl/3, so the TTL just needs headroom over a missed heartbeat or two, not the whole run - a crashed indexer's lease self-expires after this")
+	leaseTTL := flag.Duration("lease-ttl", 15*time.Minute, "writer lease TTL; a background heartbeat renews it every ttl/4 and gives up after 3 consecutive failures, strictly before expiry - a crashed indexer's lease self-expires after this")
 	stealLease := flag.Bool("steal-lease", false, "take the writer lease unconditionally at startup; operator recovery for a stuck lease")
 	flag.Parse()
 
@@ -40,7 +40,7 @@ func main() {
 		logger.Fatal("--all and --repo are mutually exclusive")
 	}
 	if *leaseTTL < time.Minute {
-		// time.NewTicker panics on ttl/3 <= 0, and anything sub-minute is
+		// time.NewTicker panics on ttl/4 <= 0, and anything sub-minute is
 		// operationally pointless (renewal jitter alone could exceed it).
 		logger.Fatalf("--lease-ttl must be at least 1m, got %s", *leaseTTL)
 	}
@@ -143,7 +143,7 @@ func main() {
 	// paths call the same owner-guarded RenewLease, so they never conflict.
 	heartbeat := &index.LeaseHeartbeat{
 		Renew:    func(hbCtx context.Context) error { return client.RenewLease(hbCtx, owner, *leaseTTL) },
-		Interval: *leaseTTL / 3,
+		Interval: *leaseTTL / 4,
 		Log:      logger,
 		IsLost:   func(err error) bool { return errors.Is(err, neo4j.ErrLeaseLost) },
 		OnFatal: func(err error) {

@@ -63,6 +63,16 @@ Terraform resources flow through graphify as generic AST nodes - there's no
 dedicated label mapping for them yet, so `InferLabel`'s existing heuristics
 bucket them same as any other file-derived symbol.
 
+The indexer appends platform-wide exclusions (`graphify.ignore_patterns`,
+default `*.tfvars`) into every checkout's `.graphifyignore` before extraction,
+because graphify only reads ignore files from the repo being scanned - a
+pattern committed here protects nothing but this repo. Repo-owned ignore
+entries are preserved; tfvars stay out of the graph everywhere by default.
+
+Graph-model changes carry a schema version (`GraphSchemaVersion`): when it
+bumps, every repo re-indexes on its next cycle even with an unchanged HEAD,
+so migrations roll out without anyone remembering `--force`.
+
 ## Quickstart
 
 Prerequisites: Go 1.26+, Docker Desktop, a local `git`, Neo4j 5.x, and the
@@ -215,7 +225,7 @@ fallback for a cross-origin API, set `QUERY_CORS_ORIGIN` on query-service.
 - **One indexer per workdir.** Enforced by flock on unix; convention on Windows.
 - **One indexer per Neo4j database.** Enforced in the database itself: each
   indexer (and `cmd/importer`) acquires a writer lease (`IndexerLease` node)
-  on startup and a background heartbeat renews it every `ttl/3`. A second
+  on startup and a background heartbeat renews it every `ttl/4`. A second
   writer either refuses to start while the lease is held, or - if it started
   because the lease had genuinely expired - gets forced to stop the moment
   its own renewal is refused. `--steal-lease` (indexer only) is the operator

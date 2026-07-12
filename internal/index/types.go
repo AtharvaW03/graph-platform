@@ -48,13 +48,17 @@ type RepoState struct {
 	LastAttemptAt     time.Time `json:"last_attempt_at,omitempty"`
 	LastIndexedAt     time.Time `json:"last_indexed_at,omitempty"`
 	LastIndexedCommit string    `json:"last_indexed_commit,omitempty"`
-	LastStatus        Status    `json:"last_status,omitempty"`
-	LastStage         Stage     `json:"last_stage,omitempty"`
-	LastError         string    `json:"last_error,omitempty"`
-	LastDurationMS    int64     `json:"last_duration_ms,omitempty"`
-	LastNodes         int       `json:"last_nodes,omitempty"`
-	LastLinks         int       `json:"last_links,omitempty"`
-	ConsecutiveFails  int       `json:"consecutive_fails,omitempty"`
+	// SchemaVersion records the GraphSchemaVersion the last successful run
+	// wrote with. A mismatch forces a re-index even on an unchanged commit,
+	// so graph-model changes roll out without operators remembering --force.
+	SchemaVersion    int    `json:"schema_version,omitempty"`
+	LastStatus       Status `json:"last_status,omitempty"`
+	LastStage        Stage  `json:"last_stage,omitempty"`
+	LastError        string `json:"last_error,omitempty"`
+	LastDurationMS   int64  `json:"last_duration_ms,omitempty"`
+	LastNodes        int    `json:"last_nodes,omitempty"`
+	LastLinks        int    `json:"last_links,omitempty"`
+	ConsecutiveFails int    `json:"consecutive_fails,omitempty"`
 }
 
 // RepoResult captures everything that happened to a single repo during a run.

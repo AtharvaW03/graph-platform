@@ -3,6 +3,8 @@ package index
 import (
 	"errors"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -104,5 +106,85 @@ func TestCheckGraphifyVersionLogic(t *testing.T) {
 	}
 	if err := checkGraphifyVersion("0.9.9", "", errors.New("boom"), logger); err == nil {
 		t.Error("expected subprocess error to fail when expected_version is set")
+	}
+}
+
+func TestEnsureIgnorePatterns(t *testing.T) {
+	patterns := []string{"*.tfvars"}
+
+	t.Run("creates file when absent", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := ensureIgnorePatterns(dir, patterns); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, ".graphifyignore"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), "*.tfvars") {
+			t.Fatalf("pattern missing from created file:\n%s", got)
+		}
+	})
+
+	t.Run("appends to repo-owned file without clobbering", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".graphifyignore")
+		if err := os.WriteFile(path, []byte("node_modules/\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := ensureIgnorePatterns(dir, patterns); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := os.ReadFile(path)
+		s := string(got)
+		if !strings.Contains(s, "node_modules/") {
+			t.Fatalf("repo-owned entry lost:\n%s", s)
+		}
+		if !strings.Contains(s, "*.tfvars") {
+			t.Fatalf("platform pattern not appended:\n%s", s)
+		}
+	})
+
+	t.Run("idempotent", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := ensureIgnorePatterns(dir, patterns); err != nil {
+			t.Fatal(err)
+		}
+		first, _ := os.ReadFile(filepath.Join(dir, ".graphifyignore"))
+		if err := ensureIgnorePatterns(dir, patterns); err != nil {
+			t.Fatal(err)
+		}
+		second, _ := os.ReadFile(filepath.Join(dir, ".graphifyignore"))
+		if string(first) != string(second) {
+			t.Fatalf("second run changed the file:\nfirst:\n%s\nsecond:\n%s", first, second)
+		}
+	})
+
+	t.Run("nil patterns writes nothing", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := ensureIgnorePatterns(dir, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".graphifyignore")); !os.IsNotExist(err) {
+			t.Fatalf("file should not exist, stat err = %v", err)
+		}
+	})
+}
+
+// TestParseGraphifyVersion_StaleSkillWarning: the CLI can print a warning
+// containing an OLDER version before the real version line; the parser must
+// report the binary's version, not the warning's.
+func TestParseGraphifyVersion_StaleSkillWarning(t *testing.T) {
+	out := "  warning: skill is from graphify 0.8.44, package is 0.9.12. Run 'graphify install' to update.\ngraphify 0.9.12\n"
+	v, ok := parseGraphifyVersion(out)
+	if !ok || v != "0.9.12" {
+		t.Fatalf("parsed %q ok=%v, want 0.9.12", v, ok)
+	}
+}
+
+func TestParseGraphifyVersion_LastTokenFallback(t *testing.T) {
+	v, ok := parseGraphifyVersion("something 1.2.3 then version: 4.5.6")
+	if !ok || v != "4.5.6" {
+		t.Fatalf("parsed %q ok=%v, want 4.5.6 (last token wins)", v, ok)
 	}
 }
