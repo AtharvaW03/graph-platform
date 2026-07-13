@@ -27,5 +27,17 @@ func luceneEscape(q string) string {
 		}
 		return r
 	}, q)
-	return luceneSpecial.ReplaceAllString(q, `\$1`)
+	q = luceneSpecial.ReplaceAllString(q, `\$1`)
+	// Uppercase AND/OR/NOT are boolean operators to the query parser even
+	// after character escaping. Phrase-quote them so they search as literal
+	// terms (the analyzer lowercases both sides, so "AND" matches and). The
+	// quotes added here are syntax; user-typed quotes were escaped above.
+	fields := strings.Fields(q)
+	for i, f := range fields {
+		switch f {
+		case "AND", "OR", "NOT":
+			fields[i] = `"` + f + `"`
+		}
+	}
+	return strings.Join(fields, " ")
 }

@@ -20,7 +20,7 @@ config/repos.yaml
 │   indexer    │────────────────▶│  workdir/  │  (shallow clones + state.json)
 │ (cmd/indexer)│                 └────────────┘
 │              │  1. git sync
-│              │  2. graphify update <repo>      → graphify-out/graph.json (AST)
+│              │  2. graphify extract <repo> --code-only --force → graphify-out/graph.json (AST)
 │              │  3. extractors (deps, http_api, kafka, mssql, glue)
 │              │  4. merge fragments into graph.json
 │              │  5. import into Neo4j + sweep stale + verify counts

@@ -231,6 +231,60 @@ func TestInstallationToken_ZeroExpiresAtDefaultsToFarFuture(t *testing.T) {
 	}
 }
 
+// TestRefresh_BypassesFreshCache is the credential-store scenario: the
+// periodic refresher fires while the cached token is still comfortably fresh
+// (minute 50 of 60). Going through InstallationToken there would return the
+// old token and the credential file would expire before the next tick;
+// Refresh must mint regardless of cache state.
+func TestRefresh_BypassesFreshCache(t *testing.T) {
+	_, pemBytes := testKey(t)
+	c, err := New("app-1", "install-1", pemBytes)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	srv, calls := tokenServer(t, "tok-fresh", time.Now().Add(1*time.Hour), nil)
+	defer srv.Close()
+	c.APIBase = srv.URL
+
+	if _, err := c.InstallationToken(context.Background()); err != nil {
+		t.Fatalf("InstallationToken() error = %v", err)
+	}
+	if _, err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if n := atomic.LoadInt32(calls); n != 2 {
+		t.Fatalf("server hit %d times, want 2 - Refresh must mint even with a fresh cached token", n)
+	}
+
+	// And the fresh mint must now be the cached token for ordinary callers.
+	if _, err := c.InstallationToken(context.Background()); err != nil {
+		t.Fatalf("InstallationToken() after Refresh error = %v", err)
+	}
+	if n := atomic.LoadInt32(calls); n != 2 {
+		t.Errorf("server hit %d times, want still 2 - Refresh result should be cached", n)
+	}
+}
+
+func TestInstallationToken_MissingTokenFieldErrors(t *testing.T) {
+	_, pemBytes := testKey(t)
+	c, err := New("app-1", "install-1", pemBytes)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"expires_at":"2030-01-01T00:00:00Z"}`))
+	}))
+	defer srv.Close()
+	c.APIBase = srv.URL
+
+	if _, err := c.InstallationToken(context.Background()); err == nil {
+		t.Fatal("InstallationToken() with no token in the response = nil error, want an error")
+	}
+}
+
 func TestInstallationToken_ErrorStatusPropagates(t *testing.T) {
 	_, pemBytes := testKey(t)
 	c, err := New("app-1", "install-1", pemBytes)

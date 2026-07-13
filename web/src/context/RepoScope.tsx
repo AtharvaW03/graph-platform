@@ -63,6 +63,16 @@ export function RepoScopeProvider({ children }: { children: ReactNode }) {
       .listRepos()
       .then((repos) => {
         setAvailable(repos);
+        // Drop persisted selections that no longer exist (renamed/retired
+        // repos): a stale name would silently scope every query to nothing.
+        const names = new Set(repos.map((r) => r.name));
+        setSelectedState((prev) => {
+          const kept = prev.filter((n) => names.has(n));
+          if (kept.length !== prev.length) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(kept));
+          }
+          return kept.length !== prev.length ? kept : prev;
+        });
         setLoading(false);
       })
       .catch((err: unknown) => {
