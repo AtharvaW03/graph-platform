@@ -419,6 +419,13 @@ func serverError(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusNotImplemented, err.Error())
 		return
 	}
+	if errors.Is(err, query.ErrNotFound) {
+		// The subject doesn't exist in the graph; nothing malfunctioned. The
+		// message names only what the caller already sent, so echoing it is
+		// safe and beats a generic body.
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
 	log.Printf("query error: %v", err)
 	writeErr(w, http.StatusInternalServerError, "internal error")
 }

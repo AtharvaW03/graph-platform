@@ -365,3 +365,115 @@ func TestIntegration_EnsureConstraints_Idempotent(t *testing.T) {
 		t.Fatalf("second EnsureConstraints: %v", err)
 	}
 }
+
+// TestIntegration_DeleteRepositoryGraph_RetiresRepoAndReapsOrphans covers
+// retirement reconciliation's delete path: the retired repo's entities,
+// stamped edges, and Repository node all go; a shared node only it referenced
+// is orphan-reaped; a shared node another repo still references survives,
+// as does everything owned by that other repo.
+func TestIntegration_DeleteRepositoryGraph_RetiresRepoAndReapsOrphans(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	retiring := uniqueRepo(t, "retire")
+	staying := uniqueRepo(t, "stay")
+	onlyRetiringID := "pkg::only-" + uniqueID(t)
+	commonID := "pkg::common-" + uniqueID(t)
+	t.Cleanup(func() {
+		wipeRepo(t, c, retiring)
+		wipeRepo(t, c, staying)
+		// Shared nodes have no repo, so wipeRepo misses them; reap directly.
+		session := c.Driver.NewSession(ctx, driver.SessionConfig{})
+		defer session.Close(ctx)
+		for _, id := range []string{onlyRetiringID, commonID} {
+			session.Run(ctx, `MATCH (n:Entity {graphify_id:$id}) DETACH DELETE n`, map[string]any{"id": id})
+		}
+	})
+
+	seed := func(repo string, nodes []graphify.Node, links []graphify.Link) {
+		t.Helper()
+		if err := c.MergeRepository(ctx, repo); err != nil {
+			t.Fatalf("merge repository %s: %v", repo, err)
+		}
+		idToKey, sharedKeys, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", nodes, false)
+		if err != nil {
+			t.Fatalf("import nodes (%s): %v", repo, err)
+		}
+		if _, _, _, err := c.ImportLinks(ctx, repo, "commit1", "run1", links, idToKey, sharedKeys, false); err != nil {
+			t.Fatalf("import links (%s): %v", repo, err)
+		}
+	}
+
+	seed(retiring,
+		[]graphify.Node{
+			astNode("r1", "retiree()", "r.go"),
+			platformNode(onlyRetiringID, "only-lib"),
+			platformNode(commonID, "common-lib"),
+		},
+		[]graphify.Link{
+			{Source: "r1", Target: onlyRetiringID, Relation: "depends_on"},
+			{Source: "r1", Target: commonID, Relation: "depends_on"},
+		})
+	seed(staying,
+		[]graphify.Node{
+			astNode("s1", "survivor()", "s.go"),
+			platformNode(commonID, "common-lib"),
+		},
+		[]graphify.Link{
+			{Source: "s1", Target: commonID, Relation: "depends_on"},
+		})
+
+	nodes, rels, err := c.DeleteRepositoryGraph(ctx, retiring)
+	if err != nil {
+		t.Fatalf("DeleteRepositoryGraph: %v", err)
+	}
+	if nodes == 0 || rels == 0 {
+		t.Fatalf("deleted %d nodes / %d rels, want both nonzero", nodes, rels)
+	}
+
+	if n, err := c.CountEntitiesForRepo(ctx, retiring); err != nil || n != 0 {
+		t.Errorf("retired repo entity count = %d (err %v), want 0", n, err)
+	}
+	if n, err := c.CountEntitiesForRepo(ctx, staying); err != nil || n == 0 {
+		t.Errorf("staying repo entity count = %d (err %v), want nonzero", n, err)
+	}
+
+	names, err := c.ListRepositoryNames(ctx)
+	if err != nil {
+		t.Fatalf("ListRepositoryNames: %v", err)
+	}
+	inList := func(want string) bool {
+		for _, n := range names {
+			if n == want {
+				return true
+			}
+		}
+		return false
+	}
+	if inList(retiring) {
+		t.Errorf("retired Repository node %q still listed", retiring)
+	}
+	if !inList(staying) {
+		t.Errorf("staying Repository node %q missing from list", staying)
+	}
+
+	sharedGone := func(id string) bool {
+		session := c.Driver.NewSession(ctx, driver.SessionConfig{AccessMode: driver.AccessModeRead})
+		defer session.Close(ctx)
+		res, err := session.Run(ctx, `MATCH (n:Entity {graphify_id:$id}) RETURN count(n) AS c`, map[string]any{"id": id})
+		if err != nil {
+			t.Fatalf("shared lookup: %v", err)
+		}
+		rec, err := res.Single(ctx)
+		if err != nil {
+			t.Fatalf("shared lookup read: %v", err)
+		}
+		n, _ := rec.AsMap()["c"].(int64)
+		return n == 0
+	}
+	if !sharedGone(onlyRetiringID) {
+		t.Errorf("shared node %q referenced only by the retired repo was not reaped", onlyRetiringID)
+	}
+	if sharedGone(commonID) {
+		t.Errorf("shared node %q still referenced by %s was wrongly deleted", commonID, staying)
+	}
+}

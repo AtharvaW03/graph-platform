@@ -59,6 +59,12 @@ type RepoState struct {
 	LastNodes        int    `json:"last_nodes,omitempty"`
 	LastLinks        int    `json:"last_links,omitempty"`
 	ConsecutiveFails int    `json:"consecutive_fails,omitempty"`
+	// RetirementWarnedAt is set the first time a run finds this repo's graph
+	// data in Neo4j but the repo missing from the config. Data is deleted
+	// only on a later run after a grace period, so a config typo gets one
+	// warning cycle to be fixed before anything is reaped. Cleared if the
+	// repo reappears in the config.
+	RetirementWarnedAt time.Time `json:"retirement_warned_at,omitempty"`
 }
 
 // RepoResult captures everything that happened to a single repo during a run.

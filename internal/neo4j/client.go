@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -130,6 +131,15 @@ func (c *Client) EnsureConstraints(ctx context.Context) error {
 	}
 	for _, q := range stmts {
 		if _, err := session.Run(ctx, q, nil); err != nil {
+			// IF NOT EXISTS is not atomic across concurrent creators: two
+			// clients booting against a fresh database (indexer +
+			// query-service, or parallel test packages) can both pass the
+			// existence check and one loses with "equivalent already exists".
+			// That loser's desired state is satisfied - treat it as success.
+			var neoErr *driver.Neo4jError
+			if errors.As(err, &neoErr) && neoErr.Code == "Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists" {
+				continue
+			}
 			return fmt.Errorf("constraint %q: %w", q, err)
 		}
 	}
@@ -428,6 +438,98 @@ RETURN count(n) AS deleted`, map[string]any{}, "sweep orphaned shared nodes")
 		if err != nil {
 			return 0, 0, err
 		}
+	}
+
+	return nodesDeleted + orphans, relsDeleted, nil
+}
+
+// ListRepositoryNames returns the name of every (:Repository) node in the
+// graph, indexed or not. Backs config-vs-graph retirement reconciliation.
+func (c *Client) ListRepositoryNames(ctx context.Context) ([]string, error) {
+	session := c.Driver.NewSession(ctx, driver.SessionConfig{AccessMode: driver.AccessModeRead})
+	defer session.Close(ctx)
+	res, err := session.Run(ctx, `MATCH (r:Repository) RETURN r.name AS name ORDER BY name`, nil)
+	if err != nil {
+		return nil, fmt.Errorf("list repositories: %w", err)
+	}
+	records, err := res.Collect(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list repositories (read): %w", err)
+	}
+	names := make([]string, 0, len(records))
+	for _, rec := range records {
+		if name, ok := rec.AsMap()["name"].(string); ok && name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+// DeleteRepositoryGraph removes a retired repository from the graph: its
+// repo-stamped relationships, its repo-owned entities, the Repository node
+// itself, and finally any shared nodes the deletion orphaned. The steps
+// mirror SweepStale's, minus the last_run staleness filter - retirement
+// means everything the repo owns is stale. Returns (nodes, rels) deleted.
+func (c *Client) DeleteRepositoryGraph(ctx context.Context, repo string) (int, int, error) {
+	if repo == "" {
+		// An empty name would make the repo-stamped queries match nothing and
+		// the caller think retirement succeeded; refuse loudly instead.
+		return 0, 0, fmt.Errorf("delete repository refused: empty repo name")
+	}
+	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
+	defer session.Close(ctx)
+
+	runCount := func(query string, params map[string]any, what string) (int, error) {
+		res, err := session.Run(ctx, query, params)
+		if err != nil {
+			return 0, fmt.Errorf("%s: %w", what, err)
+		}
+		rec, err := res.Single(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("%s (read): %w", what, err)
+		}
+		n, _ := rec.AsMap()["deleted"].(int64)
+		return int(n), nil
+	}
+	params := map[string]any{"repo": repo}
+
+	// Step 1: every relationship stamped with this repo. Covers shared-shared
+	// parallel edges, whose endpoints are not repo-owned and so survive step 2.
+	relsDeleted, err := runCount(`
+MATCH ()-[r {repo: $repo}]->()
+DELETE r
+RETURN count(r) AS deleted`, params, "delete repo relationships")
+	if err != nil {
+		return 0, 0, err
+	}
+
+	// Step 2: repo-owned entities. DETACH also removes unstamped legacy edges.
+	nodesDeleted, err := runCount(`
+MATCH (n:Entity {repo: $repo})
+DETACH DELETE n
+RETURN count(n) AS deleted`, params, "delete repo entities")
+	if err != nil {
+		return 0, 0, err
+	}
+
+	// Step 3: the Repository node. Must precede the orphan reap so its
+	// HAS_ENTITY edges to shared nodes are gone before orphanhood is judged.
+	if _, err := runCount(`
+MATCH (rep:Repository {name: $repo})
+DETACH DELETE rep
+RETURN count(rep) AS deleted`, params, "delete repository node"); err != nil {
+		return 0, 0, err
+	}
+
+	// Step 4: shared nodes orphaned by the above - same rule as SweepStale's
+	// final pass: no remaining edge to any Entity means no repo references it.
+	orphans, err := runCount(`
+MATCH (n:Entity)
+WHERE n.shared = true AND NOT EXISTS { MATCH (n)--(:Entity) }
+DETACH DELETE n
+RETURN count(n) AS deleted`, map[string]any{}, "reap orphaned shared nodes")
+	if err != nil {
+		return 0, 0, err
 	}
 
 	return nodesDeleted + orphans, relsDeleted, nil

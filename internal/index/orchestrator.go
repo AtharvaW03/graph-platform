@@ -66,7 +66,28 @@ type Orchestrator struct {
 	// RunForever, which shares RunOnce's loop). Unlike HealthChecker, a
 	// failed renewal is fatal to the run - see LeaseRenewer.
 	Lease LeaseRenewer
+
+	// Retirer, if set, reconciles the graph against the config at the start
+	// of every full run: a (:Repository) in Neo4j that's no longer configured
+	// gets a warning first, then its graph data deleted on a later run after
+	// retirementGrace. Without this, removed/renamed repos linger in the
+	// graph forever and surface as ghost zero-node entries in /repos.
+	Retirer RepoRetirer
 }
+
+// RepoRetirer lists and deletes per-repository graph data, backing
+// config-vs-graph retirement reconciliation. *neo4j.Client implements it.
+type RepoRetirer interface {
+	ListRepositoryNames(ctx context.Context) ([]string, error)
+	DeleteRepositoryGraph(ctx context.Context, repo string) (nodes, rels int, err error)
+}
+
+// retirementGrace is the minimum time between the "repo missing from config"
+// warning and its graph data actually being deleted. Long enough that a
+// config typo made just before an interval cycle isn't punished instantly;
+// re-adding the repo re-indexes from scratch either way, so the stake is a
+// redundant re-index, not data loss.
+const retirementGrace = time.Hour
 
 // ImportRunner is the importer-side interface. The default implementation
 // adapts internal/importer.Run; tests or alternative sinks can swap in.
@@ -129,6 +150,19 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 	if err != nil {
 		return summary, fmt.Errorf("load repositories: %w", err)
 	}
+
+	// Retirement reconciliation runs only on full runs: a --repo targeted run
+	// is a surgical operation and shouldn't delete anything as a side effect.
+	// It also writes to Neo4j, so it holds the same lease the repo loop does.
+	if o.Retirer != nil && len(opts.Names) == 0 {
+		if o.Lease != nil {
+			if err := o.Lease.Renew(ctx); err != nil {
+				return summary, fmt.Errorf("%w: renewal failed before retirement reconciliation: %w", errLeaseLost, err)
+			}
+		}
+		o.reconcileRetired(ctx, repos)
+	}
+
 	repos, err = filterRepos(repos, opts.Names)
 	if err != nil {
 		return summary, err
@@ -207,6 +241,71 @@ func (o *Orchestrator) runCycleSafely(ctx context.Context, opts Options) (err er
 		return runErr
 	}
 	return nil
+}
+
+// reconcileRetired compares the (:Repository) nodes in the graph against the
+// configured manifest. A graph repo missing from the config gets a warning
+// and a persisted timestamp on first sight; on a later full run past
+// retirementGrace, its graph data is deleted and its state reset so a future
+// re-add re-indexes from scratch instead of skipping on a stale commit match.
+// All failures here are logged and swallowed - reconciliation must never
+// block the indexing run itself.
+func (o *Orchestrator) reconcileRetired(ctx context.Context, configured []Repository) {
+	inConfig := make(map[string]bool, len(configured))
+	for _, r := range configured {
+		inConfig[r.Name] = true
+	}
+
+	// A repo back in the config cancels any pending retirement, whether or
+	// not the graph listing below succeeds.
+	for name, st := range o.Store.All() {
+		if inConfig[name] && !st.RetirementWarnedAt.IsZero() {
+			st.RetirementWarnedAt = time.Time{}
+			if err := o.Store.Set(st); err != nil {
+				o.Log.Printf("WARNING: [%s] failed to clear retirement warning: %v", name, err)
+			} else {
+				o.Log.Printf("[%s] back in config, retirement canceled", name)
+			}
+		}
+	}
+
+	graphRepos, err := o.Retirer.ListRepositoryNames(ctx)
+	if err != nil {
+		o.Log.Printf("WARNING: retirement reconciliation skipped: %v", err)
+		return
+	}
+	now := o.now()
+	for _, name := range graphRepos {
+		if inConfig[name] {
+			continue
+		}
+		st, _ := o.Store.Get(name)
+		if st.RetirementWarnedAt.IsZero() {
+			st.Name = name
+			st.RetirementWarnedAt = now
+			if err := o.Store.Set(st); err != nil {
+				o.Log.Printf("WARNING: [%s] failed to persist retirement warning: %v", name, err)
+				continue
+			}
+			o.Log.Printf("WARNING: [%s] is in the graph but not in the config; its graph data will be deleted on a run after %s (re-add it to the config to keep it)", name, now.Add(retirementGrace).Format(time.RFC3339))
+			continue
+		}
+		if now.Sub(st.RetirementWarnedAt) < retirementGrace {
+			o.Log.Printf("[%s] retirement pending, deleting after %s", name, st.RetirementWarnedAt.Add(retirementGrace).Format(time.RFC3339))
+			continue
+		}
+		nodes, rels, err := o.Retirer.DeleteRepositoryGraph(ctx, name)
+		if err != nil {
+			o.Log.Printf("WARNING: [%s] retirement delete failed (will retry next run): %v", name, err)
+			continue
+		}
+		// Reset state so re-adding the repo later can't skip on the old
+		// commit while the graph behind it is empty.
+		if err := o.Store.Set(RepoState{Name: name}); err != nil {
+			o.Log.Printf("WARNING: [%s] retired but state reset failed: %v", name, err)
+		}
+		o.Log.Printf("[%s] retired: deleted %d nodes, %d edges", name, nodes, rels)
+	}
 }
 
 // IndexOne runs the full sync -> change-detect -> graphify -> import

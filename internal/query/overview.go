@@ -33,7 +33,7 @@ func (s *Service) RepositoryOverview(ctx context.Context, repo string) (*Reposit
 		return nil, err
 	}
 	if nodeCount == 0 {
-		return nil, fmt.Errorf("repository %q has no indexed nodes", repo)
+		return nil, fmt.Errorf("repository %q has no indexed nodes: %w", repo, ErrNotFound)
 	}
 
 	// The remaining reads are independent, so run them concurrently.
