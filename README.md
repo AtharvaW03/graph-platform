@@ -192,6 +192,16 @@ GITHUB_TOKEN=<read-only PAT> go run ./cmd/repogen --org your-org > config/repos.
 Review the output before committing; `--days` and `--ssh` adjust the window
 and URL style.
 
+### Removing a repository
+
+Delete its entry from `config/repos.yaml`. The next full indexing run warns
+that the repo is in the graph but not in the config; a later run (at least an
+hour after the warning) deletes its graph data - owned entities, stamped
+edges, the repository node, and any shared nodes nothing else references.
+Re-adding the entry before that happens cancels the retirement; re-adding it
+after re-indexes from scratch. Targeted runs (`--repo`) never retire
+anything.
+
 ### Rotating the auth token
 
 Set the new `QUERY_AUTH_TOKEN` on query-service and restart, then update

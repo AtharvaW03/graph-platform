@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"testing"
+	"time"
 
 	"graph-platform/internal/extract"
 	"graph-platform/internal/importer"
@@ -381,5 +382,136 @@ func TestIndexOne_MatchingSchemaVersionSkipsUnchangedHead(t *testing.T) {
 	}
 	if imp.calls != 0 {
 		t.Fatalf("importer calls = %d, want 0", imp.calls)
+	}
+}
+
+// fakeRetirer serves a fixed graph-repo list and records deletions.
+type fakeRetirer struct {
+	names     []string
+	listCalls int
+	deleted   []string
+	delErr    error
+}
+
+func (f *fakeRetirer) ListRepositoryNames(context.Context) ([]string, error) {
+	f.listCalls++
+	return f.names, nil
+}
+
+func (f *fakeRetirer) DeleteRepositoryGraph(_ context.Context, repo string) (int, int, error) {
+	if f.delErr != nil {
+		return 0, 0, f.delErr
+	}
+	f.deleted = append(f.deleted, repo)
+	return 7, 9, nil
+}
+
+// TestReconcileRetired_WarnsThenReapsAfterGrace is the ghost-repo scenario: a
+// (:Repository) in the graph that's no longer in the config gets a warning
+// first, survives runs inside the grace window, and is deleted only after it.
+func TestReconcileRetired_WarnsThenReapsAfterGrace(t *testing.T) {
+	config := threeRepos()[:1] // repo-a stays configured
+	fr := &fakeRetirer{names: []string{"repo-a", "ghost"}}
+	o := testOrchestrator(config, nil)
+	o.Retirer = fr
+
+	t0 := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	o.Clock = func() time.Time { return t0 }
+
+	o.reconcileRetired(context.Background(), config)
+	if len(fr.deleted) != 0 {
+		t.Fatalf("first run deleted %v, want warning only", fr.deleted)
+	}
+	st, ok := o.Store.Get("ghost")
+	if !ok || !st.RetirementWarnedAt.Equal(t0) {
+		t.Fatalf("ghost state = %+v (ok=%v), want RetirementWarnedAt=%s", st, ok, t0)
+	}
+
+	// Inside the grace window: still nothing deleted.
+	o.Clock = func() time.Time { return t0.Add(retirementGrace / 2) }
+	o.reconcileRetired(context.Background(), config)
+	if len(fr.deleted) != 0 {
+		t.Fatalf("in-grace run deleted %v, want none", fr.deleted)
+	}
+
+	// Past the grace window: ghost is reaped, configured repo untouched,
+	// state reset so a later re-add can't skip on a stale commit.
+	o.Clock = func() time.Time { return t0.Add(retirementGrace + time.Minute) }
+	o.reconcileRetired(context.Background(), config)
+	if len(fr.deleted) != 1 || fr.deleted[0] != "ghost" {
+		t.Fatalf("deleted = %v, want exactly [ghost]", fr.deleted)
+	}
+	st, _ = o.Store.Get("ghost")
+	if !st.RetirementWarnedAt.IsZero() || st.LastIndexedCommit != "" || st.LastStatus != "" {
+		t.Fatalf("ghost state after reap = %+v, want zeroed", st)
+	}
+}
+
+// TestReconcileRetired_BackInConfigCancels: re-adding a warned repo to the
+// config clears the pending retirement instead of reaping it later.
+func TestReconcileRetired_BackInConfigCancels(t *testing.T) {
+	config := threeRepos()[:1]
+	fr := &fakeRetirer{names: []string{"repo-a"}}
+	o := testOrchestrator(config, nil)
+	o.Retirer = fr
+
+	warned := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	o.Store.Set(RepoState{Name: "repo-a", RetirementWarnedAt: warned})
+	o.Clock = func() time.Time { return warned.Add(2 * retirementGrace) }
+
+	o.reconcileRetired(context.Background(), config)
+	if len(fr.deleted) != 0 {
+		t.Fatalf("deleted = %v, want none (repo is configured)", fr.deleted)
+	}
+	st, _ := o.Store.Get("repo-a")
+	if !st.RetirementWarnedAt.IsZero() {
+		t.Fatalf("RetirementWarnedAt = %s, want cleared", st.RetirementWarnedAt)
+	}
+}
+
+// TestReconcileRetired_DeleteFailureRetries: a failed delete keeps the
+// warning timestamp so the next run past grace retries instead of forgetting.
+func TestReconcileRetired_DeleteFailureRetries(t *testing.T) {
+	config := threeRepos()[:1]
+	fr := &fakeRetirer{names: []string{"ghost"}, delErr: errors.New("neo4j down")}
+	o := testOrchestrator(config, nil)
+	o.Retirer = fr
+
+	warned := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	o.Store.Set(RepoState{Name: "ghost", RetirementWarnedAt: warned})
+	o.Clock = func() time.Time { return warned.Add(2 * retirementGrace) }
+
+	o.reconcileRetired(context.Background(), config)
+	st, _ := o.Store.Get("ghost")
+	if !st.RetirementWarnedAt.Equal(warned) {
+		t.Fatalf("RetirementWarnedAt = %s, want unchanged %s after failed delete", st.RetirementWarnedAt, warned)
+	}
+
+	fr.delErr = nil
+	o.reconcileRetired(context.Background(), config)
+	if len(fr.deleted) != 1 || fr.deleted[0] != "ghost" {
+		t.Fatalf("deleted = %v, want [ghost] on retry", fr.deleted)
+	}
+}
+
+// TestRunOnce_TargetedRunSkipsRetirement: --repo runs are surgical and must
+// not reconcile (or delete) anything as a side effect; full runs must.
+func TestRunOnce_TargetedRunSkipsRetirement(t *testing.T) {
+	fr := &fakeRetirer{names: []string{"ghost"}}
+	o := testOrchestrator(threeRepos(), nil)
+	o.Retirer = fr
+
+	if _, err := o.RunOnce(context.Background(), Options{Names: []string{"repo-a"}}); err != nil {
+		t.Fatal(err)
+	}
+	if fr.listCalls != 0 {
+		t.Fatalf("targeted run hit the retirer %d times, want 0", fr.listCalls)
+	}
+
+	if _, err := o.RunOnce(context.Background(), Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if fr.listCalls != 1 {
+		t.Fatalf("full run hit the retirer %d times, want 1", fr.listCalls)
 	}
 }

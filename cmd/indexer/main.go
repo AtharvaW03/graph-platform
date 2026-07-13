@@ -170,6 +170,7 @@ func main() {
 		WorkDir:                     absWorkDir,
 		Log:                         logger,
 		HealthChecker:               client,
+		Retirer:                     client,
 		Lease:                       clientLeaseRenewer{client: client, owner: owner, ttl: *leaseTTL},
 		Extractors:                  buildExtractorRunner(cfg, logger),
 		AllowPartialExtractorErrors: cfg.Extractors.AllowPartialEnabled(),

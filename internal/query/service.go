@@ -460,6 +460,11 @@ ORDER BY idx
 // doesn't yet produce.
 var ErrNotImplemented = errors.New("not implemented")
 
+// ErrNotFound marks lookups whose subject doesn't exist in the graph (e.g.
+// an overview of an unindexed repo). The API layer maps it to 404 instead of
+// treating it as a server fault.
+var ErrNotFound = errors.New("not found")
+
 // FindRepositoryDependencies will return cross-repo dependency edges once the
 // importer emits them; stub for now.
 func (s *Service) FindRepositoryDependencies(ctx context.Context, repo string) ([]SymbolResult, error) {
