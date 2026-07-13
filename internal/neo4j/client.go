@@ -443,12 +443,19 @@ RETURN count(n) AS deleted`, map[string]any{}, "sweep orphaned shared nodes")
 	return nodesDeleted + orphans, relsDeleted, nil
 }
 
-// ListRepositoryNames returns the name of every (:Repository) node in the
-// graph, indexed or not. Backs config-vs-graph retirement reconciliation.
+// ListRepositoryNames returns every repository name present in the graph:
+// (:Repository) nodes plus any distinct Entity repo property. The union
+// matters for retirement reconciliation: a manual `DETACH DELETE` of just
+// the Repository node (a tempting one-liner) strands the repo's entities
+// with no Repository row, and a Repository-only listing would never see
+// them again. The n.repo scan is backed by the entity_repo index.
 func (c *Client) ListRepositoryNames(ctx context.Context) ([]string, error) {
 	session := c.Driver.NewSession(ctx, driver.SessionConfig{AccessMode: driver.AccessModeRead})
 	defer session.Close(ctx)
-	res, err := session.Run(ctx, `MATCH (r:Repository) RETURN r.name AS name ORDER BY name`, nil)
+	res, err := session.Run(ctx, `
+MATCH (r:Repository) RETURN r.name AS name
+UNION
+MATCH (n:Entity) WHERE n.repo IS NOT NULL RETURN DISTINCT n.repo AS name`, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list repositories: %w", err)
 	}

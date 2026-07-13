@@ -477,3 +477,63 @@ func TestIntegration_DeleteRepositoryGraph_RetiresRepoAndReapsOrphans(t *testing
 		t.Errorf("shared node %q still referenced by %s was wrongly deleted", commonID, staying)
 	}
 }
+
+// TestIntegration_ListRepositoryNames_SeesStrandedEntities: a manual
+// `DETACH DELETE` of just the Repository node must not hide the repo's
+// leftover entities from retirement reconciliation, and
+// DeleteRepositoryGraph must still clean them up without the Repository row.
+func TestIntegration_ListRepositoryNames_SeesStrandedEntities(t *testing.T) {
+	c := testClient(t)
+	ctx := context.Background()
+	repo := uniqueRepo(t, "stranded")
+	t.Cleanup(func() { wipeRepo(t, c, repo) })
+
+	if err := c.MergeRepository(ctx, repo); err != nil {
+		t.Fatalf("merge repository: %v", err)
+	}
+	nodes := []graphify.Node{astNode("n1", "orphan()", "o.go")}
+	if _, _, _, err := c.ImportNodes(ctx, repo, "commit1", "run1", nodes, false); err != nil {
+		t.Fatalf("import nodes: %v", err)
+	}
+
+	// The tempting manual one-liner: kill the Repository node only.
+	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
+	if _, err := session.Run(ctx, `MATCH (r:Repository {name:$repo}) DETACH DELETE r`, map[string]any{"repo": repo}); err != nil {
+		t.Fatalf("manual repository delete: %v", err)
+	}
+	session.Close(ctx)
+
+	names, err := c.ListRepositoryNames(ctx)
+	if err != nil {
+		t.Fatalf("ListRepositoryNames: %v", err)
+	}
+	found := false
+	for _, n := range names {
+		if n == repo {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("stranded repo %q not listed; reconciliation would never clean it", repo)
+	}
+
+	if _, _, err := c.DeleteRepositoryGraph(ctx, repo); err != nil {
+		t.Fatalf("DeleteRepositoryGraph on stranded repo: %v", err)
+	}
+	if n, err := c.CountEntitiesForRepo(ctx, repo); err != nil || n != 0 {
+		t.Errorf("entity count after stranded cleanup = %d (err %v), want 0", n, err)
+	}
+	session = c.Driver.NewSession(ctx, driver.SessionConfig{AccessMode: driver.AccessModeRead})
+	defer session.Close(ctx)
+	res, err := session.Run(ctx, `MATCH (n:Entity {repo:$repo}) RETURN count(n) AS c`, map[string]any{"repo": repo})
+	if err != nil {
+		t.Fatalf("leftover check: %v", err)
+	}
+	rec, err := res.Single(ctx)
+	if err != nil {
+		t.Fatalf("leftover check read: %v", err)
+	}
+	if n, _ := rec.AsMap()["c"].(int64); n != 0 {
+		t.Errorf("%d entities still stamped %q after cleanup, want 0", n, repo)
+	}
+}
