@@ -293,6 +293,11 @@ func setupGitAuth(ctx context.Context, logger *log.Logger) error {
 		return fmt.Errorf("build github app client: %w", err)
 	}
 	logger.Printf("git auth: GitHub App (installation %s)", installationID)
+	if os.Getenv("GIT_TOKEN") != "" {
+		// The entrypoint writes GIT_TOKEN into the same credential file this
+		// path overwrites; the App token wins, but flag the ambiguity.
+		logger.Printf("WARNING: GIT_TOKEN is set but ignored (GitHub App auth takes precedence)")
+	}
 
 	if out, err := exec.CommandContext(ctx, "git", "config", "--global", "credential.helper", "store").CombinedOutput(); err != nil {
 		return fmt.Errorf("git config credential.helper: %w: %s", err, out)
@@ -302,8 +307,11 @@ func setupGitAuth(ctx context.Context, logger *log.Logger) error {
 	}
 
 	go func() {
-		// Installation tokens last 1h; refreshing at 50m leaves 10 minutes of
-		// margin even if a refresh attempt is briefly delayed or retried.
+		// Installation tokens last 1h. Refresh forces a mint (bypassing the
+		// client's cache - a cached token returned at minute 50 would expire
+		// at minute 60, leaving the stored credential dead until the next
+		// tick), so the credential store always holds a token with at least
+		// 10 minutes left.
 		ticker := time.NewTicker(50 * time.Minute)
 		defer ticker.Stop()
 		for {
@@ -323,10 +331,12 @@ func setupGitAuth(ctx context.Context, logger *log.Logger) error {
 // writeGitCredential mints a fresh installation token and writes it to the
 // git credential store in the same "https://x-access-token:TOKEN@github.com"
 // format deploy/indexer-entrypoint.sh writes for GIT_TOKEN, so GitSyncer picks
-// it up identically regardless of which auth mode produced it. Never logs the
-// token itself.
+// it up identically regardless of which auth mode produced it. The write is
+// atomic (temp file + rename) so a git fetch racing a refresh never reads a
+// truncated file, and the mode is forced to 0600 even when replacing a file
+// the entrypoint created under a looser umask. Never logs the token itself.
 func writeGitCredential(ctx context.Context, ghClient *githubapp.Client) error {
-	token, err := ghClient.InstallationToken(ctx)
+	token, err := ghClient.Refresh(ctx)
 	if err != nil {
 		return fmt.Errorf("mint installation token: %w", err)
 	}
@@ -334,9 +344,26 @@ func writeGitCredential(ctx context.Context, ghClient *githubapp.Client) error {
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
 	}
+	target := filepath.Join(home, ".git-credentials")
+	tmp, err := os.CreateTemp(home, ".git-credentials.tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp credential file: %w", err)
+	}
+	defer os.Remove(tmp.Name())
 	line := fmt.Sprintf("https://x-access-token:%s@github.com\n", token)
-	if err := os.WriteFile(filepath.Join(home, ".git-credentials"), []byte(line), 0o600); err != nil {
-		return fmt.Errorf("write git credentials: %w", err)
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod temp credential file: %w", err)
+	}
+	if _, err := tmp.WriteString(line); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp credential file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp credential file: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), target); err != nil {
+		return fmt.Errorf("replace git credentials: %w", err)
 	}
 	return nil
 }

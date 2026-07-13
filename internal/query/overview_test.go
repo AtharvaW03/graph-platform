@@ -60,11 +60,11 @@ func TestSummarizeDependencies(t *testing.T) {
 
 func TestClassifyEntryPoint(t *testing.T) {
 	cases := map[string]string{
-		"main()":            "executable_main",
-		"NewServer()":       "server",
-		"ListenAndServe()":  "server",
-		"StartWorker()":     "bootstrap",
-		"bootstrap()":       "bootstrap",
+		"main()":           "executable_main",
+		"NewServer()":      "server",
+		"ListenAndServe()": "server",
+		"StartWorker()":    "bootstrap",
+		"bootstrap()":      "bootstrap",
 	}
 	for name, want := range cases {
 		if got := classifyEntryPoint(name); got != want {

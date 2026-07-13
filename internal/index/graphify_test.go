@@ -169,6 +169,34 @@ func TestEnsureIgnorePatterns(t *testing.T) {
 			t.Fatalf("file should not exist, stat err = %v", err)
 		}
 	})
+
+	t.Run("refuses symlink", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(t.TempDir(), "victim")
+		if err := os.WriteFile(target, []byte("precious\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(dir, ".graphifyignore")); err != nil {
+			t.Skipf("cannot create symlink on this platform: %v", err)
+		}
+		if err := ensureIgnorePatterns(dir, patterns); err == nil {
+			t.Fatal("expected an error for a symlinked .graphifyignore, got nil")
+		}
+		got, _ := os.ReadFile(target)
+		if string(got) != "precious\n" {
+			t.Fatalf("symlink target was modified:\n%s", got)
+		}
+	})
+
+	t.Run("refuses directory", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, ".graphifyignore"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := ensureIgnorePatterns(dir, patterns); err == nil {
+			t.Fatal("expected an error for a directory .graphifyignore, got nil")
+		}
+	})
 }
 
 // TestParseGraphifyVersion_StaleSkillWarning: the CLI can print a warning

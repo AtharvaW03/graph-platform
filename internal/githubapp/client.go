@@ -50,8 +50,10 @@ func New(appID, installationID string, pemKey []byte) (*Client, error) {
 		AppID:          appID,
 		InstallationID: installationID,
 		PrivateKey:     key,
-		HTTP:           http.DefaultClient,
-		APIBase:        "https://api.github.com",
+		// Bounded client: a stalled connection to GitHub must not hang
+		// indexer startup or wedge the background refresher forever.
+		HTTP:    &http.Client{Timeout: 30 * time.Second},
+		APIBase: "https://api.github.com",
 	}, nil
 }
 
@@ -79,7 +81,24 @@ func (c *Client) InstallationToken(ctx context.Context) (string, error) {
 	if c.token != "" && time.Now().Before(c.exp.Add(-tokenExpiryBuffer)) {
 		return c.token, nil
 	}
+	return c.mintLocked(ctx)
+}
 
+// Refresh mints a new installation token unconditionally, bypassing the
+// cache. Callers that persist the token somewhere with its own lifetime
+// (the git credential store) must use this: a periodic refresher going
+// through InstallationToken would get the cached token back whenever it
+// fires earlier than tokenExpiryBuffer before expiry, and would then store
+// a credential that dies long before the next tick.
+func (c *Client) Refresh(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.mintLocked(ctx)
+}
+
+// mintLocked exchanges an App JWT for a fresh installation token and caches
+// it. Caller must hold c.mu.
+func (c *Client) mintLocked(ctx context.Context) (string, error) {
 	jwtStr, err := c.AppJWT()
 	if err != nil {
 		return "", err
@@ -97,7 +116,9 @@ func (c *Client) InstallationToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("installation token request: %w", err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	// The token response is a few hundred bytes; 1MB caps a misbehaving
+	// endpoint from ballooning memory.
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 300 {
 		return "", fmt.Errorf("installation token: %s: %s", resp.Status, body)
 	}
@@ -108,6 +129,9 @@ func (c *Client) InstallationToken(ctx context.Context) (string, error) {
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
 		return "", fmt.Errorf("parse installation token response: %w", err)
+	}
+	if out.Token == "" {
+		return "", fmt.Errorf("installation token response missing token field")
 	}
 	c.token = out.Token
 	c.exp = out.ExpiresAt

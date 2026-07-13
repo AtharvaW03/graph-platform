@@ -6,6 +6,8 @@ set -eu
 # Public repos work with no token at all.
 if [ -n "${GIT_TOKEN:-}" ]; then
 	git config --global credential.helper store
+	touch "$HOME/.git-credentials"
+	chmod 600 "$HOME/.git-credentials"
 	echo "https://x-access-token:${GIT_TOKEN}@github.com" > "$HOME/.git-credentials"
 	export GIT_TERMINAL_PROMPT=0
 fi

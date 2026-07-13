@@ -259,8 +259,8 @@ func (o *Orchestrator) persistResult(name string, r RepoResult) {
 // progress (Commit, Nodes) visible to IndexOne's deferred recover.
 func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force bool, prev RepoState, start time.Time, result *RepoResult) {
 	repoPath := filepath.Join(o.WorkDir, "repos", repo.Name)
-	// graphify update writes inside the repo tree (graphify-out/graph.json),
-	// which survives `git reset --hard` and gives it a prior-state cache.
+	// graphify writes inside the repo tree (graphify-out/graph.json), which
+	// survives `git reset --hard` and gives it a prior-state cache.
 
 	o.Log.Printf("[%s] sync %s @ %s", repo.Name, repo.URL, repo.Branch)
 	commit, err := o.Syncer.Sync(ctx, repo, repoPath)

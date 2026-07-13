@@ -32,14 +32,15 @@ export function AppShell() {
     setNavOpen(false);
   }, [loc.pathname]);
 
-  // /health is unauthenticated and cheap (no Neo4j round trip - see
-  // internal/api/server.go), so polling it is safe to run continuously.
+  // /ready is unauthenticated and pings Neo4j with a short server-side
+  // timeout (see internal/api/server.go). /health would answer "ok" with the
+  // database down, which is not what "Graph online" should mean.
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
       try {
-        const h = await api.health();
-        if (!cancelled) setOnline(h.status === "ok");
+        const h = await api.ready();
+        if (!cancelled) setOnline(h.status === "ready");
       } catch {
         if (!cancelled) setOnline(false);
       }
@@ -58,7 +59,11 @@ export function AppShell() {
         Skip to content
       </a>
 
-      <aside className={`shell__sidebar ${navOpen ? "is-open" : ""}`} aria-label="Primary">
+      <aside
+        id="sidebar"
+        className={`shell__sidebar ${navOpen ? "is-open" : ""}`}
+        aria-label="Primary"
+      >
         <div className="shell__brand">
           <div className="shell__logo" aria-hidden>
             ◈

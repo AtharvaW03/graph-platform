@@ -14,7 +14,13 @@ func TestLuceneEscape(t *testing.T) {
 		{"trims surrounding whitespace", "  ProcessPayment  ", "ProcessPayment"},
 		{"wildcard", "foo*bar", `foo\*bar`},
 		{"question mark wildcard", "foo?bar", `foo\?bar`},
-		{"boolean AND", "foo AND bar", `foo AND bar`}, // bare word "AND" is not special, only the operators below are
+		// Uppercase AND/OR/NOT are word operators to the query parser and get
+		// phrase-quoted; lowercase (or embedded) forms are plain terms.
+		{"boolean AND", "foo AND bar", `foo "AND" bar`},
+		{"boolean OR", "foo OR bar", `foo "OR" bar`},
+		{"boolean NOT", "NOT foo", `"NOT" foo`},
+		{"lowercase and is a plain term", "foo and bar", `foo and bar`},
+		{"AND embedded in a word", "OPERAND foo", `OPERAND foo`},
 		{"boolean operators", "foo&&bar||baz", `foo\&\&bar\|\|baz`},
 		{"negation and required", "-foo +bar", `\-foo \+bar`},
 		{"parens and brackets", "foo(bar)[baz]", `foo\(bar\)\[baz\]`},

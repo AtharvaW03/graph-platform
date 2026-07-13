@@ -63,8 +63,8 @@ func nodeByID(frag *extract.Fragment, id string) *extract.FragmentNode {
 
 func TestTerraformJobWithScheduleAndScriptMerge(t *testing.T) {
 	frag := runExtract(t, map[string]string{
-		"main.tf":            fixtureTF,
-		"jobs/etl_daily.py":  fixtureScript,
+		"main.tf":           fixtureTF,
+		"jobs/etl_daily.py": fixtureScript,
 	})
 
 	job := nodeByID(frag, "glue::job::data-repo::daily-recon")

@@ -210,6 +210,15 @@ func ensureIgnorePatterns(repoPath string, patterns []string) error {
 		return nil
 	}
 	path := filepath.Join(repoPath, ".graphifyignore")
+	// Lstat, not Stat: the checkout controls this path, and a repo that
+	// commits .graphifyignore as a symlink must not get the indexer to
+	// append to whatever the link points at (state.json, .git-credentials,
+	// another checkout). Directories/FIFOs are rejected on the same basis.
+	if fi, err := os.Lstat(path); err == nil && !fi.Mode().IsRegular() {
+		return fmt.Errorf("%s exists but is not a regular file (mode %v); refusing to write ignore patterns", path, fi.Mode())
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
