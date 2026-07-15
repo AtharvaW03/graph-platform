@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log"
@@ -14,29 +13,6 @@ import (
 
 	"graph-platform/internal/query"
 )
-
-// WithAuth wraps h with static bearer-token authentication. An empty token
-// disables auth (open mode, for local development). /health and /ready stay
-// unauthenticated so load balancers and uptime probes work without
-// credentials.
-func WithAuth(h http.Handler, token string) http.Handler {
-	if token == "" {
-		return h
-	}
-	expected := []byte("Bearer " + token)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" || r.URL.Path == "/ready" {
-			h.ServeHTTP(w, r)
-			return
-		}
-		got := []byte(r.Header.Get("Authorization"))
-		if subtle.ConstantTimeCompare(got, expected) != 1 {
-			writeErr(w, http.StatusUnauthorized, "missing or invalid bearer token")
-			return
-		}
-		h.ServeHTTP(w, r)
-	})
-}
 
 // WithRequestTimeout wraps h so every request context carries a deadline.
 // The deadline propagates through r.Context() into the Cypher transaction,
