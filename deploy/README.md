@@ -29,7 +29,7 @@ docker run --rm \
   graph-platform/indexer /usr/local/bin/indexer --config config/repos.yaml --all
 ```
 
-Final stage is `python:3.12-slim` with `git` and `graphifyy[terraform,sql]==0.9.13` (the PyPI
+Final stage is `python:3.12-slim` with `git` and `graphifyy==0.9.9` (the PyPI
 package; the CLI command is `graphify`). `deploy/indexer-entrypoint.sh` sets up
 git credentials from `GIT_TOKEN` when present, then `exec`s the container
 command - so the binary + its flags are the docker `command`, not baked into

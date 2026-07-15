@@ -76,8 +76,8 @@ so migrations roll out without anyone remembering `--force`.
 ## Quickstart
 
 Prerequisites: Go 1.26+, Docker Desktop, a local `git`, Neo4j 5.x, and the
-`graphify` CLI (pinned to 0.9.13; install the terraform and sql extras for
-`.tf`/`.hcl` and `.sql` coverage: `uv tool install "graphifyy[terraform,sql]"`) on PATH.
+`graphify` CLI (pinned to 0.9.13; install the terraform extra for `.tf`/`.hcl`
+coverage: `uv tool install "graphifyy[terraform]"`) on PATH.
 
 ```powershell
 # 1. Neo4j (e.g. Docker)
