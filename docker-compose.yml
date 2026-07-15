@@ -34,6 +34,25 @@ services:
       neo4j:
         condition: service_healthy
 
+  # Hosted MCP endpoint (HTTP transport). Local stdio use doesn't need this
+  # service at all - it exists so the remote-access path is testable locally:
+  #   claude mcp add --transport http gp http://127.0.0.1:8090/mcp \
+  #     --header "Authorization: Bearer ${MCP_AUTH_TOKEN}"
+  mcp-server:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.mcp-server
+    environment:
+      MCP_HTTP_ADDR: 0.0.0.0:8090
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      QUERY_SERVICE_URL: http://query-service:8080
+      QUERY_AUTH_TOKEN: ${QUERY_AUTH_TOKEN:-}
+    ports:
+      - "127.0.0.1:8090:8090"
+    depends_on:
+      query-service:
+        condition: service_started
+
   # One-shot by default (--all with no --interval). Swap config/repos.docker.yaml
   # for a real config, or override `command` to add --interval for continuous mode.
   indexer:

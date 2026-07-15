@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -36,6 +37,25 @@ func NewServer(client *QueryClient) *Server {
 // closes.
 func (s *Server) Run(ctx context.Context) error {
 	return s.sdk.Run(ctx, &sdk.StdioTransport{})
+}
+
+// HTTPHandler exposes the same tool set over the MCP streamable HTTP
+// transport, for a centrally-hosted deployment where many clients share one
+// URL instead of each spawning a stdio subprocess. Stateless: none of our
+// tools make server->client requests (no sampling/elicitation), so sessions
+// carry nothing worth validating, and every interaction is a bounded POST -
+// the SDK rejects GET/SSE with a spec-correct 405 in this mode. Returning
+// the same underlying *sdk.Server for every request is explicitly sanctioned
+// by the SDK, and QueryClient is immutable after construction, so one Server
+// serves concurrent requests safely.
+//
+// Auth is deliberately NOT applied here - the caller owns the middleware
+// stack, same as internal/api.Server.Routes.
+func (s *Server) HTTPHandler() http.Handler {
+	return sdk.NewStreamableHTTPHandler(
+		func(*http.Request) *sdk.Server { return s.sdk },
+		&sdk.StreamableHTTPOptions{Stateless: true},
+	)
 }
 
 // -------- tool input shapes --------

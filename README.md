@@ -37,9 +37,11 @@ config/repos.yaml
   (`--interval 15m`). Per-repo failures never block other repos; state
   persists in `workdir/state.json`.
 - **`cmd/query-service`**: read-only REST API over the graph.
-- **`cmd/mcp-server`**: MCP stdio adapter exposing the query API as agent
-  tools (`search_code`, `find_callers`, `blast_radius`,
-  `repository_overview`, ...).
+- **`cmd/mcp-server`**: MCP adapter exposing the query API as agent tools
+  (`search_code`, `find_callers`, `blast_radius`, `repository_overview`,
+  ...). Speaks stdio by default (local subprocess per user); set
+  `MCP_HTTP_ADDR` to instead serve the MCP streamable HTTP transport as one
+  hosted endpoint many clients share - see "Remote MCP access" below.
 - **`cmd/importer`**: manual one-off import of a static `graph.json`.
 - **`internal/extract/*`**: domain extractors that enrich the AST graph:
   dependency manifests, HTTP routes, Kafka topics, MS SQL
@@ -112,6 +114,8 @@ curl -H "Authorization: Bearer dev-token" "http://localhost:8080/overview/my-rep
 | `QUERY_CORS_ORIGIN` | query-service | *(empty = CORS disabled)* | single trusted origin for a cross-origin web UI |
 | `QUERY_SERVICE_URL` | mcp-server | `http://localhost:8080` | query-service base URL |
 | `QUERY_TIMEOUT` | mcp-server | `30s` | per-request timeout |
+| `MCP_HTTP_ADDR` | mcp-server | *(empty = stdio)* | serve MCP over HTTP on this address instead of stdio (e.g. `0.0.0.0:8090`) |
+| `MCP_AUTH_TOKEN` | mcp-server | *(empty = no auth)* | bearer token required on incoming MCP connections in HTTP mode; separate from `QUERY_AUTH_TOKEN` |
 | `GIT_TOKEN` | indexer | *(empty = public repos only)* | PAT for cloning private repos over HTTPS; ignored if the `GITHUB_APP_*` vars below are set |
 | `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_PATH` | indexer | *(empty = fall back to `GIT_TOKEN`)* | GitHub App auth, all three required together; short-lived installation tokens instead of a long-lived PAT, minted at startup and refreshed automatically before each hourly expiry |
 
@@ -165,6 +169,31 @@ For a shared/pilot box, run the same processes under a supervisor (systemd,
 launchd, pm2) and put the web UI behind any reverse proxy that forwards
 `/api` with the Authorization header.
 
+## Remote MCP access
+
+By default each user runs mcp-server as a local stdio subprocess. For a
+hosted deployment, run one mcp-server with `MCP_HTTP_ADDR` and
+`MCP_AUTH_TOKEN` set and have every client point at the shared URL:
+
+```bash
+claude mcp add --transport http a1-knowledge-graph https://<host>/mcp \
+  --header "Authorization: Bearer ${MCP_AUTH_TOKEN}"
+```
+
+`/mcp` is the protocol endpoint; `/health` is an unauthenticated liveness
+probe for load balancers. Two constraints to plan around:
+
+- MCP clients require HTTPS for non-loopback URLs. This repo ships the
+  container only (a plain-HTTP listener, same as query-service); TLS
+  termination in front of it - ALB, certificate, DNS - is deployment
+  infrastructure outside this repo, and must exist before remote clients
+  can connect.
+- `MCP_AUTH_TOKEN` ends up in every engineer's Claude Code config, so treat
+  it as the widest-distributed secret in the system. It is deliberately a
+  different token from `QUERY_AUTH_TOKEN` (which only travels between
+  mcp-server/web and query-service inside the deployment) so the two rotate
+  independently.
+
 ## Runbook
 
 ### Adding a repository
@@ -211,7 +240,11 @@ of less than half the graph, one grace period apart.
 ### Rotating the auth token
 
 Set the new `QUERY_AUTH_TOKEN` on query-service and restart, then update
-mcp-server / clients.
+mcp-server / clients. `MCP_AUTH_TOKEN` rotates separately: set the new value
+on the hosted mcp-server and have engineers update their Claude Code config -
+a `QUERY_AUTH_TOKEN` rotation doesn't touch it, and vice versa. Rotate
+`MCP_AUTH_TOKEN` first on any suspicion of a leak; it's the token with the
+widest distribution.
 
 ### Forcing a re-index
 
