@@ -1,7 +1,8 @@
 # Container images
 
-Three images. `query-service` and `indexer` build from the repo root (they need
-`go.mod`/`internal` in their build context); `web` builds from `web/`.
+Four images. `query-service`, `mcp-server`, and `indexer` build from the repo
+root (they need `go.mod`/`internal` in their build context); `web` builds from
+`web/`.
 
 ## query-service
 
@@ -16,6 +17,25 @@ docker run --rm -p 8080:8080 \
 Distroless final stage, no shell. `QUERY_BIND` must be set (or `QUERY_AUTH_TOKEN`
 set, which flips the default bind to all interfaces) or the service binds to
 127.0.0.1 and port publishing does nothing - see cmd/query-service/main.go.
+
+## mcp-server
+
+```
+docker build -f deploy/Dockerfile.mcp-server -t graph-platform/mcp-server .
+docker run --rm -p 8090:8090 \
+  -e MCP_HTTP_ADDR=0.0.0.0:8090 -e MCP_AUTH_TOKEN=... \
+  -e QUERY_SERVICE_URL=http://query-service:8080 -e QUERY_AUTH_TOKEN=... \
+  graph-platform/mcp-server
+```
+
+Distroless final stage, no shell. This image only makes sense with
+`MCP_HTTP_ADDR` set: without it the binary serves MCP over stdio, and a
+detached container has nothing attached to stdio - it just blocks silently.
+`MCP_AUTH_TOKEN` gates incoming MCP connections (`/health` stays open for LB
+probes); `QUERY_AUTH_TOKEN` is the *outbound* credential this process uses
+against query-service - two different boundaries, rotate them independently.
+Clients must reach this through an HTTPS front (ALB + certificate) - MCP
+clients refuse plain HTTP on non-loopback URLs.
 
 ## indexer
 

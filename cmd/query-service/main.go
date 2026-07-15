@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"graph-platform/internal/api"
+	"graph-platform/internal/httpmw"
 	"graph-platform/internal/neo4j"
 	"graph-platform/internal/query"
 )
@@ -72,7 +73,7 @@ func main() {
 	// Middleware order (outermost first): CORS answers preflights before auth
 	// runs, since preflights never carry an Authorization header.
 	handler := api.WithCORS(
-		api.WithAuth(
+		httpmw.WithAuth(
 			api.WithRequestTimeout(server.Routes(), requestTimeout),
 			token,
 		),
