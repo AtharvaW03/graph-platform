@@ -202,6 +202,12 @@ Re-adding the entry before that happens cancels the retirement; re-adding it
 after re-indexes from scratch. Targeted runs (`--repo`) never retire
 anything.
 
+If more than half the repos in the graph are missing from the config at once,
+retirement is skipped entirely and an error is logged instead - that pattern
+almost always means the indexer was pointed at the wrong config file, not a
+real retirement. To genuinely retire that many repos, remove them in batches
+of less than half the graph, one grace period apart.
+
 ### Rotating the auth token
 
 Set the new `QUERY_AUTH_TOKEN` on query-service and restart, then update

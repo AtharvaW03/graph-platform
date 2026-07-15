@@ -494,6 +494,42 @@ func TestReconcileRetired_DeleteFailureRetries(t *testing.T) {
 	}
 }
 
+// TestReconcileRetired_MassRetirementGuard: more than half the graph missing
+// from the config means a wrong config file, not a retirement - nothing is
+// warned or deleted, even for repos already past their grace period.
+func TestReconcileRetired_MassRetirementGuard(t *testing.T) {
+	config := threeRepos()[:1] // only repo-a configured
+	fr := &fakeRetirer{names: []string{"repo-a", "ghost-1", "ghost-2", "ghost-3"}}
+	o := testOrchestrator(config, nil)
+	o.Retirer = fr
+
+	// ghost-1 was already warned long ago; the guard must protect it anyway.
+	warned := time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)
+	o.Store.Set(RepoState{Name: "ghost-1", RetirementWarnedAt: warned})
+	o.Clock = func() time.Time { return warned.Add(2 * retirementGrace) }
+
+	o.reconcileRetired(context.Background(), config)
+	if len(fr.deleted) != 0 {
+		t.Fatalf("guard run deleted %v, want none", fr.deleted)
+	}
+	if st, ok := o.Store.Get("ghost-2"); ok && !st.RetirementWarnedAt.IsZero() {
+		t.Fatalf("guard run warned ghost-2 (%+v), want no new warnings", st)
+	}
+	st, _ := o.Store.Get("ghost-1")
+	if !st.RetirementWarnedAt.Equal(warned) {
+		t.Fatalf("ghost-1 RetirementWarnedAt = %s, want unchanged %s", st.RetirementWarnedAt, warned)
+	}
+
+	// One missing repo out of the same graph is a normal retirement: the
+	// guard must not block it.
+	fr2 := &fakeRetirer{names: []string{"repo-a", "repo-b", "repo-c", "ghost-1"}}
+	o.Retirer = fr2
+	o.reconcileRetired(context.Background(), threeRepos())
+	if len(fr2.deleted) != 1 || fr2.deleted[0] != "ghost-1" {
+		t.Fatalf("deleted = %v, want [ghost-1] (single retirement past grace)", fr2.deleted)
+	}
+}
+
 // TestRunOnce_TargetedRunSkipsRetirement: --repo runs are surgical and must
 // not reconcile (or delete) anything as a side effect; full runs must.
 func TestRunOnce_TargetedRunSkipsRetirement(t *testing.T) {

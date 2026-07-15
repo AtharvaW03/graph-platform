@@ -274,11 +274,27 @@ func (o *Orchestrator) reconcileRetired(ctx context.Context, configured []Reposi
 		o.Log.Printf("WARNING: retirement reconciliation skipped: %v", err)
 		return
 	}
-	now := o.now()
+	var missing []string
 	for _, name := range graphRepos {
-		if inConfig[name] {
-			continue
+		if !inConfig[name] {
+			missing = append(missing, name)
 		}
+	}
+	// Mass-retirement guard. A deliberate retirement removes one or a few
+	// repos; the indexer pointed at the wrong (or empty, or stale) config
+	// strands most of the graph at once - and in --interval mode that would
+	// cross the grace period and delete everything with no human watching.
+	// More than half the graph missing from the config is treated as a wrong
+	// config, not a mass retirement: nothing is warned or deleted. To really
+	// retire that many repos, remove them from the config in batches of less
+	// than half the graph, one grace period apart.
+	if len(missing) > 1 && len(missing) > len(graphRepos)/2 {
+		o.Log.Printf("ERROR: retirement reconciliation skipped: %d of %d repos in the graph are missing from the config (%s); this looks like a wrong config file, not a retirement - no data will be deleted. If intentional, retire in batches of less than half the graph.",
+			len(missing), len(graphRepos), strings.Join(missing, ", "))
+		return
+	}
+	now := o.now()
+	for _, name := range missing {
 		st, _ := o.Store.Get(name)
 		if st.RetirementWarnedAt.IsZero() {
 			st.Name = name
