@@ -38,6 +38,13 @@ func main() {
 
 	logger := log.New(os.Stderr, "", log.LstdFlags|log.Lmsgprefix)
 
+	if flag.NArg() > 0 {
+		// A bare repo name is a likely mistake for --repo, and silently
+		// ignoring it flips the run's scope to "all configured repos" -
+		// which also starts retirement countdowns for anything not in the
+		// config. Refuse instead.
+		logger.Fatalf("unexpected argument(s) %q: repository names go in --repo (e.g. --repo %s)", flag.Args(), flag.Arg(0))
+	}
 	if *all && strings.TrimSpace(*repos) != "" {
 		logger.Fatal("--all and --repo are mutually exclusive")
 	}
@@ -129,13 +136,19 @@ func main() {
 		logger.Fatalf("acquire writer lease: %v", err)
 	}
 	logger.Printf("writer lease acquired (owner=%s, ttl=%s)", owner, *leaseTTL)
-	defer func() {
+	// Every exit path after this point must release the lease. logger.Fatal
+	// os.Exits and skips defers, so the fatal paths below call releaseLease
+	// explicitly - otherwise any run ending in "N repositories failed" leaks
+	// the lease for a full TTL and pushes operators toward habitual
+	// --steal-lease.
+	releaseLease := func() {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := client.ReleaseLease(releaseCtx, owner); err != nil {
 			logger.Printf("WARNING: release lease failed: %v", err)
 		}
-	}()
+	}
+	defer releaseLease()
 
 	// runCtx is what the orchestrator actually runs under. It's separate from
 	// ctx (which only the OS signal cancels) so the lease heartbeat can cut
@@ -194,9 +207,11 @@ func main() {
 		// mechanism (distinguishing an operator shutdown from any other
 		// RunForever failure) and stays for that.
 		if fatal := exitErr(0, heartbeat.FatalErr()); fatal != nil {
+			releaseLease()
 			logger.Fatal(fatal)
 		}
 		if runErr != nil && ctx.Err() == nil {
+			releaseLease()
 			logger.Fatal(runErr)
 		}
 		return
@@ -204,12 +219,14 @@ func main() {
 
 	summary, err := orch.RunOnce(runCtx, opts)
 	if err != nil {
+		releaseLease()
 		logger.Fatal(err)
 	}
 	orch.LogSummary(summary)
 
 	_, _, _, failed := summary.Counts()
 	if fatal := exitErr(failed, heartbeat.FatalErr()); fatal != nil {
+		releaseLease()
 		logger.Fatal(fatal)
 	}
 }
