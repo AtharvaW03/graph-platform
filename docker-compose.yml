@@ -54,7 +54,11 @@ services:
         condition: service_started
 
   # One-shot by default (--all with no --interval). Swap config/repos.docker.yaml
-  # for a real config, or override `command` to add --interval for continuous mode.
+  # for a real config, or override `command` to add --interval for continuous
+  # mode. For webhook mode add to `command`:
+  #   --webhook-addr 0.0.0.0:8091 --interval 30m
+  # plus GITHUB_WEBHOOK_SECRET (and optionally INDEXER_STATUS_TOKEN) to
+  # `environment`, and publish "127.0.0.1:8091:8091".
   indexer:
     build:
       context: .

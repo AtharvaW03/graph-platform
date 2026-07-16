@@ -33,9 +33,11 @@ config/repos.yaml
                          └── engineers via curl / web UI
 ```
 
-- **`cmd/indexer`**: the pipeline daemon. One-shot or continuous
-  (`--interval 15m`). Per-repo failures never block other repos; state
-  persists in `workdir/state.json`.
+- **`cmd/indexer`**: the pipeline daemon. One-shot, continuous
+  (`--interval 15m`), or webhook-driven (`--webhook-addr` - re-indexes on
+  GitHub push deliveries, with `--interval` as the reconciliation sweep; see
+  "Webhook-triggered indexing" below). Per-repo failures never block other
+  repos; state persists in `workdir/state.json`.
 - **`cmd/query-service`**: read-only REST API over the graph.
 - **`cmd/mcp-server`**: MCP adapter exposing the query API as agent tools
   (`search_code`, `find_callers`, `blast_radius`, `repository_overview`,
@@ -116,6 +118,8 @@ curl -H "Authorization: Bearer dev-token" "http://localhost:8080/overview/my-rep
 | `QUERY_TIMEOUT` | mcp-server | `30s` | per-request timeout |
 | `MCP_HTTP_ADDR` | mcp-server | *(empty = stdio)* | serve MCP over HTTP on this address instead of stdio (e.g. `0.0.0.0:8090`) |
 | `MCP_AUTH_TOKEN` | mcp-server | *(empty = no auth)* | bearer token required on incoming MCP connections in HTTP mode; separate from `QUERY_AUTH_TOKEN` |
+| `GITHUB_WEBHOOK_SECRET` | indexer | *(required with `--webhook-addr`)* | HMAC secret every webhook delivery must be signed with (`X-Hub-Signature-256`); same value entered in the GitHub webhook config |
+| `INDEXER_STATUS_TOKEN` | indexer | *(empty = no auth)* | bearer token for the indexer's `/status` endpoint in webhook mode |
 | `GIT_TOKEN` | indexer | *(empty = public repos only)* | PAT for cloning private repos over HTTPS; ignored if the `GITHUB_APP_*` vars below are set |
 | `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_PATH` | indexer | *(empty = fall back to `GIT_TOKEN`)* | GitHub App auth, all three required together; short-lived installation tokens instead of a long-lived PAT, minted at startup and refreshed automatically before each hourly expiry |
 
@@ -193,6 +197,50 @@ probe for load balancers. Two constraints to plan around:
   different token from `QUERY_AUTH_TOKEN` (which only travels between
   mcp-server/web and query-service inside the deployment) so the two rotate
   independently.
+
+## Webhook-triggered indexing
+
+Interval mode alone re-checks every repo on a fixed clock, so worst-case
+freshness is one full interval. Webhook mode flips that: GitHub tells the
+indexer the moment a push lands, and only the pushed repos re-index.
+
+```bash
+GITHUB_WEBHOOK_SECRET=<secret> go run ./cmd/indexer --all \
+  --webhook-addr 0.0.0.0:8091 --interval 30m
+```
+
+- `POST /webhook/github` - the delivery endpoint. Every request must carry a
+  valid `X-Hub-Signature-256` HMAC (hence the required
+  `GITHUB_WEBHOOK_SECRET`); anything unsigned or mis-signed gets a 401
+  without touching the payload. `ping` is answered, `push` events for a
+  configured repo+branch queue a re-index, everything else is acknowledged
+  and ignored - so an org-wide webhook that also covers unconfigured repos
+  is fine.
+- Deliveries **coalesce**: the handler returns 202 immediately and the
+  daemon starts one cycle ~10s later covering everything queued in that
+  window, so a release train pushing ten repos costs one cycle, not ten.
+  Duplicate and out-of-order deliveries are harmless (indexing always syncs
+  to HEAD).
+- `--interval` becomes the **reconciliation sweep** and stays mandatory.
+  GitHub webhook delivery is at-most-once - a delivery that fails while the
+  indexer is down is never retried - so the sweep is what bounds staleness:
+  every `--interval` it fetches all repos and re-indexes any whose HEAD
+  moved without a delivery arriving. Webhooks are the fast path; the sweep
+  is the guarantee. 30m keeps even the missed-delivery worst case
+  comfortably inside a 1-hour freshness target.
+- `GET /status` (bearer `INDEXER_STATUS_TOKEN`) - per-repo
+  `last_indexed_commit`, timestamps, failure counts, and whether a delivery
+  is queued but not yet processed. A repo showing `last_status: success`,
+  `pending_reindex: false`, and a `last_attempt_at` within one sweep is
+  fully caught up. `GET /health` is an unauthenticated liveness probe.
+- Targeted webhook cycles never run retirement reconciliation - only full
+  sweeps do - so a delivery can never trigger data deletion.
+
+GitHub-side setup (repo or org webhook, or the GitHub App's webhook): URL
+`https://<host>/webhook/github`, content type `application/json`, the same
+secret, and only the **Push** event. Like the other HTTP services, the
+listener itself is plain HTTP - GitHub requires HTTPS, so it sits behind the
+same TLS front (ALB + certificate) as everything else.
 
 ## Runbook
 

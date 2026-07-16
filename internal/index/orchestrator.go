@@ -198,12 +198,24 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 // runCycleSafely surfaces that one case and RunForever returns instead of
 // looping.
 func (o *Orchestrator) RunForever(ctx context.Context, opts Options, sched Scheduler) error {
+	return o.RunForeverDynamic(ctx, func() Options { return opts }, sched)
+}
+
+// RunForeverDynamic is RunForever with per-cycle options: optsFn is invoked
+// at the start of every cycle, so an event-driven scheduler (e.g.
+// WebhookScheduler.NextOptions) can scope each cycle to just the
+// repositories its events touched, while periodic sweeps still cover the
+// full manifest.
+func (o *Orchestrator) RunForeverDynamic(ctx context.Context, optsFn func() Options, sched Scheduler) error {
 	if sched == nil {
 		return fmt.Errorf("scheduler is required for continuous mode")
 	}
+	if optsFn == nil {
+		return fmt.Errorf("options function is required for continuous mode")
+	}
 	o.Log.Printf("continuous indexing started")
 	for {
-		if err := o.runCycleSafely(ctx, opts); err != nil {
+		if err := o.runCycleSafely(ctx, optsFn()); err != nil {
 			return fmt.Errorf("stopping continuous indexing: %w", err)
 		}
 		if ctx.Err() != nil {
