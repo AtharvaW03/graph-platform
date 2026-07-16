@@ -55,6 +55,14 @@ git credentials from `GIT_TOKEN` when present, then `exec`s the container
 command - so the binary + its flags are the docker `command`, not baked into
 `ENTRYPOINT`.
 
+For webhook-driven indexing, add `--webhook-addr 0.0.0.0:8091 --interval 30m`
+to the command, set `GITHUB_WEBHOOK_SECRET` (required - deliveries are
+HMAC-verified), and publish the port. `/webhook/github` must be reachable by
+GitHub over HTTPS, so it needs the same TLS front as the other services;
+`/health` is the LB probe, `/status` (bearer `INDEXER_STATUS_TOKEN`) reports
+per-repo indexing state. The indexer stays a singleton either way - never run
+two replicas against one database.
+
 ## web
 
 ```

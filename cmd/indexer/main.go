@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -21,9 +22,15 @@ import (
 	"graph-platform/internal/extract/kafka"
 	"graph-platform/internal/extract/mssql"
 	"graph-platform/internal/githubapp"
+	"graph-platform/internal/httpmw"
 	"graph-platform/internal/index"
 	"graph-platform/internal/neo4j"
 )
+
+// webhookDebounce is how long a webhook-triggered cycle waits after the first
+// delivery before starting, so a burst (a release train pushing many repos
+// within seconds) coalesces into one cycle instead of N.
+const webhookDebounce = 10 * time.Second
 
 func main() {
 	configPath := flag.String("config", "config/repos.yaml", "path to indexer YAML config")
@@ -32,6 +39,7 @@ func main() {
 	all := flag.Bool("all", false, "explicit all-repositories mode; mutually exclusive with --repo")
 	force := flag.Bool("force", false, "re-index even if HEAD matches the previously-indexed commit")
 	interval := flag.Duration("interval", 0, "if > 0, run continuously every interval (e.g. 15m); otherwise one-shot")
+	webhookAddr := flag.String("webhook-addr", "", "if set (e.g. 0.0.0.0:8091), serve a GitHub push-webhook endpoint at /webhook/github and re-index repos as deliveries arrive; --interval then becomes the reconciliation sweep period and is still required (GITHUB_WEBHOOK_SECRET must be set)")
 	leaseTTL := flag.Duration("lease-ttl", 15*time.Minute, "writer lease TTL; a background heartbeat renews it every ttl/4 and gives up after 3 consecutive failures, strictly before expiry - a crashed indexer's lease self-expires after this")
 	stealLease := flag.Bool("steal-lease", false, "take the writer lease unconditionally at startup; operator recovery for a stuck lease")
 	flag.Parse()
@@ -52,6 +60,22 @@ func main() {
 		// time.NewTicker panics on ttl/4 <= 0, and anything sub-minute is
 		// operationally pointless (renewal jitter alone could exceed it).
 		logger.Fatalf("--lease-ttl must be at least 1m, got %s", *leaseTTL)
+	}
+	webhookSecret := os.Getenv("GITHUB_WEBHOOK_SECRET")
+	if *webhookAddr != "" {
+		if *interval <= 0 {
+			// The sweep is not optional in webhook mode: GitHub never retries a
+			// failed or missed delivery, so without a periodic full pass a lost
+			// event means a permanently stale repo. Forcing the flag keeps that
+			// trade-off in the operator's hands instead of a hidden default.
+			logger.Fatal("--webhook-addr requires --interval: webhook deliveries are best-effort (GitHub does not retry failures), so a periodic reconciliation sweep is what bounds staleness. 30m is a reasonable value.")
+		}
+		if strings.TrimSpace(*repos) != "" {
+			logger.Fatal("--webhook-addr and --repo are mutually exclusive: webhook mode serves the full configured manifest")
+		}
+		if webhookSecret == "" {
+			logger.Fatal("--webhook-addr requires GITHUB_WEBHOOK_SECRET: an unauthenticated webhook endpoint would let anyone who can reach it trigger indexing work")
+		}
 	}
 
 	cfg, err := index.LoadConfig(*configPath)
@@ -195,12 +219,61 @@ func main() {
 	}
 
 	if *interval > 0 {
-		sched, err := index.NewIntervalScheduler(*interval)
-		if err != nil {
-			logger.Fatal(err)
+		var (
+			sched  index.Scheduler
+			optsFn = func() index.Options { return opts }
+			// Buffered so the server goroutine never blocks on a fatal error;
+			// stays empty (and unread until after RunForever) in interval mode.
+			webhookSrvErr = make(chan error, 1)
+		)
+		if *webhookAddr != "" {
+			pending := index.NewPendingSet()
+			wsched, err := index.NewWebhookScheduler(pending, *interval, webhookDebounce)
+			if err != nil {
+				logger.Fatal(err)
+			}
+			handler, err := index.NewGitHubWebhookHandler(cfg.Repositories, webhookSecret, pending, logger)
+			if err != nil {
+				logger.Fatal(err)
+			}
+			srv := webhookServer(*webhookAddr, handler, cfg.Repositories, store, pending, logger)
+			go func() {
+				// runCtx (not ctx): a lease-heartbeat give-up must also stop
+				// accepting deliveries, not just the indexing loop.
+				<-runCtx.Done()
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				_ = srv.Shutdown(shutdownCtx)
+			}()
+			go func() {
+				logger.Printf("webhook listener on %s (reconciliation sweep every %s)", *webhookAddr, *interval)
+				if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					// A dead listener silently degrades webhook mode to
+					// sweep-only; fail loud and let the supervisor restart us.
+					webhookSrvErr <- err
+					cancelRun()
+				}
+			}()
+			optsFn = func() index.Options {
+				o := wsched.NextOptions()
+				o.Force = *force
+				if len(o.Names) > 0 {
+					logger.Printf("webhook-triggered cycle: %s", strings.Join(o.Names, ", "))
+				} else {
+					logger.Printf("reconciliation sweep (full manifest)")
+				}
+				return o
+			}
+			sched = wsched
+		} else {
+			isched, err := index.NewIntervalScheduler(*interval)
+			if err != nil {
+				logger.Fatal(err)
+			}
+			logger.Printf("continuous mode: every %s", *interval)
+			sched = isched
 		}
-		logger.Printf("continuous mode: every %s", *interval)
-		runErr := orch.RunForever(runCtx, opts, sched)
+		runErr := orch.RunForeverDynamic(runCtx, optsFn, sched)
 		// Checked against the recorded heartbeat error, not ctx state: a
 		// confirmed lease loss must exit nonzero regardless of how RunForever
 		// itself returned. The ctx.Err() check below is a separate, older
@@ -209,6 +282,15 @@ func main() {
 		if fatal := exitErr(0, heartbeat.FatalErr()); fatal != nil {
 			releaseLease()
 			logger.Fatal(fatal)
+		}
+		// Before the generic runErr check: a webhook-server death cancels
+		// runCtx, which would otherwise surface as an opaque "context
+		// canceled" from RunForever.
+		select {
+		case err := <-webhookSrvErr:
+			releaseLease()
+			logger.Fatalf("webhook listener failed: %v", err)
+		default:
 		}
 		if runErr != nil && ctx.Err() == nil {
 			releaseLease()
@@ -246,6 +328,32 @@ func exitErr(failed int, hbErr error) error {
 		return fmt.Errorf("%d repositories failed", failed)
 	}
 	return nil
+}
+
+// webhookServer assembles the webhook-mode HTTP server: the HMAC-verified
+// GitHub endpoint, an unauthenticated liveness probe, and a bearer-token
+// /status snapshot. Timeouts mirror the other services' servers, with
+// ReadTimeout sized for GitHub's up-to-25MB push payloads.
+func webhookServer(addr string, webhook http.Handler, repos []index.Repository, store index.StateStore, pending *index.PendingSet, logger *log.Logger) *http.Server {
+	mux := http.NewServeMux()
+	mux.Handle("POST /webhook/github", webhook)
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	statusToken := os.Getenv("INDEXER_STATUS_TOKEN")
+	if statusToken == "" {
+		logger.Printf("WARNING: INDEXER_STATUS_TOKEN not set - /status (repo names, commit SHAs, error details) is served unauthenticated")
+	}
+	mux.Handle("GET /status", httpmw.WithAuth(index.NewStatusHandler(repos, store, pending), statusToken))
+	return &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 }
 
 func splitCSV(s string) []string {
