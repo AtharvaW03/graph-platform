@@ -28,7 +28,7 @@ func sign(secret string, body []byte) string {
 func newTestHandler(t *testing.T, repos []Repository) (*GitHubWebhookHandler, *PendingSet) {
 	t.Helper()
 	pending := NewPendingSet()
-	h, err := NewGitHubWebhookHandler(repos, testSecret, pending, log.New(io.Discard, "", 0))
+	h, err := NewGitHubWebhookHandler(fakeSource{repos: repos}, testSecret, pending, log.New(io.Discard, "", 0))
 	if err != nil {
 		t.Fatalf("NewGitHubWebhookHandler: %v", err)
 	}
@@ -68,7 +68,7 @@ func pushBody(t *testing.T, cloneURL, ref string) []byte {
 }
 
 func TestWebhookHandler_RequiresSecretAtConstruction(t *testing.T) {
-	_, err := NewGitHubWebhookHandler(threeRepos(), "  ", NewPendingSet(), log.New(io.Discard, "", 0))
+	_, err := NewGitHubWebhookHandler(fakeSource{repos: threeRepos()}, "  ", NewPendingSet(), log.New(io.Discard, "", 0))
 	if err == nil {
 		t.Fatal("expected an error for an empty secret")
 	}
@@ -421,7 +421,7 @@ func TestWebhookEndToEnd_DeliveryDrivesTargetedCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewGitHubWebhookHandler(repos, testSecret, pending, log.New(io.Discard, "", 0))
+	handler, err := NewGitHubWebhookHandler(fakeSource{repos: repos}, testSecret, pending, log.New(io.Discard, "", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +497,7 @@ func TestStatusHandler(t *testing.T) {
 	pending := NewPendingSet()
 	pending.Add("repo-b")
 
-	h := NewStatusHandler(threeRepos(), store, pending)
+	h := NewStatusHandler(fakeSource{repos: threeRepos()}, store, pending)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/status", nil))
 	if rec.Code != http.StatusOK {

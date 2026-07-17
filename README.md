@@ -244,7 +244,40 @@ same TLS front (ALB + certificate) as everything else.
 
 ## Runbook
 
+### Automatic repository discovery (GitHub App)
+
+With GitHub App auth configured (the `GITHUB_APP_*` env vars), the manifest
+can come from the App installation itself instead of a hand-maintained list:
+
+```yaml
+discovery:
+  enabled: true
+  # ttl: 10m          # max GitHub API refresh frequency (default 10m)
+repositories: []      # optional static extras / overrides, see below
+```
+
+The set of repos the App is installed on IS the manifest: **installing the
+App on a repo adds it to the graph, uninstalling removes it** (normal
+retirement flow: warning, 1h grace, then deletion). Both actions happen in
+the GitHub UI with GitHub's own audit trail - no config edit, no redeploy.
+Changes take effect within one `ttl` + one cycle.
+
+Details:
+- Archived repos and names failing the indexer's validation are skipped
+  (logged). Each repo indexes its default branch.
+- Static `repositories:` entries still work and win by name - keep one to
+  pin a non-default branch, or to index something the App can't see.
+- If the GitHub API is unreachable, the last successful listing is served
+  (an outage can never shrink the manifest and trigger retirements); a
+  failure before the first successful listing fails the cycle instead.
+- The webhook endpoint and `/status` resolve against the live manifest, so
+  newly installed repos match deliveries without a restart.
+
 ### Adding a repository
+
+With discovery enabled: install the GitHub App on the repo - done.
+
+With a static manifest:
 
 1. Add an entry to `config/repos.yaml`:
    ```yaml
@@ -259,19 +292,23 @@ Git auth is whatever the local `git` is configured for (SSH keys, credential
 helper). The indexer disables interactive prompts, so a missing credential
 fails fast instead of hanging.
 
-To generate the manifest for a whole GitHub org (every non-archived repo
-pushed in the last 90 days - the brief's "active repo" definition):
+To generate a one-off static manifest for a whole GitHub org (every
+non-archived repo pushed in the last 90 days):
 
 ```bash
 GITHUB_TOKEN=<read-only PAT> go run ./cmd/repogen --org your-org > config/repos.yaml
 ```
 
 Review the output before committing; `--days` and `--ssh` adjust the window
-and URL style.
+and URL style. (Where PATs aren't allowed, prefer `discovery.enabled` above.)
 
 ### Removing a repository
 
-Delete its entry from `config/repos.yaml`. The next full indexing run warns
+With discovery enabled: uninstall the GitHub App from the repo (or remove it
+from the installation's repository list); retirement below applies the same
+way.
+
+With a static manifest: delete its entry from `config/repos.yaml`. The next full indexing run warns
 that the repo is in the graph but not in the config; a later run (at least an
 hour after the warning) deletes its graph data - owned entities, stamped
 edges, the repository node, and any shared nodes nothing else references.

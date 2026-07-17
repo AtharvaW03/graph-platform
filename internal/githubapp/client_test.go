@@ -324,3 +324,79 @@ func TestAuthenticatedCloneURL_InvalidURL(t *testing.T) {
 		t.Error("AuthenticatedCloneURL() with an unparseable URL = nil error, want an error")
 	}
 }
+
+// TestListInstallationRepos_PaginatesAndMaps stands up a fake GitHub API
+// serving both the token endpoint and two pages of /installation/repositories,
+// and asserts the client follows pagination, authenticates with the
+// installation token (not the App JWT), and maps every field.
+func TestListInstallationRepos_PaginatesAndMaps(t *testing.T) {
+	_, pemBytes := testKey(t)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /app/installations/install-1/access_tokens", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"token":"inst-token-1","expires_at":%q}`, time.Now().Add(time.Hour).Format(time.RFC3339))
+	})
+	mux.HandleFunc("GET /installation/repositories", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer inst-token-1" {
+			t.Errorf("repositories call Authorization = %q, want the installation token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		page := r.URL.Query().Get("page")
+		if page == "1" {
+			// A full page of 100 forces the client to request page 2.
+			repos := make([]string, 0, 100)
+			for i := 0; i < 100; i++ {
+				repos = append(repos, fmt.Sprintf(`{"name":"svc-%03d","full_name":"org/svc-%03d","clone_url":"https://github.com/org/svc-%03d.git","default_branch":"main","archived":false}`, i, i, i))
+			}
+			fmt.Fprintf(w, `{"total_count":101,"repositories":[%s]}`, strings.Join(repos, ","))
+			return
+		}
+		fmt.Fprint(w, `{"total_count":101,"repositories":[{"name":"last-svc","full_name":"org/last-svc","clone_url":"https://github.com/org/last-svc.git","default_branch":"develop","archived":true}]}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, err := New("12345", "install-1", pemBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.APIBase = srv.URL
+
+	repos, err := c.ListInstallationRepos(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 101 {
+		t.Fatalf("got %d repos, want 101 across two pages", len(repos))
+	}
+	first, last := repos[0], repos[100]
+	if first.Name != "svc-000" || first.CloneURL != "https://github.com/org/svc-000.git" || first.DefaultBranch != "main" || first.Archived {
+		t.Fatalf("first repo mapped wrong: %+v", first)
+	}
+	if last.Name != "last-svc" || last.DefaultBranch != "develop" || !last.Archived {
+		t.Fatalf("archived flag or later pages mapped wrong: %+v", last)
+	}
+}
+
+func TestListInstallationRepos_APIErrorSurfaces(t *testing.T) {
+	_, pemBytes := testKey(t)
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /app/installations/install-1/access_tokens", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"token":"inst-token-1","expires_at":%q}`, time.Now().Add(time.Hour).Format(time.RFC3339))
+	})
+	mux.HandleFunc("GET /installation/repositories", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Server Error"}`, http.StatusBadGateway)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c, err := New("12345", "install-1", pemBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.APIBase = srv.URL
+	if _, err := c.ListInstallationRepos(context.Background()); err == nil {
+		t.Fatal("expected an error from a 502 repositories response")
+	}
+}

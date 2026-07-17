@@ -143,6 +143,77 @@ func (c *Client) mintLocked(ctx context.Context) (string, error) {
 	return c.token, nil
 }
 
+// InstalledRepo is one repository the App installation grants access to, as
+// returned by ListInstallationRepos. Archived is carried through so callers
+// can decide whether archived repos still belong in their working set.
+type InstalledRepo struct {
+	Name          string
+	FullName      string
+	CloneURL      string
+	DefaultBranch string
+	Archived      bool
+}
+
+// ListInstallationRepos returns every repository this installation can
+// access, following pagination. This is the discovery primitive: the set of
+// repos the App is installed on IS the manifest, so granting/revoking the
+// App on a repo is how operators add/remove it - no config edit involved.
+// Requires only the mandatory Metadata permission.
+func (c *Client) ListInstallationRepos(ctx context.Context) ([]InstalledRepo, error) {
+	token, err := c.InstallationToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list installation repos: %w", err)
+	}
+	var out []InstalledRepo
+	for page := 1; ; page++ {
+		endpoint := fmt.Sprintf("%s/installation/repositories?per_page=100&page=%d", c.APIBase, page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/vnd.github+json")
+
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("list installation repos page %d: %w", page, err)
+		}
+		// 10MB cap: 100 repos/page of metadata is well under 1MB; anything
+		// bigger is not GitHub.
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+		resp.Body.Close()
+		if resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("list installation repos page %d: %s: %s", page, resp.Status, body)
+		}
+
+		var parsed struct {
+			TotalCount   int `json:"total_count"`
+			Repositories []struct {
+				Name          string `json:"name"`
+				FullName      string `json:"full_name"`
+				CloneURL      string `json:"clone_url"`
+				DefaultBranch string `json:"default_branch"`
+				Archived      bool   `json:"archived"`
+			} `json:"repositories"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return nil, fmt.Errorf("parse installation repos page %d: %w", page, err)
+		}
+		for _, r := range parsed.Repositories {
+			out = append(out, InstalledRepo{
+				Name:          r.Name,
+				FullName:      r.FullName,
+				CloneURL:      r.CloneURL,
+				DefaultBranch: r.DefaultBranch,
+				Archived:      r.Archived,
+			})
+		}
+		if len(parsed.Repositories) < 100 || len(out) >= parsed.TotalCount {
+			return out, nil
+		}
+	}
+}
+
 // AuthenticatedCloneURL rewrites a GitHub HTTPS clone URL to carry token as
 // the x-access-token basic-auth user, the form git and GitHub's own tooling
 // expect for App-authenticated clones and pushes.
