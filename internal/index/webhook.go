@@ -1,6 +1,7 @@
 package index
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -100,29 +101,29 @@ type GitHubWebhookHandler struct {
 	secret  []byte
 	pending *PendingSet
 	log     *log.Logger
-	// byURL maps normalized remote URLs to the configured repositories that
-	// track them (a slice: the same URL may appear under several entries,
-	// e.g. two branches of one repo).
-	byURL map[string][]Repository
+	// source serves the current manifest per delivery rather than a map
+	// frozen at startup, so discovery-driven changes (App installed on a new
+	// repo) are matchable without a restart. ConfigJobSource serves a static
+	// list; DiscoveryJobSource serves its TTL-cached listing - either way
+	// this is an in-memory read, not a GitHub API call per delivery.
+	source JobSource
 }
 
-func NewGitHubWebhookHandler(repos []Repository, secret string, pending *PendingSet, logger *log.Logger) (*GitHubWebhookHandler, error) {
+func NewGitHubWebhookHandler(source JobSource, secret string, pending *PendingSet, logger *log.Logger) (*GitHubWebhookHandler, error) {
 	if strings.TrimSpace(secret) == "" {
 		return nil, fmt.Errorf("webhook secret must not be empty")
 	}
 	if pending == nil {
 		return nil, fmt.Errorf("pending set is required")
 	}
-	byURL := make(map[string][]Repository, len(repos))
-	for _, r := range repos {
-		key := normalizeRemoteURL(r.URL)
-		byURL[key] = append(byURL[key], r)
+	if source == nil {
+		return nil, fmt.Errorf("job source is required")
 	}
 	return &GitHubWebhookHandler{
 		secret:  []byte(secret),
 		pending: pending,
 		log:     logger,
-		byURL:   byURL,
+		source:  source,
 	}, nil
 }
 
@@ -153,7 +154,7 @@ func (h *GitHubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(http.StatusOK)
 		io.WriteString(w, "pong")
 	case "push":
-		h.handlePush(w, body, delivery)
+		h.handlePush(w, r.Context(), body, delivery)
 	default:
 		// 2xx so GitHub doesn't mark the delivery failed; subscribing to
 		// extra events is a GitHub-side config choice, not an error here.
@@ -176,7 +177,7 @@ type pushEvent struct {
 	} `json:"repository"`
 }
 
-func (h *GitHubWebhookHandler) handlePush(w http.ResponseWriter, body []byte, delivery string) {
+func (h *GitHubWebhookHandler) handlePush(w http.ResponseWriter, ctx context.Context, body []byte, delivery string) {
 	var ev pushEvent
 	if err := json.Unmarshal(body, &ev); err != nil {
 		http.Error(w, "malformed push payload", http.StatusBadRequest)
@@ -188,12 +189,27 @@ func (h *GitHubWebhookHandler) handlePush(w http.ResponseWriter, body []byte, de
 		return
 	}
 
+	repos, err := h.source.Repositories(ctx)
+	if err != nil {
+		// Can only happen while discovery has never succeeded; 5xx is honest
+		// (GitHub shows the delivery as failed) and the reconciliation sweep
+		// still covers the repo once discovery recovers.
+		h.log.Printf("webhook: delivery %q: manifest unavailable: %v", delivery, err)
+		http.Error(w, "repository manifest unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	byURL := make(map[string][]Repository, len(repos))
+	for _, r := range repos {
+		key := normalizeRemoteURL(r.URL)
+		byURL[key] = append(byURL[key], r)
+	}
+
 	var matched []Repository
 	for _, candidate := range []string{ev.Repository.CloneURL, ev.Repository.SSHURL, ev.Repository.HTMLURL} {
 		if candidate == "" {
 			continue
 		}
-		if repos, ok := h.byURL[normalizeRemoteURL(candidate)]; ok {
+		if repos, ok := byURL[normalizeRemoteURL(candidate)]; ok {
 			matched = repos
 			break
 		}

@@ -47,9 +47,9 @@ var oasMethods = map[string]bool{
 // returns the documented routes. Parse failures become warnings, not errors,
 // so a malformed spec can't sink the code-derived routes.
 func (e *Extractor) openAPIRoutes(repoPath string, frag interface{ Warn(string) }) []heldRoute {
-	maxBytes := e.MaxFileBytes
+	maxBytes := e.SpecMaxBytes
 	if maxBytes <= 0 {
-		maxBytes = 2 * 1024 * 1024
+		maxBytes = 10 * 1024 * 1024
 	}
 
 	var out []heldRoute
@@ -66,15 +66,25 @@ func (e *Extractor) openAPIRoutes(repoPath string, frag interface{ Warn(string) 
 		if !isSpecFile(d.Name()) {
 			return nil
 		}
-		info, statErr := d.Info()
-		if statErr != nil || info.Size() > maxBytes {
-			return nil
-		}
 		rel, _ := filepath.Rel(repoPath, path)
 		rel = filepath.ToSlash(rel)
 
+		// A spec is the authored route contract - skipping one silently
+		// leaves documented routes out of the graph with no trace, so every
+		// skip below is a warning.
+		info, statErr := d.Info()
+		if statErr != nil {
+			frag.Warn(fmt.Sprintf("%s: openapi spec skipped: stat: %v", rel, statErr))
+			return nil
+		}
+		if info.Size() > maxBytes {
+			frag.Warn(fmt.Sprintf("%s: openapi spec skipped: %d bytes exceeds the %d-byte spec cap; its documented routes are missing from the graph", rel, info.Size(), maxBytes))
+			return nil
+		}
+
 		data, rerr := os.ReadFile(path)
 		if rerr != nil {
+			frag.Warn(fmt.Sprintf("%s: openapi spec skipped: read: %v", rel, rerr))
 			return nil
 		}
 		routes, perr := parseOpenAPI(data, rel)

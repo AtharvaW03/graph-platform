@@ -27,7 +27,12 @@ import (
 //	    rewire onto their definitions. Both change what a repo's nodes
 //	    look like without changing its source, so unchanged-HEAD repos
 //	    need one forced re-extract to converge on the new shape.
-const GraphSchemaVersion = 3
+//	v4: httpapi extractor hardening - typed/raw/concatenated Go route
+//	    constants now resolve, formatter-wrapped registrations are joined
+//	    and matched, and spec files get a 10MB cap with loud skips. Repos
+//	    indexed under v3 may be missing real routes, so every repo must
+//	    re-extract even with an unchanged HEAD.
+const GraphSchemaVersion = 4
 
 // Orchestrator drives the per-repo pipeline for a configured set of
 // repositories. Every step is delegated to a pluggable component (Source,

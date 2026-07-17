@@ -23,10 +23,24 @@ var validBranch = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._/-]*$`)
 // manifest and tunables for the git, graphify, and orchestrator subsystems.
 type Config struct {
 	Repositories []Repository     `yaml:"repositories"`
+	Discovery    DiscoveryConfig  `yaml:"discovery"`
 	Git          GitConfig        `yaml:"git"`
 	Graphify     GraphifyConfig   `yaml:"graphify"`
 	Extractors   ExtractorsConfig `yaml:"extractors"`
 	Org          OrgConfig        `yaml:"org"`
+}
+
+// DiscoveryConfig enables GitHub App installation-based repository
+// discovery: the manifest becomes "every repo the App is installed on",
+// refreshed at most every TTL, merged with any static `repositories:`
+// entries (static wins by name, e.g. to pin a non-default branch). Requires
+// the GITHUB_APP_* environment variables. With discovery enabled the static
+// repositories list may be empty.
+type DiscoveryConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// TTL caps how often the GitHub API is consulted; between refreshes the
+	// cached manifest is served. Defaults to 10m.
+	TTL time.Duration `yaml:"ttl"`
 }
 
 // ExtractorsConfig toggles each platform extractor on/off. All default to
@@ -173,13 +187,19 @@ func (c *Config) ApplyDefaults() {
 	if c.Graphify.IgnorePatterns == nil {
 		c.Graphify.IgnorePatterns = d.Graphify.IgnorePatterns
 	}
+	if c.Discovery.TTL == 0 {
+		c.Discovery.TTL = 10 * time.Minute
+	}
 }
 
 // Validate catches config errors here rather than as confusing failures deep
 // in the pipeline, e.g. a missing URL failing at clone time.
 func (c *Config) Validate() error {
-	if len(c.Repositories) == 0 {
-		return fmt.Errorf("no repositories configured")
+	if len(c.Repositories) == 0 && !c.Discovery.Enabled {
+		return fmt.Errorf("no repositories configured (set discovery.enabled: true to source the manifest from the GitHub App installation instead)")
+	}
+	if c.Discovery.Enabled && c.Discovery.TTL < time.Minute {
+		return fmt.Errorf("discovery.ttl must be at least 1m, got %s", c.Discovery.TTL)
 	}
 	seen := map[string]bool{}
 	for i, r := range c.Repositories {

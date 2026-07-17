@@ -35,10 +35,16 @@ type repoStatus struct {
 }
 
 // NewStatusHandler serves a read-only JSON snapshot of per-repo indexing
-// state. repos is the configured manifest (so never-attempted repos still
-// appear, with empty state); pending may be nil when webhook mode is off.
-func NewStatusHandler(repos []Repository, store StateStore, pending *PendingSet) http.Handler {
+// state. source serves the current manifest (so never-attempted repos still
+// appear, with empty state, and discovery-driven additions show up without a
+// restart); pending may be nil when webhook mode is off.
+func NewStatusHandler(source JobSource, store StateStore, pending *PendingSet) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		repos, err := source.Repositories(r.Context())
+		if err != nil {
+			http.Error(w, "repository manifest unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		queued := map[string]bool{}
 		if pending != nil {
 			for _, n := range pending.Snapshot() {

@@ -141,8 +141,43 @@ func main() {
 
 	// Also before any repo is touched: whichever git auth mode is configured
 	// must be in place before the first clone, not discovered mid-run.
-	if err := setupGitAuth(ctx, logger); err != nil {
+	ghClient, err := setupGitAuth(ctx, logger)
+	if err != nil {
 		logger.Fatal(err)
+	}
+
+	// The manifest source: static config list by default; with discovery
+	// enabled, the set of repos the GitHub App installation covers, refreshed
+	// at most every discovery.ttl and merged with any static entries
+	// (static wins by name). Installing/uninstalling the App on a repo is
+	// then how operators add/remove it - no config edit, no redeploy.
+	var source index.JobSource = index.NewConfigJobSource(cfg)
+	if cfg.Discovery.Enabled {
+		if ghClient == nil {
+			logger.Fatal("discovery.enabled requires GitHub App auth: set GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY_PATH")
+		}
+		fetch := func(fctx context.Context) ([]index.DiscoveredRepo, error) {
+			installed, err := ghClient.ListInstallationRepos(fctx)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]index.DiscoveredRepo, 0, len(installed))
+			for _, r := range installed {
+				out = append(out, index.DiscoveredRepo{
+					Name:     r.Name,
+					URL:      r.CloneURL,
+					Branch:   r.DefaultBranch,
+					Archived: r.Archived,
+				})
+			}
+			return out, nil
+		}
+		ds, err := index.NewDiscoveryJobSource(fetch, cfg.Repositories, cfg.Discovery.TTL, logger)
+		if err != nil {
+			logger.Fatal(err)
+		}
+		logger.Printf("repository discovery: GitHub App installation listing (refresh <= every %s, %d static entries)", cfg.Discovery.TTL, len(cfg.Repositories))
+		source = ds
 	}
 
 	owner := neo4j.LeaseOwner()
@@ -199,7 +234,7 @@ func main() {
 	go heartbeat.Run(ctx)
 
 	orch := &index.Orchestrator{
-		Source:                      index.NewConfigJobSource(cfg),
+		Source:                      source,
 		Syncer:                      index.NewGitSyncer(cfg.Git),
 		Graphify:                    index.NewExecGraphifier(cfg.Graphify, os.Stderr),
 		Importer:                    index.NewDefaultImportRunner(client),
@@ -232,11 +267,11 @@ func main() {
 			if err != nil {
 				logger.Fatal(err)
 			}
-			handler, err := index.NewGitHubWebhookHandler(cfg.Repositories, webhookSecret, pending, logger)
+			handler, err := index.NewGitHubWebhookHandler(source, webhookSecret, pending, logger)
 			if err != nil {
 				logger.Fatal(err)
 			}
-			srv := webhookServer(*webhookAddr, handler, cfg.Repositories, store, pending, logger)
+			srv := webhookServer(*webhookAddr, handler, source, store, pending, logger)
 			go func() {
 				// runCtx (not ctx): a lease-heartbeat give-up must also stop
 				// accepting deliveries, not just the indexing loop.
@@ -334,7 +369,7 @@ func exitErr(failed int, hbErr error) error {
 // GitHub endpoint, an unauthenticated liveness probe, and a bearer-token
 // /status snapshot. Timeouts mirror the other services' servers, with
 // ReadTimeout sized for GitHub's up-to-25MB push payloads.
-func webhookServer(addr string, webhook http.Handler, repos []index.Repository, store index.StateStore, pending *index.PendingSet, logger *log.Logger) *http.Server {
+func webhookServer(addr string, webhook http.Handler, source index.JobSource, store index.StateStore, pending *index.PendingSet, logger *log.Logger) *http.Server {
 	mux := http.NewServeMux()
 	mux.Handle("POST /webhook/github", webhook)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
@@ -345,7 +380,7 @@ func webhookServer(addr string, webhook http.Handler, repos []index.Repository, 
 	if statusToken == "" {
 		logger.Printf("WARNING: INDEXER_STATUS_TOKEN not set - /status (repo names, commit SHAs, error details) is served unauthenticated")
 	}
-	mux.Handle("GET /status", httpmw.WithAuth(index.NewStatusHandler(repos, store, pending), statusToken))
+	mux.Handle("GET /status", httpmw.WithAuth(index.NewStatusHandler(source, store, pending), statusToken))
 	return &http.Server{
 		Addr:              addr,
 		Handler:           mux,
@@ -395,28 +430,29 @@ func envOr(key, def string) string {
 // GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY_PATH are all set, it
 // mints a GitHub App installation token and writes it to the git credential
 // store, then starts a background goroutine that re-mints and re-writes it
-// before each hourly token expires. With any of the three unset, this is a
-// no-op: git auth stays exactly as deploy/indexer-entrypoint.sh configured it
-// (GIT_TOKEN, or none for public repos).
-func setupGitAuth(ctx context.Context, logger *log.Logger) error {
+// before each hourly token expires, and returns the App client for other
+// GitHub API needs (repository discovery). With any of the three unset, it
+// returns nil: git auth stays exactly as deploy/indexer-entrypoint.sh
+// configured it (GIT_TOKEN, or none for public repos).
+func setupGitAuth(ctx context.Context, logger *log.Logger) (*githubapp.Client, error) {
 	appID := os.Getenv("GITHUB_APP_ID")
 	installationID := os.Getenv("GITHUB_APP_INSTALLATION_ID")
 	keyPath := os.Getenv("GITHUB_APP_PRIVATE_KEY_PATH")
 	if appID == "" && installationID == "" && keyPath == "" {
 		logger.Printf("git auth: GIT_TOKEN (personal access token), if set")
-		return nil
+		return nil, nil
 	}
 	if appID == "" || installationID == "" || keyPath == "" {
-		return fmt.Errorf("GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY_PATH must all be set together to enable GitHub App auth")
+		return nil, fmt.Errorf("GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, and GITHUB_APP_PRIVATE_KEY_PATH must all be set together to enable GitHub App auth")
 	}
 
 	pemBytes, err := os.ReadFile(keyPath)
 	if err != nil {
-		return fmt.Errorf("read github app private key: %w", err)
+		return nil, fmt.Errorf("read github app private key: %w", err)
 	}
 	ghClient, err := githubapp.New(appID, installationID, pemBytes)
 	if err != nil {
-		return fmt.Errorf("build github app client: %w", err)
+		return nil, fmt.Errorf("build github app client: %w", err)
 	}
 	logger.Printf("git auth: GitHub App (installation %s)", installationID)
 	if os.Getenv("GIT_TOKEN") != "" {
@@ -426,10 +462,10 @@ func setupGitAuth(ctx context.Context, logger *log.Logger) error {
 	}
 
 	if out, err := exec.CommandContext(ctx, "git", "config", "--global", "credential.helper", "store").CombinedOutput(); err != nil {
-		return fmt.Errorf("git config credential.helper: %w: %s", err, out)
+		return nil, fmt.Errorf("git config credential.helper: %w: %s", err, out)
 	}
 	if err := writeGitCredential(ctx, ghClient); err != nil {
-		return fmt.Errorf("write initial github app credential: %w", err)
+		return nil, fmt.Errorf("write initial github app credential: %w", err)
 	}
 
 	go func() {
@@ -451,7 +487,7 @@ func setupGitAuth(ctx context.Context, logger *log.Logger) error {
 			}
 		}
 	}()
-	return nil
+	return ghClient, nil
 }
 
 // writeGitCredential mints a fresh installation token and writes it to the

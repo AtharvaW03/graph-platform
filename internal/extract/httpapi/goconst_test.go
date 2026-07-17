@@ -1,6 +1,9 @@
 package httpapi
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestGoConstantRoutes covers the org's dominant Go style: every path behind
 // a constants.XxxRoute identifier, with nested Group() prefixes.
@@ -94,6 +97,104 @@ func WidgetRoutesV2(group *gin.RouterGroup) {
 		if !routes[want] {
 			t.Errorf("missing route %q; got %v", want, routes)
 		}
+	}
+}
+
+// TestGoConstantRoutes_TypedRawAndConcatenated covers the declaration shapes
+// that previously caused routes to vanish entirely (the us-funds P0):
+// custom-typed constants, raw-string literals, and concatenation chains
+// (including a chain referencing another constant).
+func TestGoConstantRoutes_TypedRawAndConcatenated(t *testing.T) {
+	routes := runExtract(t, map[string]string{
+		"constants/routes.go": `package constants
+
+type Route string
+
+const (
+	V1           = "/v1"
+	DepositGroup = V1 + "/deposit"
+	VerifyOTP    = DepositGroup + "/verify-otp"
+	Profile      Route = "/user/profile"
+	History      = ` + "`/transactions/history`" + ` // raw string
+)
+`,
+		"api/router.go": `package api
+
+func Setup(r *gin.Engine) {
+	r.POST(constants.VerifyOTP, VerifyOTPController)
+	r.PUT(constants.Profile, UpdateSelectedBankController)
+	r.GET(constants.History, TransactionsHistoryController)
+}
+`,
+	})
+	for _, want := range []string{
+		"POST /v1/deposit/verify-otp",
+		"PUT /user/profile",
+		"GET /transactions/history",
+	} {
+		if !routes[want] {
+			t.Errorf("missing route %q; got %v", want, routes)
+		}
+	}
+}
+
+// TestGoWrappedRegistrations: formatter-wrapped registrations (arguments on
+// their own lines) previously never matched any per-line regex and vanished.
+// Covers wrapped identifier args, wrapped literal args, and a wrapped
+// Group() definition whose prefix must still chain.
+func TestGoWrappedRegistrations(t *testing.T) {
+	routes := runExtract(t, map[string]string{
+		"constants/routes.go": `package constants
+
+const CancelTransaction = "/transactions/cancel"
+`,
+		"api/router.go": `package api
+
+func Setup(r *gin.Engine) {
+	group := r.Group(
+		"/v1",
+	)
+	group.POST(
+		constants.CancelTransaction,
+		middleware.Auth(),
+		CancelTransactionController,
+	)
+	group.GET(
+		"/deposit/charges",
+		RatesAndChargesController,
+	)
+}
+`,
+	})
+	for _, want := range []string{
+		"POST /v1/transactions/cancel",
+		"GET /v1/deposit/charges",
+	} {
+		if !routes[want] {
+			t.Errorf("missing route %q; got %v", want, routes)
+		}
+	}
+}
+
+// TestGoConstantRoutes_UnresolvedIsLoud: a route whose path identifier can't
+// be resolved must surface as a fragment warning, never a silent drop.
+func TestGoConstantRoutes_UnresolvedIsLoud(t *testing.T) {
+	frag := runExtractFrag(t, map[string]string{
+		"api/router.go": `package api
+
+func Setup(r *gin.Engine) {
+	r.POST(constants.BuiltAtRuntime, handler)
+}
+`,
+	})
+	found := false
+	for _, w := range frag.Warnings {
+		if strings.Contains(w, "BuiltAtRuntime") && strings.Contains(w, "dropped") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("unresolved route identifier dropped silently; warnings: %v", frag.Warnings)
 	}
 }
 

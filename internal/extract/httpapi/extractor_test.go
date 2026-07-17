@@ -9,9 +9,9 @@ import (
 	"graph-platform/internal/extract"
 )
 
-// runExtract writes files into a temp repo and returns the route labels
-// ("METHOD /path") the extractor emitted.
-func runExtract(t *testing.T, files map[string]string) map[string]bool {
+// runExtractFrag writes files into a temp repo and returns the raw fragment,
+// for tests that assert on warnings or metadata, not just route labels.
+func runExtractFrag(t *testing.T, files map[string]string) *extract.Fragment {
 	t.Helper()
 	dir := t.TempDir()
 	for name, contents := range files {
@@ -27,6 +27,14 @@ func runExtract(t *testing.T, files map[string]string) map[string]bool {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return frag
+}
+
+// runExtract writes files into a temp repo and returns the route labels
+// ("METHOD /path") the extractor emitted.
+func runExtract(t *testing.T, files map[string]string) map[string]bool {
+	t.Helper()
+	frag := runExtractFrag(t, files)
 	routes := map[string]bool{}
 	for _, n := range frag.Nodes {
 		if n.Type == "http_route" {
