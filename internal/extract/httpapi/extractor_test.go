@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"graph-platform/internal/extract"
@@ -144,6 +145,53 @@ def fast():
 	for _, want := range []string{"GET /api/items", "POST /api/items", "POST /flask", "GET /fast"} {
 		if !routes[want] {
 			t.Errorf("missing route %q; got %v", want, routes)
+		}
+	}
+}
+
+// TestCrossLanguageCommentedRoutesIgnored: commented-out registrations in
+// every non-Go language must not become routes, while live code (including
+// lines with trailing comments and backtick template paths) still matches.
+func TestCrossLanguageCommentedRoutesIgnored(t *testing.T) {
+	routes := runExtract(t, map[string]string{
+		"app.py": `# @app.route('/py-dead', methods=['POST'])
+@app.route('/py-live', methods=['GET'])  # trailing comment
+def handler():
+    pass
+`,
+		"server.js": "// app.get('/js-dead-line', h);\n" +
+			"/*\napp.post('/js-dead-block', h);\n*/\n" +
+			"const tpl = `\n/* app.get('/js-dead-in-template', h) */\n`;\n" +
+			"app.get(`/js-live-tpl`, h);\n" +
+			"app.post('/js-live', h); // trailing\n",
+		"Controller.java": `package com.example;
+
+/**
+ * Example javadoc, retired route kept for reference:
+ * @GetMapping("/java-dead-javadoc")
+ */
+@RestController
+public class Controller {
+    // @GetMapping("/java-dead-line")
+    @GetMapping("/java-live")
+    public String live() { return "ok"; }
+}
+`,
+		"routes.rb": `# get '/rb-dead'
+get '/rb-live'
+`,
+	})
+
+	for _, want := range []string{
+		"GET /py-live", "GET /js-live-tpl", "POST /js-live", "GET /java-live", "GET /rb-live",
+	} {
+		if !routes[want] {
+			t.Errorf("live route %q missing; got %v", want, routes)
+		}
+	}
+	for label := range routes {
+		if strings.Contains(label, "dead") {
+			t.Errorf("commented-out code produced route %q", label)
 		}
 	}
 }
