@@ -38,7 +38,10 @@ import (
 //	v6: empty-string constants (constants.EMPTY) resolve as the same idiom,
 //	    and `x := "/path"` locals used in route position resolve
 //	    (file-scoped). Repos indexed under v5 are missing those routes.
-const GraphSchemaVersion = 6
+//	v7: commented-out Go code is stripped before route matching - repos
+//	    indexed earlier may carry FALSE routes from commented registrations
+//	    with literal paths, which this re-extract removes.
+const GraphSchemaVersion = 7
 
 // Orchestrator drives the per-repo pipeline for a configured set of
 // repositories. Every step is delegated to a pluggable component (Source,

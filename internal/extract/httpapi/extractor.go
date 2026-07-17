@@ -223,6 +223,56 @@ func splitConcat(expr string) ([]string, bool) {
 	return parts, true
 }
 
+// stripGoComments removes comment content from one line - trailing //
+// comments and /* */ block comments, tracking block state across lines so a
+// commented-out registration block can never register routes. String-aware:
+// "//" or "/*" inside a literal survives. Returns the code portion and
+// whether a block comment is still open at end of line.
+func stripGoComments(line string, inBlock bool) (string, bool) {
+	var b strings.Builder
+	inStr, inRaw, esc := false, false, false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if inBlock {
+			if c == '*' && i+1 < len(line) && line[i+1] == '/' {
+				inBlock = false
+				i++
+			}
+			continue
+		}
+		switch {
+		case inRaw:
+			b.WriteByte(c)
+			if c == '`' {
+				inRaw = false
+			}
+		case inStr:
+			b.WriteByte(c)
+			if esc {
+				esc = false
+			} else if c == '\\' {
+				esc = true
+			} else if c == '"' {
+				inStr = false
+			}
+		case c == '"':
+			inStr = true
+			b.WriteByte(c)
+		case c == '`':
+			inRaw = true
+			b.WriteByte(c)
+		case c == '/' && i+1 < len(line) && line[i+1] == '/':
+			return b.String(), false
+		case c == '/' && i+1 < len(line) && line[i+1] == '*':
+			inBlock = true
+			i++
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String(), inBlock
+}
+
 // stripGoLineComment removes a trailing // comment, string-aware so a "//"
 // inside a literal survives.
 func stripGoLineComment(s string) string {
@@ -374,12 +424,18 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		// re-match, or a formatter-wrapped route silently disappears.
 		carry := ""
 		carryStart, carryDepth := 0, 0
+		inBlockComment := false
 
 		lineNum := 0
 		for scanner.Scan() {
 			lineNum++
 			line := scanner.Text()
 			if isGo {
+				// Comments are not code: a commented-out registration block
+				// must neither emit routes (false positives in the graph)
+				// nor warn about identifiers its dead declarations no longer
+				// define. Everything below sees only the code portion.
+				line, inBlockComment = stripGoComments(line, inBlockComment)
 				if m := goConstExprRe.FindStringSubmatch(line); m != nil {
 					registerGoConstExpr(constExprs, m[1], m[2])
 				}
@@ -404,7 +460,7 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 						}
 						carry = ""
 					}
-				} else if goWrapOpenRe.MatchString(stripGoLineComment(line)) {
+				} else if goWrapOpenRe.MatchString(line) {
 					carry = line
 					carryStart, carryDepth = lineNum, parenDelta(line)
 				}
