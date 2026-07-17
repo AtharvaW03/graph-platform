@@ -305,6 +305,50 @@ func Setup(r *gin.Engine) {
 	}
 }
 
+// TestGoCommentedRoutesIgnored replicates the amx-pledge finding: an entire
+// commented-out registration block (line comments and a /* */ block) must
+// produce neither routes (false positives) nor unresolved-identifier
+// warnings (the dead declarations no longer define them). Live code with a
+// trailing comment must still match.
+func TestGoCommentedRoutesIgnored(t *testing.T) {
+	frag := runExtractFrag(t, map[string]string{
+		"api/actuator.go": `package api
+
+// Legacy config-driven registration, kept for reference:
+// 	var healthStatusEndpoint string
+// 	healthStatusEndpoint = fmt.Sprintf("%v", healthStatusEndpointIface)
+// 	r.GET(healthStatusEndpoint, healthHandler)
+// 	r.POST("/commented-literal", oldHandler)
+
+/*
+r.POST("/block-commented", blockHandler)
+group.GET(constants.DeadRoute, deadHandler)
+*/
+
+func Setup(r *gin.Engine) {
+	r.GET("/live", liveHandler) // trailing comment must not hide this
+}
+`,
+	})
+	routes := map[string]bool{}
+	for _, n := range frag.Nodes {
+		if n.Type == "http_route" {
+			routes[n.Label] = true
+		}
+	}
+	if !routes["GET /live"] {
+		t.Errorf("live route missing: %v", routes)
+	}
+	for label := range routes {
+		if label != "GET /live" {
+			t.Errorf("commented-out code produced route %q", label)
+		}
+	}
+	if len(frag.Warnings) != 0 {
+		t.Errorf("commented-out code produced warnings: %v", frag.Warnings)
+	}
+}
+
 // TestGoConstantRoutesNoise: config-getter constants and unresolvable
 // identifiers must not become routes.
 func TestGoConstantRoutesNoise(t *testing.T) {
