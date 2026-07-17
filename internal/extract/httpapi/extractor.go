@@ -512,7 +512,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	}
 	for _, pr := range pending {
 		p := resolveArg(pr.arg)
-		if p == "" {
+		isLiteral := strings.HasPrefix(pr.arg, `"`)
+		if p == "" && !isLiteral {
 			// A route registration whose path we couldn't resolve is a hole
 			// in the graph - missing routes read as false information to
 			// anyone querying it, so the drop must be loud, never silent.
@@ -520,9 +521,19 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 				pr.file, pr.line, pr.method, pr.arg))
 			continue
 		}
+		// `group.POST("", h)` is the gin idiom for "register on the group's
+		// own path": the route IS the prefix. An empty literal is a valid
+		// path spelling, not an unresolved identifier.
+		path := joinPrefix(prefixOf(pr.file, pr.groupVar, 0), p)
+		if p == "" {
+			path = prefixOf(pr.file, pr.groupVar, 0)
+			if path == "" {
+				path = "/"
+			}
+		}
 		emit(pr.file, route{
 			Method:  pr.method,
-			Path:    joinPrefix(prefixOf(pr.file, pr.groupVar, 0), p),
+			Path:    path,
 			Handler: pr.handler,
 			Line:    pr.line,
 		})
