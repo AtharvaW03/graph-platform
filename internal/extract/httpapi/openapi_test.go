@@ -94,6 +94,59 @@ func routes() {
 	}
 }
 
+// TestSpecReconciliation_ParamSyntax: gin's `:id`, OpenAPI's `{id}`, and
+// Flask's `<id>` spellings of the same parameterized endpoint must reconcile
+// to ONE route, not inflate the inventory with a twin per spelling.
+func TestSpecReconciliation_ParamSyntax(t *testing.T) {
+	frag := runExtractFrag(t, map[string]string{
+		"swagger.json": `{"swagger":"2.0","paths":{
+			"/v1/transactions/{transactionId}/status":{"get":{"operationId":"txStatus"}},
+			"/v1/fx/{ccy}":{"get":{"operationId":"getFX"}}
+		}}`,
+		"main.go": `package main
+
+func routes() {
+	router.GET("/v1/transactions/:transactionId/status", statusHandler)
+	router.GET("/v1/fx/:ccy", fxHandler)
+}
+`,
+	})
+	var routeLabels []string
+	documented := 0
+	for _, n := range frag.Nodes {
+		if n.Type == "http_route" {
+			routeLabels = append(routeLabels, n.Label)
+			if d, _ := n.Metadata["documented"].(bool); d {
+				documented++
+			}
+		}
+	}
+	if len(routeLabels) != 2 {
+		t.Fatalf("got %d routes, want 2 (param-syntax twins must merge): %v", len(routeLabels), routeLabels)
+	}
+	if documented != 2 {
+		t.Fatalf("spec version should win the merge (documented=true), got %d documented", documented)
+	}
+}
+
+// TestTestFilesExcluded: routes registered in test files are not API surface.
+func TestTestFilesExcluded(t *testing.T) {
+	routes := runExtract(t, map[string]string{
+		"api/routes.go":      "package api\n\nfunc r() { router.GET(\"/live\", h) }\n",
+		"api/routes_test.go":  "package api\n\nfunc t() { router.GET(\"/test-only\", h) }\n",
+		"web/app.test.ts":     "app.get('/ts-test-only', h);\n",
+		"testdata/fixture.go": "package fixture\n\nfunc f() { router.GET(\"/fixture-only\", h) }\n",
+	})
+	if !routes["GET /live"] {
+		t.Fatalf("live route missing: %v", routes)
+	}
+	for label := range routes {
+		if label != "GET /live" {
+			t.Errorf("test code produced route %q", label)
+		}
+	}
+}
+
 // TestSpecSizeCapIsLoud: a spec over the cap must produce a fragment warning,
 // never a silent skip - a skipped spec means documented routes are missing
 // from the graph.

@@ -381,6 +381,9 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		if !ok {
 			return nil
 		}
+		if isTestFile(d.Name()) {
+			return nil
+		}
 		info, statErr := d.Info()
 		if statErr != nil || info.Size() > maxBytes {
 			return nil
@@ -782,10 +785,21 @@ func reconcileRoutes(code, spec []heldRoute) []heldRoute {
 	return out
 }
 
-// routeKey is a route's reconciliation identity: method + normalized path,
-// matching emitRoute's normalization so a spec and code route compare equal.
+// routeKey is a route's reconciliation identity: method + normalized path
+// with path parameters canonicalized, so `/tx/:id/status` (gin),
+// `/tx/{id}/status` (OpenAPI), and `/tx/<id>/status` (Flask) all compare
+// equal - otherwise every parameterized endpoint that is both implemented
+// and documented lands in the graph twice.
 func routeKey(method, path string) string {
-	return strings.ToUpper(method) + " " + normalizePath(path)
+	segs := strings.Split(normalizePath(path), "/")
+	for i, s := range segs {
+		if strings.HasPrefix(s, ":") || strings.HasPrefix(s, "*") ||
+			(strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}")) ||
+			(strings.HasPrefix(s, "<") && strings.HasSuffix(s, ">")) {
+			segs[i] = "{param}"
+		}
+	}
+	return strings.ToUpper(method) + " " + strings.Join(segs, "/")
 }
 
 // infraPrefixes flag operational endpoints (health, metrics, profiling, docs)
@@ -820,7 +834,43 @@ func shouldSkipDir(name string) bool {
 	switch name {
 	case ".git", "node_modules", "vendor", "target", "build", "dist",
 		"__pycache__", ".venv", "venv", ".tox", ".gradle", ".idea",
-		".vs", "bin", "obj", ".mvn", "tests", "test", "graphify-out":
+		".vs", "bin", "obj", ".mvn", "tests", "test", "graphify-out",
+		"testdata", "mocks", "__mocks__", "__tests__":
+		return true
+	}
+	return false
+}
+
+// isTestFile reports whether a source file is a test by naming convention.
+// Routes registered in tests (httptest routers, mock servers) are not API
+// surface; counting them inflates a repo's route inventory with endpoints
+// no client can call.
+func isTestFile(name string) bool {
+	l := strings.ToLower(name)
+	if strings.HasSuffix(l, "_test.go") {
+		return true
+	}
+	for _, suf := range []string{
+		".test.js", ".test.jsx", ".test.ts", ".test.tsx", ".test.mjs",
+		".spec.js", ".spec.jsx", ".spec.ts", ".spec.tsx", ".spec.mjs",
+	} {
+		if strings.HasSuffix(l, suf) {
+			return true
+		}
+	}
+	// Python/Java conventions: test_*.py, *_test.py, *Test.java, *Tests.cs.
+	base := l
+	if i := strings.LastIndexByte(base, '/'); i >= 0 {
+		base = base[i+1:]
+	}
+	if strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py") {
+		return true
+	}
+	if strings.HasSuffix(base, "_test.py") {
+		return true
+	}
+	if strings.HasSuffix(base, "test.java") || strings.HasSuffix(base, "tests.java") ||
+		strings.HasSuffix(base, "test.kt") || strings.HasSuffix(base, "tests.cs") || strings.HasSuffix(base, "test.cs") {
 		return true
 	}
 	return false
