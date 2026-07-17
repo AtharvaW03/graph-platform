@@ -294,3 +294,42 @@ func TestIntegration_Search_LuceneReservedInputReturnsCleanly(t *testing.T) {
 		t.Errorf("Search with Lucene-reserved input returned an error, want it to return cleanly: %v", err)
 	}
 }
+
+// TestIntegration_ShortestPath_SameSourceAndTarget is the repro for the
+// web-UI 500: asking for a path from a symbol to itself made Neo4j's
+// shortestPath throw ("start and end nodes are the same"). It must instead
+// return the node as a zero-length path - and two different spellings
+// resolving to one node must return empty, not error.
+func TestIntegration_ShortestPath_SameSourceAndTarget(t *testing.T) {
+	svc, c := testService(t)
+	ctx := context.Background()
+	repo := uniqueQueryRepo(t, "selfpath")
+	t.Cleanup(func() { wipeQueryRepo(t, c, repo) })
+
+	if err := c.MergeRepository(ctx, repo); err != nil {
+		t.Fatalf("merge repository: %v", err)
+	}
+	nodes := []graphify.Node{
+		{ID: "s1", Label: "selfSameFn()", NormLabel: "selfsamefn"},
+	}
+	if _, _, _, err := c.ImportNodes(ctx, repo, "c1", "r1", nodes, false); err != nil {
+		t.Fatalf("import nodes: %v", err)
+	}
+
+	path, err := svc.ShortestPath(ctx, "selfSameFn()", "selfSameFn()", nil)
+	if err != nil {
+		t.Fatalf("ShortestPath(same, same): %v", err)
+	}
+	if len(path) != 1 || path[0].Name != "selfSameFn()" {
+		t.Errorf("want the node itself as a zero-length path, got %+v", path)
+	}
+
+	// Different spellings, same node: filtered by src <> dst, no error.
+	path, err = svc.ShortestPath(ctx, "selfSameFn()", "selfsamefn", nil)
+	if err != nil {
+		t.Fatalf("ShortestPath(name, norm_name): %v", err)
+	}
+	if len(path) != 0 {
+		t.Errorf("different spellings of one node: want empty path, got %+v", path)
+	}
+}
