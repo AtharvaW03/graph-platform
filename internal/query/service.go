@@ -406,12 +406,23 @@ func (s *Service) ShortestPath(ctx context.Context, source, target string, repos
 	if source == "" || target == "" {
 		return []PathNode{}, nil
 	}
+	// Same symbol on both ends: the path is trivially the node itself.
+	// Answered directly because Neo4j's shortestPath throws a database error
+	// when a candidate pair has src == dst.
+	if strings.EqualFold(strings.TrimSpace(source), strings.TrimSpace(target)) {
+		return s.selfPath(ctx, source, repos)
+	}
 
+	// src <> dst covers the other spelling of the same situation: two
+	// different search terms (name vs norm_name) resolving to one node would
+	// otherwise put an identical pair into shortestPath and trigger the same
+	// database error.
 	cypher := fmt.Sprintf(`
 MATCH (src:Entity), (dst:Entity)
 WHERE (src.name_lower = $src OR src.norm_name_lower = $src)
   AND (dst.name_lower = $dst OR dst.norm_name_lower = $dst)
   AND (size($repos) = 0 OR (src.repo IN $repos AND dst.repo IN $repos))
+  AND src <> dst
 WITH src, dst LIMIT %d
 OPTIONAL MATCH p = shortestPath((src)-[:%s*..%d]-(dst))
 WITH p WHERE p IS NOT NULL
@@ -446,6 +457,45 @@ ORDER BY idx
 				Path:         asString(m["path"]),
 				Labels:       asStringSlice(m["labels"]),
 				Relationship: asString(m["relationship"]),
+			})
+		}
+		return path, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out.([]PathNode), nil
+}
+
+// selfPath answers ShortestPath when source and target are the same symbol:
+// the single matching node as a zero-length path. Empty result (not an
+// error) when the symbol doesn't exist, matching ShortestPath's own
+// no-path-found behavior.
+func (s *Service) selfPath(ctx context.Context, symbol string, repos []string) ([]PathNode, error) {
+	const cypher = `
+MATCH (n:Entity)
+WHERE (n.name_lower = $q OR n.norm_name_lower = $q)
+  AND (size($repos) = 0 OR n.repo IN $repos)
+RETURN n.name AS name, n.repo AS repo, n.path AS path, labels(n) AS labels
+LIMIT 1
+`
+	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
+		res, err := tx.Run(ctx, cypher, map[string]any{"q": strings.ToLower(strings.TrimSpace(symbol)), "repos": orEmpty(repos)})
+		if err != nil {
+			return nil, err
+		}
+		records, err := res.Collect(ctx)
+		if err != nil {
+			return nil, err
+		}
+		path := make([]PathNode, 0, 1)
+		for _, r := range records {
+			m := r.AsMap()
+			path = append(path, PathNode{
+				Name:   asString(m["name"]),
+				Repo:   asString(m["repo"]),
+				Path:   asString(m["path"]),
+				Labels: asStringSlice(m["labels"]),
 			})
 		}
 		return path, nil
