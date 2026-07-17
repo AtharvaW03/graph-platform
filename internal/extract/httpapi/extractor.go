@@ -425,16 +425,22 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		carry := ""
 		carryStart, carryDepth := 0, 0
 		inBlockComment := false
+		// Non-Go languages use the generic per-extension comment stripper.
+		langSyntax, hasLangSyntax := commentSyntaxByExt[ext]
+		var langStrip stripState
 
 		lineNum := 0
 		for scanner.Scan() {
 			lineNum++
 			line := scanner.Text()
+			// Comments are not code: a commented-out registration block must
+			// neither emit routes (false positives in the graph) nor warn
+			// about identifiers its dead declarations no longer define.
+			// Everything below sees only the code portion.
+			if !isGo && hasLangSyntax {
+				line = stripComments(line, langSyntax, &langStrip)
+			}
 			if isGo {
-				// Comments are not code: a commented-out registration block
-				// must neither emit routes (false positives in the graph)
-				// nor warn about identifiers its dead declarations no longer
-				// define. Everything below sees only the code portion.
 				line, inBlockComment = stripGoComments(line, inBlockComment)
 				if m := goConstExprRe.FindStringSubmatch(line); m != nil {
 					registerGoConstExpr(constExprs, m[1], m[2])
