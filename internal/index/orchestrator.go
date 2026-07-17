@@ -32,7 +32,10 @@ import (
 //	    and matched, and spec files get a 10MB cap with loud skips. Repos
 //	    indexed under v3 may be missing real routes, so every repo must
 //	    re-extract even with an unchanged HEAD.
-const GraphSchemaVersion = 4
+//	v5: `group.POST("", h)` (gin's register-on-the-group's-own-path idiom)
+//	    now emits the group prefix as the route instead of warning and
+//	    dropping. Repos indexed under v4 are missing all such routes.
+const GraphSchemaVersion = 5
 
 // Orchestrator drives the per-repo pipeline for a configured set of
 // repositories. Every step is delegated to a pluggable component (Source,

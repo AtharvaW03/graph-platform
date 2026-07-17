@@ -176,6 +176,39 @@ func Setup(r *gin.Engine) {
 	}
 }
 
+// TestGoEmptyLiteralRegistersOnGroupPath: `group.POST("", h)` is the gin
+// idiom for "this route IS the group's path". It must emit the prefix as the
+// route, never warn as an unresolved identifier.
+func TestGoEmptyLiteralRegistersOnGroupPath(t *testing.T) {
+	frag := runExtractFrag(t, map[string]string{
+		"api/router.go": `package api
+
+func Setup(r *gin.Engine) {
+	orders := r.Group("/v5/orders")
+	orders.POST("", createOrder)
+	orders.PATCH("", modifyOrder)
+	r.POST("", rootHandler)
+}
+`,
+	})
+	routes := map[string]bool{}
+	for _, n := range frag.Nodes {
+		if n.Type == "http_route" {
+			routes[n.Label] = true
+		}
+	}
+	for _, want := range []string{"POST /v5/orders", "PATCH /v5/orders", "POST /"} {
+		if !routes[want] {
+			t.Errorf("missing route %q; got %v", want, routes)
+		}
+	}
+	for _, w := range frag.Warnings {
+		if strings.Contains(w, `"\"\""`) || strings.Contains(w, "dropped") {
+			t.Errorf("empty-literal registration produced a warning: %q", w)
+		}
+	}
+}
+
 // TestGoConstantRoutes_UnresolvedIsLoud: a route whose path identifier can't
 // be resolved must surface as a fragment warning, never a silent drop.
 func TestGoConstantRoutes_UnresolvedIsLoud(t *testing.T) {
