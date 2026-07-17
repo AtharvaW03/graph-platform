@@ -209,6 +209,80 @@ func Setup(r *gin.Engine) {
 	}
 }
 
+// TestGoEmptyConstantRegistersOnGroupPath: `orders.POST(constants.EMPTY, h)`
+// where EMPTY = "" is the named-constant spelling of the group's-own-path
+// idiom. Must emit the prefix, not warn.
+func TestGoEmptyConstantRegistersOnGroupPath(t *testing.T) {
+	frag := runExtractFrag(t, map[string]string{
+		"constants/misc.go": `package constants
+
+const EMPTY = ""
+`,
+		"api/router.go": `package api
+
+func Setup(r *gin.Engine) {
+	orders := r.Group("/v1/orders")
+	orders.POST(constants.EMPTY, createOrder)
+	orders.DELETE(constants.EMPTY, cancelOrder)
+}
+`,
+	})
+	routes := map[string]bool{}
+	for _, n := range frag.Nodes {
+		if n.Type == "http_route" {
+			routes[n.Label] = true
+		}
+	}
+	for _, want := range []string{"POST /v1/orders", "DELETE /v1/orders"} {
+		if !routes[want] {
+			t.Errorf("missing route %q; got %v", want, routes)
+		}
+	}
+	for _, w := range frag.Warnings {
+		if strings.Contains(w, "EMPTY") {
+			t.Errorf("EMPTY constant produced a warning: %q", w)
+		}
+	}
+}
+
+// TestGoLocalVariableRoutes: `endpoint := "/health-status"` locals used in
+// route position must resolve, file-scoped so a same-named local in another
+// file with a different value can't cross-contaminate.
+func TestGoLocalVariableRoutes(t *testing.T) {
+	routes := runExtract(t, map[string]string{
+		"api/actuator.go": `package api
+
+func Setup(r *gin.Engine) {
+	healthStatusEndpoint := "/health-status"
+	pledgeSetupEndpoint := basePath + "/setup"
+	r.GET(healthStatusEndpoint, healthHandler)
+	r.POST(pledgeSetupEndpoint, setupHandler)
+}
+
+const basePath = "/v2/pledge"
+`,
+		"api/other.go": `package api
+
+func Other(r *gin.Engine) {
+	healthStatusEndpoint := "/completely-different"
+	r.GET(healthStatusEndpoint, otherHandler)
+}
+`,
+	})
+	for _, want := range []string{
+		"GET /health-status",
+		"POST /v2/pledge/setup",
+		"GET /completely-different",
+	} {
+		if !routes[want] {
+			t.Errorf("missing route %q; got %v", want, routes)
+		}
+	}
+	if routes["GET /health-status"] && !routes["GET /completely-different"] {
+		t.Error("file-scoped locals leaked across files")
+	}
+}
+
 // TestGoConstantRoutes_UnresolvedIsLoud: a route whose path identifier can't
 // be resolved must surface as a fragment warning, never a silent drop.
 func TestGoConstantRoutes_UnresolvedIsLoud(t *testing.T) {
