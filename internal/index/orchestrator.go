@@ -45,7 +45,12 @@ import (
 //	    (Python/Ruby #, JS//TS/Java/Kotlin/C#/PHP // and block comments,
 //	    VB ', F# //): sweeps false routes from commented code in those
 //	    languages too.
-const GraphSchemaVersion = 8
+//	v9: route-inventory dedup - spec/code reconciliation now canonicalizes
+//	    path-parameter syntax (:id vs {id} vs <id>), and test files
+//	    (_test.go, *.test.ts, testdata/, mocks/) no longer contribute
+//	    routes. Both shrank inflated route counts, so re-extract sweeps
+//	    the twins and test routes out.
+const GraphSchemaVersion = 9
 
 // Orchestrator drives the per-repo pipeline for a configured set of
 // repositories. Every step is delegated to a pluggable component (Source,
