@@ -2,12 +2,17 @@
 // gin/echo/chi/mux/net-http (Go), Spring (Java/Kotlin), Express (JS/TS),
 // Flask/FastAPI/Django (Python), and ASP.NET (.NET).
 //
-// Two strategies: literal matchers (matchers.go) for string-literal paths at
-// the call site, and Go constant resolution (this file) for routes registered
+// Three strategies: literal matchers (matchers.go) for string-literal paths
+// at the call site; Go constant resolution (this file) for routes registered
 // through identifiers, e.g. router.POST(constants.XxxRoute, h) with nested
-// Group() prefixes. Group prefixes are chained only within one file; a group
+// Group() prefixes, typed constants, raw strings, and concatenation chains;
+// and OpenAPI/Swagger spec ingestion (openapi.go) as the authored contract.
+// Formatter-wrapped registrations (arguments on their own lines) are joined
+// and re-matched. Group prefixes are chained only within one file; a group
 // passed across a function boundary loses its parent prefix (the route still
-// surfaces, with a partial path).
+// surfaces, with a partial path). A route registration whose path cannot be
+// resolved is dropped LOUDLY (fragment warning) - a silently missing route
+// reads as false information to graph consumers.
 //
 // The extractor is heuristic, so every emitted edge is INFERRED.
 package httpapi
@@ -26,10 +31,21 @@ import (
 )
 
 type Extractor struct {
-	MaxFileBytes int64 // skip files larger than this (defensive); 0 = 2 MiB default
+	MaxFileBytes int64 // skip source files larger than this (defensive); 0 = 2 MiB default
+	// SpecMaxBytes caps OpenAPI/Swagger spec files separately - generated
+	// swagger.json files routinely exceed source-file size, and a spec is
+	// the authored route contract, so it gets a much higher ceiling and a
+	// loud warning (never a silent skip) when even that is exceeded.
+	// 0 = 10 MiB default.
+	SpecMaxBytes int64
 }
 
-func New() *Extractor { return &Extractor{MaxFileBytes: 2 * 1024 * 1024} }
+func New() *Extractor {
+	return &Extractor{
+		MaxFileBytes: 2 * 1024 * 1024,
+		SpecMaxBytes: 10 * 1024 * 1024,
+	}
+}
 
 func (e *Extractor) Name() string { return "httpapi" }
 
@@ -60,8 +76,11 @@ type matcher func(line string, lineNum int) []route
 
 // matchers per file extension. Each list is non-overlapping so the same route
 // isn't emitted twice.
+// Note: Go's uppercase-verb family (gin/echo `r.GET(...)`) is deliberately
+// NOT in this table - it goes through the const/group-aware pending path
+// (goIdentRouteRe) so group prefixes and constant paths resolve uniformly.
 var matchers = map[string][]matcher{
-	".go":   {matchGin, matchChi, matchGorillaMux, matchNetHTTP},
+	".go":   {matchChi, matchGorillaMux, matchNetHTTP},
 	".py":   {matchFlaskFastAPI, matchDjango},
 	".js":   {matchExpress},
 	".jsx":  {matchExpress},
@@ -99,29 +118,177 @@ type goPendingRoute struct {
 }
 
 var (
-	// Package-level string constants: `X = "..."`, `const X = "..."`,
-	// `var X = "..."`. Does not match `:=` locals.
-	goConstStrRe = regexp.MustCompile(`^\s*(?:var\s+|const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:string\s*)?=\s*"([^"]+)"`)
+	// Package-level string-constant declarations, captured as a full
+	// right-hand-side expression so all the shapes seen in real route
+	// constants resolve: plain literals (`X = "/v1"`), explicitly or
+	// custom-typed constants (`X string = "/v1"`, `X Route = "/v1"`), raw
+	// strings (backticks), and concatenation chains (`X = V1 + "/deposit"`).
+	// Does not match `:=` locals (the `:` can't be consumed by any group).
+	goConstExprRe = regexp.MustCompile(`^\s*(?:var\s+|const\s+)?([A-Za-z_]\w*)(?:\s+[A-Za-z_][\w.\[\]]*)?\s*=\s*(.+)$`)
+	// One token of a constant expression: identifier (possibly pkg-qualified).
+	goIdentTokenRe = regexp.MustCompile(`^[A-Za-z_][\w.]*$`)
 	// `v := recv.Group(arg, ...)`; arg may be an identifier or a literal.
 	goGroupDefRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*:?=\s*([A-Za-z_]\w*)\.Group\s*\(\s*([A-Za-z_][\w.]*|"[^"]*")`)
-	// `recv.POST(pkg.Identifier, handler)`: uppercase verbs, identifier arg.
-	// Literal args are matchGin's job; lowercase .Get() is config-getter noise.
-	goIdentRouteRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|Any)\s*\(\s*([A-Za-z_][\w.]*)\s*(?:,\s*([A-Za-z0-9_.]+))?`)
+	// `recv.POST(arg, handler)`: uppercase verbs (gin/echo style), arg either
+	// an identifier (pkg.Constant) or a string literal. Both flow through the
+	// same pending-resolution path so group prefixes chain for literals too -
+	// `group.GET("/charges", h)` must get group's prefix exactly like
+	// `group.GET(constants.Charges, h)`. Lowercase .Get() is config-getter
+	// noise and stays with matchChi's path-shaped filter.
+	goIdentRouteRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|Any)\s*\(\s*([A-Za-z_][\w.]*|"[^"]*")\s*(?:,\s*([A-Za-z0-9_.]+))?`)
+	// A route/group call whose argument list starts on the NEXT line
+	// (formatter-wrapped registration). Detected so the following lines can
+	// be joined and re-matched - otherwise the whole registration is
+	// invisible to the per-line regexes and the route silently vanishes.
+	goWrapOpenRe = regexp.MustCompile(`\.(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|Any|Get|Post|Put|Delete|Patch|Options|Head|Group|Handle|HandleFunc)\s*\(\s*$`)
 )
 
-// registerGoConst stores a package-level string constant that might hold a
-// route path. Whether it IS one is decided by use, not spelling: only
-// constants that later appear in route position get resolved, so capture
-// broadly and reject only values that can't be a path (whitespace or a URL).
-// A leading "/" or path-like name is not required; normalizePath adds the
-// slash at emit time. First declaration wins on duplicate names.
-func registerGoConst(m map[string]string, name, val string) {
-	if val == "" || strings.ContainsAny(val, " \t") || strings.Contains(val, "://") {
+// goWrapMaxLines / goWrapMaxBytes bound how far a wrapped registration is
+// followed before giving up; a gofmt-wrapped call is a handful of lines.
+const (
+	goWrapMaxLines = 10
+	goWrapMaxBytes = 4096
+)
+
+// registerGoConstExpr stores a package-level string-constant declaration for
+// post-walk resolution. Whether it IS a route path is decided by use, not
+// spelling: only constants that later appear in route position get resolved.
+// The raw expression is validated (every `+`-separated part must be a string
+// literal or an identifier) but not resolved here - referenced identifiers
+// may live in files not walked yet. First declaration wins on duplicates.
+func registerGoConstExpr(m map[string]string, name, rhs string) {
+	rhs = strings.TrimSpace(stripGoLineComment(rhs))
+	parts, ok := splitConcat(rhs)
+	if !ok || len(parts) == 0 {
 		return
 	}
-	if _, exists := m[name]; !exists {
-		m[name] = val
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if len(p) >= 2 && (p[0] == '"' && p[len(p)-1] == '"' || p[0] == '`' && p[len(p)-1] == '`') {
+			continue
+		}
+		if goIdentTokenRe.MatchString(p) {
+			continue
+		}
+		return // function call, number, composite - not a string constant
 	}
+	if _, exists := m[name]; !exists {
+		m[name] = rhs
+	}
+}
+
+// splitConcat splits a Go expression on top-level `+`, respecting string
+// literals (escaped quotes included). ok is false when quoting is unbalanced.
+func splitConcat(expr string) ([]string, bool) {
+	var parts []string
+	var cur strings.Builder
+	inStr, inRaw, esc := false, false, false
+	for i := 0; i < len(expr); i++ {
+		c := expr[i]
+		switch {
+		case inRaw:
+			cur.WriteByte(c)
+			if c == '`' {
+				inRaw = false
+			}
+		case inStr:
+			cur.WriteByte(c)
+			if esc {
+				esc = false
+			} else if c == '\\' {
+				esc = true
+			} else if c == '"' {
+				inStr = false
+			}
+		case c == '"':
+			inStr = true
+			cur.WriteByte(c)
+		case c == '`':
+			inRaw = true
+			cur.WriteByte(c)
+		case c == '+':
+			parts = append(parts, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	if inStr || inRaw {
+		return nil, false
+	}
+	parts = append(parts, cur.String())
+	return parts, true
+}
+
+// stripGoLineComment removes a trailing // comment, string-aware so a "//"
+// inside a literal survives.
+func stripGoLineComment(s string) string {
+	inStr, inRaw, esc := false, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inRaw:
+			if c == '`' {
+				inRaw = false
+			}
+		case inStr:
+			if esc {
+				esc = false
+			} else if c == '\\' {
+				esc = true
+			} else if c == '"' {
+				inStr = false
+			}
+		case c == '"':
+			inStr = true
+		case c == '`':
+			inRaw = true
+		case c == '/' && i+1 < len(s) && s[i+1] == '/':
+			return s[:i]
+		}
+	}
+	return s
+}
+
+// parenDelta returns the net parenthesis depth change of a line, ignoring
+// parens inside string literals and after a // comment. Drives the
+// wrapped-registration joiner.
+func parenDelta(line string) int {
+	depth := 0
+	inStr, inRaw, esc := false, false, false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case inRaw:
+			if c == '`' {
+				inRaw = false
+			}
+		case inStr:
+			if esc {
+				esc = false
+			} else if c == '\\' {
+				esc = true
+			} else if c == '"' {
+				inStr = false
+			}
+		default:
+			switch c {
+			case '"':
+				inStr = true
+			case '`':
+				inRaw = true
+			case '/':
+				if i+1 < len(line) && line[i+1] == '/' {
+					return depth
+				}
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+		}
+	}
+	return depth
 }
 
 func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*extract.Fragment, error) {
@@ -134,7 +301,7 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	}
 
 	// Go constant-resolution state, filled during the walk, resolved after.
-	constVals := map[string]string{}
+	constExprs := map[string]string{} // name -> raw RHS expression
 	groupDefs := map[string]map[string]goGroupDef{} // file -> var -> def
 	var pending []goPendingRoute
 
@@ -179,26 +346,56 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		isJVM := ext == ".java" || ext == ".kt" || ext == ".kts"
 		classPrefix := ""
 		var pendingJVM *pendingMapping
+
+		// processGoRouteText applies the Go route/group regexes plus the Go
+		// literal matchers to one piece of text - a physical line during the
+		// scan, or a joined wrapped registration at carry flush.
+		processGoRouteText := func(text string, lineNum int) {
+			if m := goGroupDefRe.FindStringSubmatch(text); m != nil {
+				if groupDefs[rel] == nil {
+					groupDefs[rel] = map[string]goGroupDef{}
+				}
+				groupDefs[rel][m[1]] = goGroupDef{recv: m[2], arg: m[3]}
+			}
+			for _, m := range goIdentRouteRe.FindAllStringSubmatch(text, -1) {
+				pending = append(pending, goPendingRoute{
+					file: rel, line: lineNum,
+					groupVar: m[1], method: m[2], arg: m[3], handler: m[4],
+				})
+			}
+		}
+
+		// Wrapped-registration carry: a route/group call whose `(` ends the
+		// line has its arguments on following lines; join them (bounded) and
+		// re-match, or a formatter-wrapped route silently disappears.
+		carry := ""
+		carryStart, carryDepth := 0, 0
+
 		lineNum := 0
 		for scanner.Scan() {
 			lineNum++
 			line := scanner.Text()
 			if isGo {
-				if m := goConstStrRe.FindStringSubmatch(line); m != nil {
-					registerGoConst(constVals, m[1], m[2])
+				if m := goConstExprRe.FindStringSubmatch(line); m != nil {
+					registerGoConstExpr(constExprs, m[1], m[2])
 				}
-				if m := goGroupDefRe.FindStringSubmatch(line); m != nil {
-					if groupDefs[rel] == nil {
-						groupDefs[rel] = map[string]goGroupDef{}
+				if carry != "" {
+					carry += " " + strings.TrimSpace(line)
+					carryDepth += parenDelta(line)
+					if carryDepth <= 0 || lineNum-carryStart >= goWrapMaxLines || len(carry) > goWrapMaxBytes {
+						processGoRouteText(carry, carryStart)
+						for _, m := range ms {
+							for _, r := range m(carry, carryStart) {
+								emit(rel, r)
+							}
+						}
+						carry = ""
 					}
-					groupDefs[rel][m[1]] = goGroupDef{recv: m[2], arg: m[3]}
+				} else if goWrapOpenRe.MatchString(stripGoLineComment(line)) {
+					carry = line
+					carryStart, carryDepth = lineNum, parenDelta(line)
 				}
-				for _, m := range goIdentRouteRe.FindAllStringSubmatch(line, -1) {
-					pending = append(pending, goPendingRoute{
-						file: rel, line: lineNum,
-						groupVar: m[1], method: m[2], arg: m[3], handler: m[4],
-					})
-				}
+				processGoRouteText(line, lineNum)
 			}
 			if isJVM {
 				pendingJVM, classPrefix = resolveRequestMapping(emit, rel, line, pendingJVM, classPrefix)
@@ -224,6 +421,16 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		if serr := scanner.Err(); serr != nil {
 			frag.Warn(fmt.Sprintf("%s: scan: %v", rel, serr))
 		}
+		// A wrapped registration still open at EOF (truncated file): match
+		// what was gathered rather than drop it.
+		if isGo && carry != "" {
+			processGoRouteText(carry, carryStart)
+			for _, m := range ms {
+				for _, r := range m(carry, carryStart) {
+					emit(rel, r)
+				}
+			}
+		}
 		// An annotation still pending at EOF: emit it rather than drop it.
 		if pendingJVM != nil {
 			emitPendingAsRoute(emit, rel, pendingJVM, classPrefix)
@@ -237,6 +444,52 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	}
 
 	// Resolve identifier-arg routes now that every file's constants are known.
+	// Constant expressions resolve recursively (V1 + "/deposit" where V1 is
+	// itself a constant), memoized, with a depth cap against cycles. The
+	// final value must look like a path: non-empty, no whitespace, not a URL.
+	memo := map[string]string{}
+	var resolveConstName func(name string, depth int) string
+	resolveConstName = func(name string, depth int) string {
+		if depth > 8 {
+			return ""
+		}
+		if v, ok := memo[name]; ok {
+			return v
+		}
+		expr, ok := constExprs[name]
+		if !ok {
+			return ""
+		}
+		parts, _ := splitConcat(expr)
+		var b strings.Builder
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			switch {
+			case len(p) >= 2 && p[0] == '"' && p[len(p)-1] == '"':
+				b.WriteString(p[1 : len(p)-1])
+			case len(p) >= 2 && p[0] == '`' && p[len(p)-1] == '`':
+				b.WriteString(p[1 : len(p)-1])
+			case goIdentTokenRe.MatchString(p):
+				nm := p
+				if i := strings.LastIndex(nm, "."); i >= 0 {
+					nm = nm[i+1:]
+				}
+				v := resolveConstName(nm, depth+1)
+				if v == "" {
+					return ""
+				}
+				b.WriteString(v)
+			default:
+				return ""
+			}
+		}
+		val := b.String()
+		if val == "" || strings.ContainsAny(val, " \t") || strings.Contains(val, "://") {
+			val = ""
+		}
+		memo[name] = val
+		return val
+	}
 	resolveArg := func(arg string) string {
 		if strings.HasPrefix(arg, `"`) {
 			return strings.Trim(arg, `"`)
@@ -244,7 +497,7 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		if i := strings.LastIndex(arg, "."); i >= 0 {
 			arg = arg[i+1:]
 		}
-		return constVals[arg]
+		return resolveConstName(arg, 0)
 	}
 	var prefixOf func(file, v string, depth int) string
 	prefixOf = func(file, v string, depth int) string {
@@ -260,7 +513,12 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	for _, pr := range pending {
 		p := resolveArg(pr.arg)
 		if p == "" {
-			continue // identifier didn't resolve to a path-like constant
+			// A route registration whose path we couldn't resolve is a hole
+			// in the graph - missing routes read as false information to
+			// anyone querying it, so the drop must be loud, never silent.
+			frag.Warn(fmt.Sprintf("%s:%d: %s route with path identifier %q dropped: does not resolve to a string constant",
+				pr.file, pr.line, pr.method, pr.arg))
+			continue
 		}
 		emit(pr.file, route{
 			Method:  pr.method,

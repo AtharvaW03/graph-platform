@@ -9,17 +9,14 @@ import (
 // canonical method names. False positives are rare, and every edge is INFERRED.
 
 // --- Go: gin / echo / chi ---
+//
+// The uppercase-verb family (`r.GET("/x", h)`, gin/echo/chi-upper) is handled
+// by the extractor's const/group-aware pending path (goIdentRouteRe in
+// extractor.go), not by a matcher here, so literal and constant paths get
+// identical group-prefix resolution.
 
-var ginEchoChiRe = regexp.MustCompile(`(?P<recv>\b\w+)\.(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD|Any)\s*\(\s*"([^"]+)"(?:\s*,\s*([A-Za-z0-9_.]+))?`)
-
-// matchGin captures gin / echo / chi (upper-case) and any other framework
-// using the `<recv>.METHOD("path", ...)` shape with HTTP-verb-cased method
-// names. This single matcher covers the bulk of Go web frameworks.
-func matchGin(line string, lineNum int) []route { return runRegex(ginEchoChiRe, line, lineNum) }
-
-// matchChi handles chi's lowercase variants (`r.Get`, `r.Post`) which
-// matchGin does NOT cover (it's case-sensitive on the method). Run alongside
-// matchGin so a file using both call styles is fully scanned.
+// matchChi handles chi's lowercase variants (`r.Get`, `r.Post`), which the
+// uppercase pending path does not cover (it's case-sensitive on the method).
 //
 // `.Get("...")` is an extremely common shape in non-router Go code -
 // viper.Get("server.port"), cache.Get("key"), headers.Get("Accept") - so
