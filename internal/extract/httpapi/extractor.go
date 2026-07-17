@@ -127,6 +127,9 @@ var (
 	goConstExprRe = regexp.MustCompile(`^\s*(?:var\s+|const\s+)?([A-Za-z_]\w*)(?:\s+[A-Za-z_][\w.\[\]]*)?\s*=\s*(.+)$`)
 	// One token of a constant expression: identifier (possibly pkg-qualified).
 	goIdentTokenRe = regexp.MustCompile(`^[A-Za-z_][\w.]*$`)
+	// `x := <expr>` short variable declarations whose RHS might be a string
+	// path. Registered file-scoped (see localExprs).
+	goLocalAssignRe = regexp.MustCompile(`^\s*([A-Za-z_]\w*)\s*:=\s*(.+)$`)
 	// `v := recv.Group(arg, ...)`; arg may be an identifier or a literal.
 	goGroupDefRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\s*:?=\s*([A-Za-z_]\w*)\.Group\s*\(\s*([A-Za-z_][\w.]*|"[^"]*")`)
 	// `recv.POST(arg, handler)`: uppercase verbs (gin/echo style), arg either
@@ -301,7 +304,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	}
 
 	// Go constant-resolution state, filled during the walk, resolved after.
-	constExprs := map[string]string{} // name -> raw RHS expression
+	constExprs := map[string]string{}               // package-level: name -> raw RHS expression
+	localExprs := map[string]map[string]string{}    // file-scoped `x := "..."` locals: file -> name -> RHS
 	groupDefs := map[string]map[string]goGroupDef{} // file -> var -> def
 	var pending []goPendingRoute
 
@@ -379,6 +383,15 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 				if m := goConstExprRe.FindStringSubmatch(line); m != nil {
 					registerGoConstExpr(constExprs, m[1], m[2])
 				}
+				// `x := "/health"` locals used in route position. File-scoped:
+				// short local names (path, url) recur across files with
+				// different values, so they must never collide globally.
+				if m := goLocalAssignRe.FindStringSubmatch(line); m != nil {
+					if localExprs[rel] == nil {
+						localExprs[rel] = map[string]string{}
+					}
+					registerGoConstExpr(localExprs[rel], m[1], m[2])
+				}
 				if carry != "" {
 					carry += " " + strings.TrimSpace(line)
 					carryDepth += parenDelta(line)
@@ -444,24 +457,34 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	}
 
 	// Resolve identifier-arg routes now that every file's constants are known.
-	// Constant expressions resolve recursively (V1 + "/deposit" where V1 is
-	// itself a constant), memoized, with a depth cap against cycles. The
-	// final value must look like a path: non-empty, no whitespace, not a URL.
+	// Expressions resolve recursively (V1 + "/deposit" where V1 is itself a
+	// constant), memoized, with a depth cap against cycles. File-scoped
+	// locals win over package-level constants for the file they appear in.
+	// Resolution distinguishes "resolved to a value" (which may legitimately
+	// be "" - constants.EMPTY is the register-on-the-group's-own-path idiom)
+	// from "did not resolve at all"; only the latter is a dropped route.
 	memo := map[string]string{}
-	var resolveConstName func(name string, depth int) string
-	resolveConstName = func(name string, depth int) string {
+	memoOK := map[string]bool{}
+	var resolveConstName func(file, name string, depth int) (string, bool)
+	resolveConstName = func(file, name string, depth int) (string, bool) {
 		if depth > 8 {
-			return ""
+			return "", false
 		}
-		if v, ok := memo[name]; ok {
-			return v
+		key := file + "\x00" + name
+		if ok, seen := memoOK[key]; seen {
+			return memo[key], ok
 		}
-		expr, ok := constExprs[name]
-		if !ok {
-			return ""
+		expr, found := localExprs[file][name]
+		if !found {
+			expr, found = constExprs[name]
+		}
+		if !found {
+			memoOK[key] = false
+			return "", false
 		}
 		parts, _ := splitConcat(expr)
 		var b strings.Builder
+		resolved := true
 		for _, p := range parts {
 			p = strings.TrimSpace(p)
 			switch {
@@ -474,30 +497,39 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 				if i := strings.LastIndex(nm, "."); i >= 0 {
 					nm = nm[i+1:]
 				}
-				v := resolveConstName(nm, depth+1)
-				if v == "" {
-					return ""
+				v, ok := resolveConstName(file, nm, depth+1)
+				if !ok {
+					resolved = false
 				}
 				b.WriteString(v)
 			default:
-				return ""
+				resolved = false
+			}
+			if !resolved {
+				break
 			}
 		}
 		val := b.String()
-		if val == "" || strings.ContainsAny(val, " \t") || strings.Contains(val, "://") {
+		// A value that can't be a route path (whitespace, full URL) counts
+		// as unresolved; empty stays valid (group's-own-path idiom).
+		if resolved && (strings.ContainsAny(val, " \t") || strings.Contains(val, "://")) {
+			resolved = false
+		}
+		if !resolved {
 			val = ""
 		}
-		memo[name] = val
-		return val
+		memo[key], memoOK[key] = val, resolved
+		return val, resolved
 	}
-	resolveArg := func(arg string) string {
+	resolveArg := func(file, arg string) (string, bool) {
 		if strings.HasPrefix(arg, `"`) {
-			return strings.Trim(arg, `"`)
+			return strings.Trim(arg, `"`), true
 		}
-		if i := strings.LastIndex(arg, "."); i >= 0 {
-			arg = arg[i+1:]
+		nm := arg
+		if i := strings.LastIndex(nm, "."); i >= 0 {
+			nm = nm[i+1:]
 		}
-		return resolveConstName(arg, 0)
+		return resolveConstName(file, nm, 0)
 	}
 	var prefixOf func(file, v string, depth int) string
 	prefixOf = func(file, v string, depth int) string {
@@ -508,12 +540,12 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		if !ok {
 			return ""
 		}
-		return joinPrefix(prefixOf(file, def.recv, depth+1), resolveArg(def.arg))
+		arg, _ := resolveArg(file, def.arg)
+		return joinPrefix(prefixOf(file, def.recv, depth+1), arg)
 	}
 	for _, pr := range pending {
-		p := resolveArg(pr.arg)
-		isLiteral := strings.HasPrefix(pr.arg, `"`)
-		if p == "" && !isLiteral {
+		p, ok := resolveArg(pr.file, pr.arg)
+		if !ok {
 			// A route registration whose path we couldn't resolve is a hole
 			// in the graph - missing routes read as false information to
 			// anyone querying it, so the drop must be loud, never silent.
@@ -521,9 +553,9 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 				pr.file, pr.line, pr.method, pr.arg))
 			continue
 		}
-		// `group.POST("", h)` is the gin idiom for "register on the group's
-		// own path": the route IS the prefix. An empty literal is a valid
-		// path spelling, not an unresolved identifier.
+		// An empty path (literal "" or a constant like EMPTY = "") is gin's
+		// idiom for "register on the group's own path": the route IS the
+		// prefix ("/" on a bare router).
 		path := joinPrefix(prefixOf(pr.file, pr.groupVar, 0), p)
 		if p == "" {
 			path = prefixOf(pr.file, pr.groupVar, 0)

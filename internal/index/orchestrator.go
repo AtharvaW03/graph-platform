@@ -35,7 +35,10 @@ import (
 //	v5: `group.POST("", h)` (gin's register-on-the-group's-own-path idiom)
 //	    now emits the group prefix as the route instead of warning and
 //	    dropping. Repos indexed under v4 are missing all such routes.
-const GraphSchemaVersion = 5
+//	v6: empty-string constants (constants.EMPTY) resolve as the same idiom,
+//	    and `x := "/path"` locals used in route position resolve
+//	    (file-scoped). Repos indexed under v5 are missing those routes.
+const GraphSchemaVersion = 6
 
 // Orchestrator drives the per-repo pipeline for a configured set of
 // repositories. Every step is delegated to a pluggable component (Source,
