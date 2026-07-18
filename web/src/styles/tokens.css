@@ -11,10 +11,12 @@
   --color-text-muted: #8b93a1;
   --color-text-inverse: #ffffff;
 
-  --color-brand: #0b5fff;
-  --color-brand-hover: #094ed6;
-  --color-brand-soft: #e8f0ff;
-  --color-brand-text: #0a4ad4;
+  /* graph-teal: the product's accent. Node color on the org map, actions,
+     active nav. Deliberately not the default SaaS blue. */
+  --color-brand: #0f766e;
+  --color-brand-hover: #0c5f59;
+  --color-brand-soft: #e4f2f0;
+  --color-brand-text: #0b5d56;
 
   --color-success: #0d7a4f;
   --color-success-soft: #e6f6ef;
@@ -25,13 +27,8 @@
   --color-info: #0b6e99;
   --color-info-soft: #e6f5fb;
 
-  --color-focus: #0b5fff;
+  --color-focus: #0f766e;
   --color-overlay: rgba(15, 20, 25, 0.45);
-
-  /* Persona accents (not sole meaning - always with labels) */
-  --color-persona-eng: #0b5fff;
-  --color-persona-pm: #6b4eff;
-  --color-persona-sec: #c45c00;
 
   /* Spacing scale (4px base) */
   --space-0: 0;
@@ -104,10 +101,10 @@
   --color-text-muted: #6f788a;
   --color-text-inverse: #0c0e12;
 
-  --color-brand: #5b8fff;
-  --color-brand-hover: #7aa3ff;
-  --color-brand-soft: #1a2744;
-  --color-brand-text: #9bb8ff;
+  --color-brand: #3ecfbe;
+  --color-brand-hover: #63dccd;
+  --color-brand-soft: #11332f;
+  --color-brand-text: #7fe3d6;
 
   --color-success: #3dbe8c;
   --color-success-soft: #143528;
@@ -118,7 +115,7 @@
   --color-info: #5eb8e0;
   --color-info-soft: #142a36;
 
-  --color-focus: #5b8fff;
+  --color-focus: #3ecfbe;
   --color-overlay: rgba(0, 0, 0, 0.6);
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);

@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { useRepoScope } from "../context/RepoScope";
@@ -16,6 +17,7 @@ export function Repos() {
   const { available, loading: reposLoading, error: reposError, refresh } = useRepoScope();
   const [selected, setSelected] = useState("");
   const [filter, setFilter] = useState("");
+  const [params] = useSearchParams();
   const overview = useAsync<RepositoryOverview>();
 
   const filtered = useMemo(() => {
@@ -29,11 +31,22 @@ export function Repos() {
     overview.run(() => api.repositoryOverview(name));
   };
 
+  // Arriving from the Home constellation (or a shared link) with ?repo=name
+  // opens that service directly once the list has loaded.
+  const linked = params.get("repo");
+  useEffect(() => {
+    if (linked && !selected && available.some((r) => r.name === linked)) {
+      onSelect(linked);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [available, linked]);
+
   return (
     <>
       <PageHeader
-        title="Repos"
-        description="Every indexed repository. Select one for its architecture, entry points, modules, and dependency summary."
+        eyebrow="Understand"
+        title="Services"
+        description="Every indexed repository. Open one for a guided overview: what it is, its APIs, and how it connects to the rest of the org."
         actions={
           <Button variant="secondary" size="sm" onClick={() => refresh()} loading={reposLoading}>
             Refresh
@@ -96,8 +109,8 @@ export function Repos() {
           {selected && (
             <>
               <StatusBox loading={overview.loading} error={overview.error} />
-              {overview.data && <FeedbackWidget endpoint="overview" query={selected} />}
               {overview.data && <OverviewBody ov={overview.data} />}
+              {overview.data && <FeedbackWidget endpoint="overview" query={selected} />}
             </>
           )}
         </Card>
@@ -204,10 +217,10 @@ function OverviewBody({ ov }: { ov: RepositoryOverview }) {
       <p className="ov-summary">{ov.architecture.summary}</p>
 
       <div className="grid-stats">
-        <Stat label="Nodes" value={ov.repository.node_count.toLocaleString()} />
-        <Stat label="Relationships" value={ov.repository.relationship_count.toLocaleString()} />
-        <Stat label="HTTP Routes" value={ov.http_apis.route_count} />
-        <Stat label="Kafka Topics" value={ov.kafka.topics.length} />
+        <Stat label="Code elements" value={ov.repository.node_count.toLocaleString()} />
+        <Stat label="Connections" value={ov.repository.relationship_count.toLocaleString()} />
+        <Stat label="HTTP endpoints" value={ov.http_apis.route_count} />
+        <Stat label="Kafka topics" value={ov.kafka.topics.length} />
         <Stat label="Modules" value={ov.modules.length} />
       </div>
 

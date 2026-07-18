@@ -6,7 +6,7 @@ import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges, joinList } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
-import { Button, Card, Input, PageHeader, Select } from "../components/ui";
+import { Button, Card, Input, PageHeader, Segmented } from "../components/ui";
 import type {
   DependencyEdge,
   GlueJobInfo,
@@ -17,12 +17,12 @@ import type {
 
 type Kind = "routes" | "kafka" | "sql" | "glue" | "dependencies";
 
-const KINDS: { id: Kind; label: string }[] = [
-  { id: "routes", label: "HTTP routes" },
-  { id: "kafka", label: "Kafka topics" },
-  { id: "sql", label: "SQL objects" },
-  { id: "glue", label: "Glue jobs" },
-  { id: "dependencies", label: "Dependencies" },
+const KINDS: { value: Kind; label: string }[] = [
+  { value: "routes", label: "HTTP endpoints" },
+  { value: "kafka", label: "Kafka topics" },
+  { value: "sql", label: "SQL objects" },
+  { value: "glue", label: "Glue jobs" },
+  { value: "dependencies", label: "Dependencies" },
 ];
 
 export function Explore() {
@@ -31,19 +31,14 @@ export function Explore() {
   return (
     <>
       <PageHeader
-        title="Explore"
-        description="Browse the platform's domain inventories: HTTP routes, Kafka topics, SQL objects, Glue jobs, and repo dependencies."
+        eyebrow="Find"
+        title="Catalog"
+        description="Browse everything the org runs on: HTTP endpoints, Kafka topics, SQL objects, Glue jobs, and dependencies."
       />
 
       <Card>
         <div className="form-row">
-          <Select label="Kind" value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
-            {KINDS.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.label}
-              </option>
-            ))}
-          </Select>
+          <Segmented label="What to browse" value={kind} onChange={setKind} options={KINDS} />
         </div>
         {kind === "routes" && <RoutesForm />}
         {kind === "kafka" && <KafkaForm />}
