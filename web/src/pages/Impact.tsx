@@ -6,16 +6,18 @@ import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
-import { Button, Card, Input, PageHeader, Select } from "../components/ui";
+import { Button, Card, Input, PageHeader, Segmented } from "../components/ui";
 import type { CallEdge, ImpactNode, PathNode } from "../types";
 
 type Mode = "callers" | "callees" | "blast-radius" | "path";
 
-const MODES: { id: Mode; label: string }[] = [
-  { id: "blast-radius", label: "Blast radius" },
-  { id: "callers", label: "Callers" },
-  { id: "callees", label: "Callees" },
-  { id: "path", label: "Shortest path" },
+// Modes are the questions people actually arrive with; the technical term
+// rides along as the hint so engineers can confirm what runs underneath.
+const MODES: { value: Mode; label: string; hint?: string }[] = [
+  { value: "blast-radius", label: "What breaks?", hint: "Blast radius - everything reachable from this symbol" },
+  { value: "callers", label: "Who calls it?", hint: "Direct callers" },
+  { value: "callees", label: "What does it call?", hint: "Direct callees" },
+  { value: "path", label: "How are two connected?", hint: "Shortest path between two symbols" },
 ];
 
 export function Impact() {
@@ -53,20 +55,19 @@ export function Impact() {
   return (
     <>
       <PageHeader
-        title="Impact"
-        description="Trace how a symbol connects to the rest of the graph - what calls it, what it calls, its blast radius, or the shortest path to another symbol."
+        eyebrow="Understand"
+        title="Change impact"
+        description="Before you change something, see what depends on it."
       />
 
       <Card>
         <form onSubmit={onSubmit}>
-          <div className="form-row form-row--2">
-            <Select label="Mode" value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
-              {MODES.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-            </Select>
+          <div className="form-row">
+            <Segmented label="Question" value={mode} onChange={setMode} options={MODES} />
+          </div>
+          <div className="form-row">
             <Input
-              label={mode === "path" ? "Source symbol" : "Symbol"}
+              label={mode === "path" ? "From (function or file)" : "Function or file"}
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
               placeholder="e.g. ProcessOrder()"
@@ -76,7 +77,7 @@ export function Impact() {
           {mode === "path" && (
             <div className="form-row">
               <Input
-                label="Target symbol"
+                label="To (function or file)"
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
                 placeholder="e.g. SendReceipt()"
@@ -86,12 +87,13 @@ export function Impact() {
           {mode === "blast-radius" && (
             <div className="form-row">
               <Input
-                label="Traversal depth"
+                label="How far to follow (hops)"
                 type="number"
                 min={1}
                 max={10}
                 value={depth}
                 onChange={(e) => setDepth(Number(e.target.value))}
+                hint="3 covers most ripple effects; higher casts a wider net."
               />
             </div>
           )}
@@ -154,7 +156,7 @@ export function Impact() {
             rows={blast.data}
             keyFn={(r, i) => `${r.repo}:${r.path}:${i}`}
             columns={[
-              { header: "Distance", render: (r) => r.distance },
+              { header: "Hops away", render: (r) => r.distance },
               { header: "Name", render: (r) => r.name },
               { header: "Labels", render: (r) => <LabelBadges labels={r.labels} /> },
               { header: "Repo", render: (r) => r.repo },

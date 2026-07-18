@@ -3,15 +3,36 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import "./shell.css";
 
-const NAV = [
-  { to: "/", label: "Home", end: true },
-  { to: "/search", label: "Search" },
-  { to: "/explore", label: "Explore" },
-  { to: "/impact", label: "Impact" },
-  { to: "/hotspots", label: "Hotspots" },
-  { to: "/security", label: "Security" },
-  { to: "/repos", label: "Repos" },
-] as const;
+// Navigation is grouped by what the user is trying to do, not by feature
+// name - the groups are the same wayfinding words each page repeats in its
+// header eyebrow.
+const NAV_GROUPS: {
+  group: string | null;
+  items: { to: string; label: string; end?: boolean }[];
+}[] = [
+  { group: null, items: [{ to: "/", label: "Home", end: true }] },
+  {
+    group: "Find",
+    items: [
+      { to: "/search", label: "Search" },
+      { to: "/explore", label: "Catalog" },
+    ],
+  },
+  {
+    group: "Understand",
+    items: [
+      { to: "/repos", label: "Services" },
+      { to: "/impact", label: "Change impact" },
+    ],
+  },
+  {
+    group: "Review",
+    items: [
+      { to: "/security", label: "API surface" },
+      { to: "/hotspots", label: "Risk hotspots" },
+    ],
+  },
+];
 
 export function AppShell() {
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -68,21 +89,26 @@ export function AppShell() {
           <div className="shell__logo" aria-hidden>
             ◈
           </div>
-          <div className="shell__brand-name">graph-platform</div>
+          <div className="shell__brand-name">A1 Knowledge Graph</div>
         </div>
 
         <nav className="shell__nav" aria-label="Main">
-          {NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={"end" in item ? item.end : false}
-              className={({ isActive }) =>
-                `shell__nav-link ${isActive ? "is-active" : ""}`
-              }
-            >
-              {item.label}
-            </NavLink>
+          {NAV_GROUPS.map((g) => (
+            <div className="shell__nav-group" key={g.group ?? "top"}>
+              {g.group && <p className="shell__nav-label">{g.group}</p>}
+              {g.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end ?? false}
+                  className={({ isActive }) =>
+                    `shell__nav-link ${isActive ? "is-active" : ""}`
+                  }
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 

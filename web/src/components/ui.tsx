@@ -104,10 +104,14 @@ export function Card({
 }
 
 export function PageHeader({
+  eyebrow,
   title,
   description,
   actions,
 }: {
+  // eyebrow names the page's nav group (Find / Understand / Review) so the
+  // header itself tells you where you are in the product's structure.
+  eyebrow?: string;
   title: string;
   description?: string;
   actions?: ReactNode;
@@ -115,11 +119,45 @@ export function PageHeader({
   return (
     <header className="page-header">
       <div className="page-header__text">
+        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
         <h1>{title}</h1>
         {description && <p className="page-header__desc">{description}</p>}
       </div>
       {actions && <div className="page-header__actions">{actions}</div>}
     </header>
+  );
+}
+
+// Segmented shows every mode as a visible, clickable option - a question the
+// user answers by looking, instead of a dropdown they must open to discover.
+// Options carry plain-language labels; an optional hint holds the technical
+// term so experts can confirm what's underneath.
+export function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: T; label: string; hint?: string }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="segmented" role="group" aria-label={label}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          className={`segmented__opt ${o.value === value ? "is-active" : ""}`}
+          aria-pressed={o.value === value}
+          title={o.hint}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

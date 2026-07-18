@@ -7,7 +7,7 @@ import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
-import { Button, Card, Input, PageHeader, Select } from "../components/ui";
+import { Button, Card, Input, PageHeader, Segmented } from "../components/ui";
 import type { SearchResult, SymbolResult } from "../types";
 
 type Mode = "fuzzy" | "symbol";
@@ -58,19 +58,27 @@ export function Search() {
   return (
     <>
       <PageHeader
+        eyebrow="Find"
         title="Search"
-        description="Fuzzy substring search, or an exact symbol name lookup across every occurrence."
+        description="Find any function, file, endpoint, or topic by name - across every indexed repository."
       />
 
       <Card>
         <form onSubmit={onSubmit}>
-          <div className="form-row form-row--2">
-            <Select label="Mode" value={mode} onChange={(e) => switchMode(e.target.value as Mode)}>
-              <option value="fuzzy">Fuzzy search</option>
-              <option value="symbol">Exact symbol</option>
-            </Select>
+          <div className="form-row">
+            <Segmented
+              label="Match"
+              value={mode}
+              onChange={switchMode}
+              options={[
+                { value: "fuzzy", label: "Name contains", hint: "Fuzzy substring search" },
+                { value: "symbol", label: "Exact name", hint: "Every occurrence of one exact symbol" },
+              ]}
+            />
+          </div>
+          <div className="form-row">
             <Input
-              label="Query"
+              label={mode === "fuzzy" ? "Name contains" : "Exact name"}
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder={mode === "fuzzy" ? "e.g. OrderService" : "e.g. ProcessOrder()"}

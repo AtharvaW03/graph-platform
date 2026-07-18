@@ -27,8 +27,9 @@ export function Hotspots() {
   return (
     <>
       <PageHeader
-        title="Hotspots"
-        description="Code ranked by incoming dependency fan-in: what the most other code depends on. High fan-in nodes are high-risk change sites; a dependent-repos count above 1 means the risk crosses repository boundaries."
+        eyebrow="Review"
+        title="Risk hotspots"
+        description="The code most of the org depends on. A change or an outage here reaches furthest - review these first."
       />
 
       <Card>
@@ -62,8 +63,8 @@ export function Hotspots() {
               { header: "Name", render: (r) => r.name },
               { header: "Labels", render: (r) => <LabelBadges labels={r.labels} /> },
               { header: "Repo", render: (r) => r.repo },
-              { header: "Fan-in", render: (r) => r.fan_in.toLocaleString() },
-              { header: "Dependent Repos", render: (r) => r.dependent_repos },
+              { header: "Used by", render: (r) => r.fan_in.toLocaleString() },
+              { header: "Repos affected", render: (r) => r.dependent_repos },
               { header: "Path", render: (r) => r.path },
               { header: "Line", render: (r) => r.line },
             ]}

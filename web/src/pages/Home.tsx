@@ -1,7 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useRepoScope } from "../context/RepoScope";
-import { Badge, Button, Card, Input, PageHeader, Stat } from "../components/ui";
+import { Button, Card } from "../components/ui";
+import { Constellation } from "../components/Constellation";
+
+// Example searches for the ask box - concrete things people actually look
+// up, so the empty input teaches by example instead of by instruction.
+const EXAMPLES = ["payment", "order", "notification", "/v1/deposit"];
 
 export function Home() {
   const [q, setQ] = useState("");
@@ -18,82 +23,115 @@ export function Home() {
 
   return (
     <>
-      <PageHeader
-        title="graph-platform"
-        description="A knowledge graph over the org's codebases - symbols, call edges, HTTP routes, Kafka topics, SQL objects, and cross-repo dependencies."
-      />
+      <section className="hero">
+        <p className="eyebrow">A1 Knowledge Graph</p>
+        <h1 className="hero__title">Ask the codebase.</h1>
+        <p className="hero__sub">
+          Every service, API, function, and connection across the org - mapped,
+          searchable, and always current.
+        </p>
 
-      <div className="grid-stats">
-        <Stat label="Nodes" value={totalNodes.toLocaleString()} />
-        <Stat label="Repositories" value={available.length} />
-      </div>
-
-      <Card>
-        <form onSubmit={onSubmit} className="quick-search">
-          <Input
-            label="Quick search"
+        <form onSubmit={onSubmit} className="hero__ask">
+          <input
+            className="field__input hero__input"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="e.g. ProcessPayment"
+            placeholder="Search a function, endpoint, topic, or service…"
+            aria-label="Search the codebase"
             autoFocus
           />
-          <Button type="submit">Search</Button>
+          <Button type="submit" size="lg">
+            Search
+          </Button>
         </form>
-      </Card>
+        <div className="hero__examples">
+          <span className="small">Try:</span>
+          {EXAMPLES.map((ex) => (
+            <button
+              key={ex}
+              type="button"
+              className="chip chip--action"
+              onClick={() => navigate(`/search?q=${encodeURIComponent(ex)}`)}
+            >
+              {ex}
+            </button>
+          ))}
+        </div>
+      </section>
 
-      <div className="home-grid" style={{ marginTop: "var(--space-6)" }}>
-        <PersonaCard
-          to="/search"
-          badge="Engineer"
-          tone="brand"
-          title="Search"
-          description="Find any symbol, file, or route by name across every indexed repo."
-        />
-        <PersonaCard
-          to="/impact"
-          badge="Engineer"
-          tone="brand"
-          title="Impact"
-          description="See what calls a function, what it calls, and what breaks if it changes."
-        />
-        <PersonaCard
-          to="/security"
-          badge="Security"
-          tone="warning"
-          title="Security"
-          description="Review the HTTP surface: which routes are documented and which aren't."
-        />
-        <PersonaCard
-          to="/explore"
-          badge="Anyone"
-          tone="info"
-          title="Explore"
-          description="Browse HTTP routes, Kafka topics, SQL objects, Glue jobs, and dependencies."
-        />
-      </div>
+      {available.length > 0 && (
+        <Card as="section" className="org-map">
+          <div className="org-map__head">
+            <h3>The org, mapped</h3>
+            <p className="small">
+              {available.length} services · {totalNodes.toLocaleString()} code
+              elements. Each dot is a service - select one for its overview.
+            </p>
+          </div>
+          <Constellation repos={available} />
+        </Card>
+      )}
+
+      <section className="q-section">
+        <h2 className="q-section__title">What do you want to know?</h2>
+        <div className="q-grid">
+          <QuestionCard
+            to="/search"
+            group="Find"
+            title="Where is this defined?"
+            description="Look up any function, file, endpoint, or topic by name."
+          />
+          <QuestionCard
+            to="/repos"
+            group="Understand"
+            title="What does this service do?"
+            description="A guided overview per service: its APIs, structure, and connections."
+          />
+          <QuestionCard
+            to="/impact"
+            group="Understand"
+            title="What breaks if we change it?"
+            description="See everything that depends on a piece of code before touching it."
+          />
+          <QuestionCard
+            to="/security"
+            group="Review"
+            title="Which endpoints are undocumented?"
+            description="The org's whole HTTP surface, checked against committed API specs."
+          />
+          <QuestionCard
+            to="/explore"
+            group="Find"
+            title="Who talks to this topic or table?"
+            description="Browse Kafka topics, SQL objects, Glue jobs, and dependencies."
+          />
+          <QuestionCard
+            to="/hotspots"
+            group="Review"
+            title="What does everyone depend on?"
+            description="The riskiest code to change, ranked by how much depends on it."
+          />
+        </div>
+      </section>
     </>
   );
 }
 
-function PersonaCard({
+function QuestionCard({
   to,
-  badge,
-  tone,
+  group,
   title,
   description,
 }: {
   to: string;
-  badge: string;
-  tone: "brand" | "warning" | "info";
+  group: string;
   title: string;
   description: string;
 }) {
   return (
-    <Link to={to} className="persona-card">
+    <Link to={to} className="q-card">
       <Card>
-        <div className="persona-card__tag">
-          <Badge tone={tone}>{badge}</Badge>
-        </div>
+        <p className="eyebrow">{group}</p>
         <h3>{title}</h3>
         <p>{description}</p>
       </Card>

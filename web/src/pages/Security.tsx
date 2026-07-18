@@ -6,7 +6,7 @@ import { StatusBox } from "../components/StatusBox";
 import { DataTable, joinList } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
-import { Badge, Button, Card, PageHeader, Stat } from "../components/ui";
+import { Badge, Button, Card, PageHeader, Segmented, Stat } from "../components/ui";
 import type { HTTPRoute } from "../types";
 
 // Backed by the same /routes data Explore's "HTTP routes" kind uses, filtered
@@ -31,12 +31,14 @@ export function Security() {
   const shown = undocumentedOnly ? routes.filter((r) => !r.documented) : routes;
   const documentedCount = routes.filter((r) => r.documented).length;
   const businessCount = routes.filter((r) => r.classification === "business").length;
+  const coverage = routes.length > 0 ? Math.round((documentedCount / routes.length) * 100) : 0;
 
   return (
     <>
       <PageHeader
-        title="Security"
-        description="API surface review: which HTTP routes are documented in a committed spec, and how they're classified."
+        eyebrow="Review"
+        title="API surface"
+        description="Every HTTP endpoint the org exposes, and whether it's documented in a committed API spec."
       />
 
       <Card>
@@ -45,14 +47,15 @@ export function Security() {
             <RepoPicker label="Scope" value={selected} onChange={setSelected} hint="Empty = every indexed repo." />
           </div>
           <div className="form-row">
-            <label className="field__label" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
-              <input
-                type="checkbox"
-                checked={undocumentedOnly}
-                onChange={(e) => setUndocumentedOnly(e.target.checked)}
-              />
-              Show undocumented routes only
-            </label>
+            <Segmented
+              label="Show"
+              value={undocumentedOnly ? "undocumented" : "all"}
+              onChange={(v) => setUndocumentedOnly(v === "undocumented")}
+              options={[
+                { value: "all", label: "All endpoints" },
+                { value: "undocumented", label: "Undocumented only" },
+              ]}
+            />
           </div>
           <div className="form-actions">
             <Button type="submit" loading={loading}>
@@ -74,14 +77,14 @@ export function Security() {
         {data && data.length > 0 && (
           <>
             <div className="grid-stats">
-              <Stat label="Total routes" value={routes.length} />
-              <Stat label="Documented" value={documentedCount} />
+              <Stat label="Endpoints" value={routes.length} />
+              <Stat label="Documented" value={`${coverage}%`} />
               <Stat label="Undocumented" value={routes.length - documentedCount} />
-              <Stat label="Business-classified" value={businessCount} />
+              <Stat label="Business-facing" value={businessCount} />
             </div>
 
             {shown.length === 0 ? (
-              <p className="dim">No undocumented routes in this scope.</p>
+              <p className="dim">Every endpoint in this scope is documented.</p>
             ) : (
               <DataTable
                 rows={shown}
