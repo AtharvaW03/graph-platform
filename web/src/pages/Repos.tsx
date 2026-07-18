@@ -41,7 +41,7 @@ export function Repos() {
         }
       />
 
-      <div className="home-grid">
+      <div className="repos-grid">
         <Card as="section">
           <h3 style={{ marginBottom: "var(--space-3)" }}>Indexed repositories</h3>
           {available.length > 0 && (
@@ -56,8 +56,8 @@ export function Repos() {
               />
               <span className="small" aria-live="polite">
                 {filtered.length === available.length
-                  ? `${available.length} repositories`
-                  : `${filtered.length} of ${available.length}`}
+                  ? `${available.length}`
+                  : `${filtered.length} / ${available.length}`}
               </span>
             </div>
           )}
@@ -80,7 +80,7 @@ export function Repos() {
                     onClick={() => onSelect(r.name)}
                   >
                     <span className="mono">{r.name}</span>
-                    <span className="dim">{r.nodes.toLocaleString()} nodes</span>
+                    <span className="dim">{r.nodes.toLocaleString()}</span>
                   </button>
                 </li>
               ))}
@@ -88,10 +88,8 @@ export function Repos() {
           )}
         </Card>
 
-        <Card as="section">
-          <h3 style={{ marginBottom: "var(--space-3)" }}>
-            {selected || "Overview"}
-          </h3>
+        <Card as="section" className="repos-detail">
+          <h3 style={{ marginBottom: "var(--space-3)" }}>{selected || "Overview"}</h3>
           {!selected && (
             <p className="dim">Select a repository from the list to see its overview.</p>
           )}
@@ -110,8 +108,8 @@ export function Repos() {
 
 // Section renders one collapsible block of the overview: a title with a
 // count, verbose detail hidden behind a native <details> so the page reads
-// as a scannable outline instead of a wall of lists. Sections a newcomer
-// acts on first (entry points, APIs) start open; inventories start closed.
+// as a scannable outline. Sections a newcomer acts on first (entry points,
+// APIs, reading order) start open; inventories start closed.
 function Section({
   title,
   count,
@@ -134,31 +132,71 @@ function Section({
   );
 }
 
-// capped joins the first n items and summarizes the rest, so a repo with
-// 200 SQL tables doesn't paint 200 names onto the page.
-function capped(items: string[], n: number): ReactNode {
+// Chips renders an identifier list as scannable mono tokens, capped so a
+// repo with 200 SQL tables shows a sample plus "+192 more", not a wall.
+function Chips({ items, cap = 8 }: { items: string[]; cap?: number }) {
   if (items.length === 0) return <span className="dim">-</span>;
-  const shown = items.slice(0, n);
+  const shown = items.slice(0, cap);
   const rest = items.length - shown.length;
   return (
-    <>
-      {shown.join(", ")}
-      {rest > 0 && <span className="dim"> +{rest} more</span>}
-    </>
+    <div className="chip-group">
+      {shown.map((it) => (
+        <span className="chip" key={it}>
+          {it}
+        </span>
+      ))}
+      {rest > 0 && <span className="chip chip--more">+{rest} more</span>}
+    </div>
+  );
+}
+
+function Group({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="ov-group">
+      <p className="ov-group__label">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+// Tbl is a minimal static table on the shared .table styles - the overview's
+// per-section data is small and pre-sorted by the API, so the interactive
+// DataTable (sorting, paging) would be dead weight here.
+function Tbl({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
+  return (
+    <div className="table-wrap">
+      <table className="table">
+        <thead>
+          <tr>
+            {head.map((h) => (
+              <th key={h}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((cells, i) => (
+            <tr key={i}>
+              {cells.map((c, j) => (
+                <td key={j}>{c}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
 function OverviewBody({ ov }: { ov: RepositoryOverview }) {
   const sql = ov.sql;
-  const sqlCounts = [
-    ["Schemas", sql.schemas.length],
-    ["Tables", sql.tables.length],
-    ["Views", sql.views.length],
-    ["Procedures", sql.procedures.length],
-    ["Functions", sql.functions.length],
-    ["Triggers", sql.triggers.length],
-  ].filter(([, n]) => (n as number) > 0) as [string, number][];
-  const sqlTotal = sqlCounts.reduce((acc, [, n]) => acc + n, 0);
+  const sqlGroups = [
+    ["Tables", sql.tables],
+    ["Views", sql.views],
+    ["Procedures", sql.procedures],
+    ["Functions", sql.functions],
+    ["Triggers", sql.triggers],
+  ].filter(([, items]) => (items as string[]).length > 0) as [string, string[]][];
+  const sqlTotal = sqlGroups.reduce((acc, [, items]) => acc + items.length, 0);
   const kafkaTotal = ov.kafka.topics.length + ov.kafka.producers.length + ov.kafka.consumers.length;
 
   return (
@@ -185,113 +223,92 @@ function OverviewBody({ ov }: { ov: RepositoryOverview }) {
 
       {ov.entry_points.length > 0 && (
         <Section title="Entry points" count={ov.entry_points.length} defaultOpen>
-          {ov.entry_points.map((ep, i) => (
-            <div className="ov-row" key={i}>
-              <span>
-                <strong>{ep.name}</strong> <Badge>{ep.kind}</Badge>
-              </span>
-              <span className="mono small">
+          <Tbl
+            head={["Name", "Kind", "Location"]}
+            rows={ov.entry_points.map((ep) => [
+              <strong key="n">{ep.name}</strong>,
+              <Badge key="k">{ep.kind}</Badge>,
+              <span key="l" className="mono small">
                 {ep.path}:{ep.line}
-              </span>
-            </div>
-          ))}
+              </span>,
+            ])}
+          />
         </Section>
       )}
 
       {ov.http_apis.groups.length > 0 && (
         <Section title="HTTP APIs" count={ov.http_apis.route_count} defaultOpen>
           {ov.http_apis.methods.length > 0 && (
-            <div className="badge-row">
-              {ov.http_apis.methods.map((m) => (
-                <Badge key={m.name} tone="info">
-                  {m.name} × {m.count}
-                </Badge>
-              ))}
-            </div>
+            <Group label="Methods">
+              <div className="badge-row">
+                {ov.http_apis.methods.map((m) => (
+                  <Badge key={m.name} tone="info">
+                    {m.name} × {m.count}
+                  </Badge>
+                ))}
+              </div>
+            </Group>
           )}
-          {ov.http_apis.groups.map((g) => (
-            <div className="ov-row" key={g.prefix}>
-              <code>{g.prefix}</code>
-              <span className="small">
-                {g.count} routes · {g.methods.join(" ")}
-              </span>
-            </div>
-          ))}
+          <Tbl
+            head={["Path prefix", "Routes", "Methods"]}
+            rows={ov.http_apis.groups.map((g) => [
+              <code key="p">{g.prefix}</code>,
+              g.count,
+              <span key="m" className="small">{g.methods.join(" · ")}</span>,
+            ])}
+          />
         </Section>
       )}
 
       {ov.architecture.communities.length > 0 && (
         <Section title="Architecture communities" count={ov.architecture.communities.length}>
-          {ov.architecture.communities.map((c) => (
-            <div className="ov-row ov-row--stacked" key={c.id}>
-              <span>
-                <strong>{c.label}</strong>
-                <span className="dim">
-                  {" "}
-                  · {c.size} nodes{c.dominant_dir ? ` · ${c.dominant_dir}` : ""}
-                </span>
-              </span>
-              <span className="small">{capped(c.sample_members, 3)}</span>
-            </div>
-          ))}
+          <Tbl
+            head={["Community", "Size", "Mainly in", "Examples"]}
+            rows={ov.architecture.communities.map((c) => [
+              <strong key="n">{c.label}</strong>,
+              c.size,
+              c.dominant_dir ? <span key="d" className="mono small">{c.dominant_dir}</span> : "-",
+              <Chips key="s" items={c.sample_members} cap={3} />,
+            ])}
+          />
         </Section>
       )}
 
       {ov.modules.length > 0 && (
         <Section title="Modules" count={ov.modules.length}>
-          {ov.modules.map((m) => (
-            <div className="ov-row" key={m.package}>
-              <code>{m.package}</code>
-              <span className="small">
-                {m.node_count} nodes · {m.functions} functions
-              </span>
-            </div>
-          ))}
+          <Tbl
+            head={["Package", "Nodes", "Functions"]}
+            rows={ov.modules.map((m) => [<code key="p">{m.package}</code>, m.node_count, m.functions])}
+          />
         </Section>
       )}
 
       {kafkaTotal > 0 && (
         <Section title="Kafka" count={ov.kafka.topics.length}>
-          <div className="ov-kv">
-            <span className="ov-kv__key">Topics</span>
-            <span>{capped(ov.kafka.topics, 8)}</span>
-            <span className="ov-kv__key">Producers</span>
-            <span>{capped(ov.kafka.producers, 6)}</span>
-            <span className="ov-kv__key">Consumers</span>
-            <span>{capped(ov.kafka.consumers, 6)}</span>
-          </div>
+          <Group label="Topics">
+            <Chips items={ov.kafka.topics} />
+          </Group>
+          <Group label="Producers">
+            <Chips items={ov.kafka.producers} cap={6} />
+          </Group>
+          <Group label="Consumers">
+            <Chips items={ov.kafka.consumers} cap={6} />
+          </Group>
         </Section>
       )}
 
       {sqlTotal > 0 && (
         <Section title="SQL objects" count={sqlTotal}>
-          <div className="badge-row">
-            {sqlCounts.map(([name, n]) => (
-              <Badge key={name}>
-                {name} × {n}
-              </Badge>
-            ))}
-          </div>
-          <div className="ov-kv">
-            {sql.tables.length > 0 && (
-              <>
-                <span className="ov-kv__key">Tables</span>
-                <span>{capped(sql.tables, 8)}</span>
-              </>
-            )}
-            {sql.procedures.length > 0 && (
-              <>
-                <span className="ov-kv__key">Procedures</span>
-                <span>{capped(sql.procedures, 8)}</span>
-              </>
-            )}
-            {sql.views.length > 0 && (
-              <>
-                <span className="ov-kv__key">Views</span>
-                <span>{capped(sql.views, 8)}</span>
-              </>
-            )}
-          </div>
+          {sql.schemas.length > 0 && (
+            <Group label="Schemas">
+              <Chips items={sql.schemas} cap={6} />
+            </Group>
+          )}
+          {sqlGroups.map(([label, items]) => (
+            <Group key={label} label={`${label} (${items.length})`}>
+              <Chips items={items} />
+            </Group>
+          ))}
         </Section>
       )}
 
@@ -301,8 +318,7 @@ function OverviewBody({ ov }: { ov: RepositoryOverview }) {
           count={ov.dependencies.internal_repos.length + ov.dependencies.top_ecosystems.length}
         >
           {ov.dependencies.internal_repos.length > 0 && (
-            <>
-              <p className="ov-kv__key">Internal (cross-repo)</p>
+            <Group label="Depends on (in this graph)">
               <div className="badge-row">
                 {ov.dependencies.internal_repos.map((r) => (
                   <Badge key={r} tone="brand">
@@ -310,11 +326,10 @@ function OverviewBody({ ov }: { ov: RepositoryOverview }) {
                   </Badge>
                 ))}
               </div>
-            </>
+            </Group>
           )}
           {ov.dependencies.top_ecosystems.length > 0 && (
-            <>
-              <p className="ov-kv__key">Top ecosystems</p>
+            <Group label="External ecosystems">
               <div className="badge-row">
                 {ov.dependencies.top_ecosystems.map((e) => (
                   <Badge key={e.name}>
@@ -322,35 +337,39 @@ function OverviewBody({ ov }: { ov: RepositoryOverview }) {
                   </Badge>
                 ))}
               </div>
-            </>
+            </Group>
           )}
         </Section>
       )}
 
       {ov.important_components.length > 0 && (
         <Section title="Hub components" count={ov.important_components.length}>
-          <p className="small" style={{ marginBottom: "var(--space-2)" }}>
-            Highest-degree nodes - the code most other code touches.
+          <p className="small" style={{ marginBottom: "var(--space-3)" }}>
+            The code most other code touches - changes here have the widest blast radius.
           </p>
-          {ov.important_components.map((c, i) => (
-            <div className="ov-row" key={i}>
-              <strong>{c.name}</strong>
-              <span className="small">
-                degree {c.degree} · <span className="mono">{c.path}</span>
-              </span>
-            </div>
-          ))}
+          <Tbl
+            head={["Component", "Connections", "File"]}
+            rows={ov.important_components.map((c) => [
+              <strong key="n">{c.name}</strong>,
+              c.degree,
+              <span key="f" className="mono small">{c.path}</span>,
+            ])}
+          />
         </Section>
       )}
 
       {ov.suggested_reading_order.length > 0 && (
-        <Section title="Suggested reading order" count={ov.suggested_reading_order.length} defaultOpen>
+        <Section
+          title="Suggested reading order"
+          count={ov.suggested_reading_order.length}
+          defaultOpen
+        >
           <ol className="ov-reading">
             {ov.suggested_reading_order.map((step, i) => (
               <li key={i}>
                 <strong>{step.category}</strong>
-                <span className="dim"> - {step.why}</span>
-                <div className="small">{capped(step.items, 5)}</div>
+                <div className="small">{step.why}</div>
+                <Chips items={step.items} cap={5} />
               </li>
             ))}
           </ol>
