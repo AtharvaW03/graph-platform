@@ -38,3 +38,14 @@
 .constellation__node:hover .constellation__label {
   fill: var(--color-text);
 }
+
+/* Above the label-density threshold, names appear only for the node under
+   the pointer or keyboard focus. */
+.constellation__label--hover {
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.constellation__node:hover .constellation__label--hover,
+.constellation__node:focus-visible .constellation__label--hover {
+  opacity: 1;
+}

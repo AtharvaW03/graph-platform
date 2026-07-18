@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useRepoScope } from "../context/RepoScope";
 import { Button, Card } from "../components/ui";
-import { Constellation } from "../components/Constellation";
+import { Constellation, constellationOverflow } from "../components/Constellation";
 
 // Example searches for the ask box - concrete things people actually look
 // up, so the empty input teaches by example instead of by instruction.
@@ -66,6 +66,8 @@ export function Home() {
             <p className="small">
               {available.length} services · {totalNodes.toLocaleString()} code
               elements. Each dot is a service - select one for its overview.
+              {constellationOverflow(available.length) > 0 &&
+                ` Showing the ${available.length - constellationOverflow(available.length)} largest; find the rest under Services.`}
             </p>
           </div>
           <Constellation repos={available} />
