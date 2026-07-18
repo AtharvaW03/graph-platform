@@ -406,42 +406,79 @@ code {
   padding: 0 var(--space-1) var(--space-4);
 }
 
-/* One item inside a section: name left, metadata right. */
-.ov-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+/* Repos page layout: fixed-width repo sidebar, fluid detail pane. Cards
+   size independently (align-items: start) so toggling a section or picking
+   a repo with more content never resizes the other card, and minmax(0,1fr)
+   stops long unbroken mono strings from forcing the columns to renegotiate
+   width - the "page keeps switching sizes" bug. */
+.repos-grid {
+  display: grid;
   gap: var(--space-4);
-  padding: var(--space-2) 0;
-  border-bottom: 1px dashed var(--color-border);
-  font-size: var(--text-sm);
+  align-items: start;
 }
-.ov-row:last-child {
-  border-bottom: none;
+@media (min-width: 880px) {
+  .repos-grid {
+    grid-template-columns: 21rem minmax(0, 1fr);
+  }
 }
-.ov-row--stacked {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-1);
+.repos-detail {
+  min-height: 20rem;
+}
+.repos-detail .table-wrap {
+  max-height: none;
+  margin-bottom: var(--space-2);
+}
+.ov .mono,
+.ov code {
+  overflow-wrap: anywhere;
 }
 
-/* Label/value pairs (kafka, sql inventories). */
-.ov-kv {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--space-2) var(--space-4);
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
+/* Labeled group inside a section: small uppercase key above its content. */
+.ov-group {
+  margin-bottom: var(--space-3);
 }
-.ov-kv__key {
+.ov-group:last-child {
+  margin-bottom: 0;
+}
+.ov-group__label {
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin: 0 0 var(--space-1);
+  margin: 0 0 var(--space-2);
 }
 
-.ov-reading li {
-  margin-bottom: var(--space-3);
+/* Mono chips for identifier lists (topics, tables, sample members) -
+   scannable tokens instead of comma-run prose. */
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--color-bg-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.15rem 0.45rem;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+.chip--more {
+  font-family: var(--font-sans);
+  border-style: dashed;
+  color: var(--color-text-muted);
+}
+
+/* Reading order: numbered plan, one step per block. */
+.ov-reading {
+  padding-left: 1.25rem;
+}
+.ov-reading > li {
+  margin-bottom: var(--space-4);
+}
+.ov-reading .chip-group {
+  margin-top: var(--space-2);
 }
