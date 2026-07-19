@@ -258,7 +258,7 @@
 
 /* Question cards on Home. */
 .q-section {
-  margin-top: var(--space-10);
+  margin-top: var(--space-6);
 }
 .q-section__title {
   font-size: var(--text-lg);
@@ -563,49 +563,4 @@ code {
 }
 .shell__fresh.is-stale {
   color: var(--color-warning);
-}
-
-/* Recently-updated list (Home): service name left, index age right. */
-.recent-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 2px;
-}
-@media (min-width: 760px) {
-  .recent-list {
-    grid-template-columns: 1fr 1fr;
-    column-gap: var(--space-8);
-  }
-}
-.recent-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-2);
-  border-radius: var(--radius-md);
-  text-decoration: none;
-  color: inherit;
-  font-size: var(--text-sm);
-}
-.recent-row:hover {
-  background: var(--color-bg-subtle);
-  text-decoration: none;
-}
-.recent-row__name {
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.recent-row:hover .recent-row__name {
-  color: var(--color-brand-text);
-}
-.recent-row__age {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  white-space: nowrap;
 }
