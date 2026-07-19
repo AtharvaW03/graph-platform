@@ -100,10 +100,9 @@ func WidgetRoutesV2(group *gin.RouterGroup) {
 	}
 }
 
-// TestGoConstantRoutes_TypedRawAndConcatenated covers the declaration shapes
-// that previously caused routes to vanish entirely (the us-funds P0):
-// custom-typed constants, raw-string literals, and concatenation chains
-// (including a chain referencing another constant).
+// TestGoConstantRoutes_TypedRawAndConcatenated: custom-typed constants,
+// raw-string literals, and concatenation chains (including a chain
+// referencing another constant) all resolve to routes.
 func TestGoConstantRoutes_TypedRawAndConcatenated(t *testing.T) {
 	routes := runExtract(t, map[string]string{
 		"constants/routes.go": `package constants
@@ -139,9 +138,8 @@ func Setup(r *gin.Engine) {
 }
 
 // TestGoWrappedRegistrations: formatter-wrapped registrations (arguments on
-// their own lines) previously never matched any per-line regex and vanished.
-// Covers wrapped identifier args, wrapped literal args, and a wrapped
-// Group() definition whose prefix must still chain.
+// their own lines) must match - wrapped identifier args, wrapped literal
+// args, and a wrapped Group() definition whose prefix must still chain.
 func TestGoWrappedRegistrations(t *testing.T) {
 	routes := runExtract(t, map[string]string{
 		"constants/routes.go": `package constants
@@ -305,11 +303,10 @@ func Setup(r *gin.Engine) {
 	}
 }
 
-// TestGoCommentedRoutesIgnored replicates the amx-pledge finding: an entire
-// commented-out registration block (line comments and a /* */ block) must
-// produce neither routes (false positives) nor unresolved-identifier
-// warnings (the dead declarations no longer define them). Live code with a
-// trailing comment must still match.
+// TestGoCommentedRoutesIgnored: a commented-out registration block (line
+// comments and a /* */ block) must produce neither routes nor
+// unresolved-identifier warnings. Live code with a trailing comment must
+// still match.
 func TestGoCommentedRoutesIgnored(t *testing.T) {
 	frag := runExtractFrag(t, map[string]string{
 		"api/actuator.go": `package api

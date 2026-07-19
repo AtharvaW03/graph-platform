@@ -15,7 +15,7 @@ func TestSwaggerV2JSONIngestion(t *testing.T) {
 	frag := runExtractFrag(t, map[string]string{
 		"docs/swagger.json": `{
   "swagger": "2.0",
-  "info": {"title": "us-funds", "version": "1.0"},
+  "info": {"title": "funds-api", "version": "1.0"},
   "basePath": "/v1",
   "paths": {
     "/deposit/verify-otp": {

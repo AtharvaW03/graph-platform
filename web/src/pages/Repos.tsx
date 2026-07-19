@@ -31,8 +31,7 @@ export function Repos() {
     overview.run(() => api.repositoryOverview(name));
   };
 
-  // Arriving from the Home constellation (or a shared link) with ?repo=name
-  // opens that service directly once the list has loaded.
+  // A ?repo=name link opens that service directly once the list has loaded.
   const linked = params.get("repo");
   useEffect(() => {
     if (linked && !selected && available.some((r) => r.name === linked)) {
@@ -119,10 +118,8 @@ export function Repos() {
   );
 }
 
-// Section renders one collapsible block of the overview: a title with a
-// count, verbose detail hidden behind a native <details> so the page reads
-// as a scannable outline. Sections a newcomer acts on first (entry points,
-// APIs, reading order) start open; inventories start closed.
+// Section renders one collapsible overview block: a summary row with title
+// and count, detail inside a native <details>.
 function Section({
   title,
   count,
@@ -145,8 +142,8 @@ function Section({
   );
 }
 
-// Chips renders an identifier list as scannable mono tokens, capped so a
-// repo with 200 SQL tables shows a sample plus "+192 more", not a wall.
+// Chips renders an identifier list as mono tokens, capped with a "+N more"
+// marker.
 function Chips({ items, cap = 8 }: { items: string[]; cap?: number }) {
   if (items.length === 0) return <span className="dim">-</span>;
   const shown = items.slice(0, cap);
@@ -172,9 +169,8 @@ function Group({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-// Tbl is a minimal static table on the shared .table styles - the overview's
-// per-section data is small and pre-sorted by the API, so the interactive
-// DataTable (sorting, paging) would be dead weight here.
+// Tbl is a static table on the shared .table styles; the per-section data is
+// small and pre-sorted by the API.
 function Tbl({ head, rows }: { head: string[]; rows: ReactNode[][] }) {
   return (
     <div className="table-wrap">

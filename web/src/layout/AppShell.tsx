@@ -3,9 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import "./shell.css";
 
-// Navigation is grouped by what the user is trying to do, not by feature
-// name - the groups are the same wayfinding words each page repeats in its
-// header eyebrow.
+// Navigation grouped by task; group names match the page-header eyebrows.
 const NAV_GROUPS: {
   group: string | null;
   items: { to: string; label: string; end?: boolean }[];
