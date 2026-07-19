@@ -8,11 +8,9 @@ import { FeedbackWidget } from "../components/FeedbackWidget";
 import { Badge, Button, Card, PageHeader, Stat } from "../components/ui";
 import type { RepositoryOverview } from "../types";
 
-// Repos folds two things together: the plain indexed-repo list, and (once
-// one is selected) the same repository-overview detail that used to be its
-// own top-level page - onboarding content ("architecture, entry points,
-// modules, APIs, dependencies") naturally lives under "pick a repo, see
-// what's there".
+// Repos shows the indexed-repo list and, once one is selected, its
+// repository overview: architecture, entry points, modules, APIs, and
+// dependencies.
 export function Repos() {
   const { available, loading: reposLoading, error: reposError, refresh } = useRepoScope();
   const [selected, setSelected] = useState("");

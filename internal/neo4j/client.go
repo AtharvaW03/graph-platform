@@ -607,9 +607,8 @@ var nodeHashProps = append(append([]string(nil), nodeProps...), "label")
 // stamped on every node and HAS_ENTITY edge as last_commit/last_run,
 // unconditionally for every row in the batch - that stamp is what SweepStale
 // keys staleness on, so it must never be skipped for a live row. An empty
-// commit preserves legacy behavior for the static-graph importer CLI: no
-// stamps, and always a full property rewrite (there's no content_hash
-// baseline to gate against without a run to compare against).
+// commit (the static-graph importer CLI) means no stamps and always a full
+// property rewrite.
 //
 // The full property rewrite (SET n += {...}, content_hash refresh) only runs
 // for rows whose hash differs from the stored one, or when rewriteAll forces

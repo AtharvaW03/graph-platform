@@ -94,9 +94,8 @@ func TestObjectsExtracted(t *testing.T) {
 	}
 }
 
-// TestDeleteIsWriteNotRead is the regression test for the DELETE FROM
-// double-count: a proc that only deletes from a table must get writes_table
-// but NOT reads_table for it.
+// TestDeleteIsWriteNotRead: a proc that only deletes from a table must get
+// writes_table but NOT reads_table for it.
 func TestDeleteIsWriteNotRead(t *testing.T) {
 	g := runExtract(t)
 	cleanup := "sql::sql_procedure::trade.usp_cleanup"
@@ -138,10 +137,9 @@ func TestViewAndTriggerEdges(t *testing.T) {
 	}
 }
 
-// TestExecTargetIsProcedureNotTable is the repro for bug (a): an EXEC target
-// is a procedure, not a table. Also covers the sp_executesql blocklist entry
-// from delta 3 - dynamic SQL's standard entry point must not create a node at
-// all, since "sp_executesql" is never a real object name.
+// TestExecTargetIsProcedureNotTable: an EXEC target is a procedure, not a
+// table. sp_executesql (dynamic SQL's entry point) must not create a node at
+// all, since it is never a real object name.
 func TestExecTargetIsProcedureNotTable(t *testing.T) {
 	const sql = `CREATE PROCEDURE billing.SettleInvoice AS
 BEGIN
@@ -173,9 +171,8 @@ GO
 	}
 }
 
-// TestTriggerHeaderUpdateNotMisreadAsTable is the repro for bug (b): the
-// trigger header "AFTER UPDATE\nAS" must not be misread as "UPDATE AS" (a
-// table named AS).
+// TestTriggerHeaderUpdateNotMisreadAsTable: the trigger header
+// "AFTER UPDATE\nAS" must not be misread as "UPDATE AS" (a table named AS).
 func TestTriggerHeaderUpdateNotMisreadAsTable(t *testing.T) {
 	const sql = `CREATE TABLE billing.Orders (id INT)
 GO
@@ -200,11 +197,9 @@ GO
 	}
 }
 
-// TestTriggerPseudoTablesFiltered is the repro for bug (c): inserted/deleted
-// are T-SQL pseudo-tables inside trigger bodies, not real tables. Filtered
-// globally (not just in trigger bodies), per team-lead's call: a real table
-// named inserted is vanishingly rare and the noise cost is higher than the
-// miss cost.
+// TestTriggerPseudoTablesFiltered: inserted/deleted are T-SQL
+// pseudo-tables, not real tables. Filtered globally, since a real table
+// named inserted is vanishingly rare.
 func TestTriggerPseudoTablesFiltered(t *testing.T) {
 	const sql = `CREATE TABLE billing.Orders (id INT)
 GO
@@ -225,8 +220,7 @@ GO
 			t.Errorf("pseudo-table must not produce a node, got %s", id)
 		}
 	}
-	// Regression safety: the blocklist must not swallow a real edge in the
-	// same body.
+	// The blocklist must not swallow a real edge in the same body.
 	trg := "sql::sql_trigger::billing.trg_orders"
 	audit := "sql::sql_table::billing.AuditLog"
 	if !g.edges["writes_table"][trg+"|"+audit] {
@@ -234,10 +228,9 @@ GO
 	}
 }
 
-// TestForeignKeyReferencesExtracted is the repro for bug (d): FOREIGN KEY
-// REFERENCES inside a CREATE TABLE body produced nothing. Covers bracketed +
-// schema-qualified and unbracketed + unqualified (defaults to dbo, same as
-// every other regex in this file) forms.
+// TestForeignKeyReferencesExtracted: FOREIGN KEY REFERENCES inside a
+// CREATE TABLE body must produce references edges. Covers bracketed +
+// schema-qualified and unbracketed + unqualified (defaults to dbo) forms.
 func TestForeignKeyReferencesExtracted(t *testing.T) {
 	const sql = `CREATE TABLE billing.Customers (
     CustomerID INT PRIMARY KEY
@@ -268,12 +261,10 @@ GO
 	}
 }
 
-// TestALTERTableForeignKeysNotCaptured documents a known non-goal (delta 2):
-// FKs added via ALTER TABLE ADD CONSTRAINT are not attached to any CREATE
-// TABLE body - splitObjects only splits on CREATE statements, so a
-// migration file containing only ALTER statements has no hits at all, and
-// its text is never scanned. A common migration-file pattern, deliberately
-// not handled this batch.
+// TestALTERTableForeignKeysNotCaptured documents a known non-goal: FKs
+// added via ALTER TABLE ADD CONSTRAINT are not captured - splitObjects only
+// splits on CREATE statements, so a migration file containing only ALTER
+// statements is never scanned.
 func TestALTERTableForeignKeysNotCaptured(t *testing.T) {
 	dir := t.TempDir()
 	createSQL := `CREATE TABLE billing.Customers (CustomerID INT PRIMARY KEY)

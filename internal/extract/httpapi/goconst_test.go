@@ -53,14 +53,12 @@ func registerPledge(r *gin.RouterGroup) {
 	}
 }
 
-// TestGoConstantRoutesBareSegments covers a common convention that a stricter
-// constant filter used to miss: path constants are bare segments with no
-// leading slash and plain names that contain no route/path/endpoint hint.
-// When such a constant is used in route position it must still resolve -
-// otherwise the route is dropped entirely. Here the group prefix is defined
-// in a different file than the function that registers the routes, so the
-// paths surface partial (cross-file group resolution is a separate, documented
-// limitation); the point of this test is that the routes surface at all.
+// TestGoConstantRoutesBareSegments: path constants that are bare segments
+// with no leading slash and no route/path hint in the name must still
+// resolve in route position. The group prefix lives in a different file
+// than the registering function, so the paths surface partial (cross-file
+// group resolution is a documented limitation); the routes must surface
+// regardless.
 func TestGoConstantRoutesBareSegments(t *testing.T) {
 	routes := runExtract(t, map[string]string{
 		"constants/routes.go": `package constants

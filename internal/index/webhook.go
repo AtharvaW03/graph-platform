@@ -21,9 +21,9 @@ const maxWebhookBody = 25 << 20
 
 // PendingSet is the coalescing hand-off between webhook deliveries and the
 // indexing loop. Deliveries Add repo names from HTTP handler goroutines; the
-// single indexing loop Drains them at the start of a cycle. A set (not a
-// queue) on purpose: five pushes to one repo before the next cycle mean one
-// re-index, because indexing always syncs to HEAD.
+// indexing loop Drains them at the start of a cycle. A set, not a queue:
+// multiple pushes to one repo before the next cycle coalesce into one
+// re-index (indexing always syncs to HEAD).
 type PendingSet struct {
 	mu    sync.Mutex
 	names map[string]struct{}
@@ -89,14 +89,13 @@ func (p *PendingSet) Snapshot() []string {
 // many Adds between reads collapse into one wake-up.
 func (p *PendingSet) C() <-chan struct{} { return p.ch }
 
-// GitHubWebhookHandler accepts GitHub push-event deliveries and enqueues the
-// matching configured repositories for re-indexing. It does no indexing work
-// itself - GitHub abandons deliveries that take longer than ~10s and never
-// retries failures, so the handler's job is verify, enqueue, 202, done.
+// GitHubWebhookHandler accepts GitHub push-event deliveries and enqueues
+// the matching configured repositories for re-indexing. It does no indexing
+// work itself: GitHub abandons slow deliveries and never retries failures,
+// so the handler verifies, enqueues, and returns 202.
 //
 // Every delivery must carry a valid X-Hub-Signature-256 HMAC; the secret is
-// required at construction because an unauthenticated endpoint would let
-// anyone who can reach it trigger indexing work at will.
+// required at construction.
 type GitHubWebhookHandler struct {
 	secret  []byte
 	pending *PendingSet
@@ -140,9 +139,8 @@ func (h *GitHubWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 	delivery := r.Header.Get("X-GitHub-Delivery")
 
-	// Signature before anything else - an unauthenticated caller learns
-	// nothing about expected payload shape, and malformed-but-unsigned junk
-	// never reaches the JSON parser.
+	// Verify the signature before anything else; unsigned payloads never
+	// reach the JSON parser.
 	if !validSignature(h.secret, body, r.Header.Get("X-Hub-Signature-256")) {
 		h.log.Printf("webhook: rejected delivery %q: bad or missing signature", delivery)
 		http.Error(w, "invalid signature", http.StatusUnauthorized)

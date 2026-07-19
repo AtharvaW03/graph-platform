@@ -47,27 +47,22 @@ func main() {
 	logger := log.New(os.Stderr, "", log.LstdFlags|log.Lmsgprefix)
 
 	if flag.NArg() > 0 {
-		// A bare repo name is a likely mistake for --repo, and silently
-		// ignoring it flips the run's scope to "all configured repos" -
-		// which also starts retirement countdowns for anything not in the
-		// config. Refuse instead.
+		// Repository names must be passed via --repo; a silently ignored
+		// positional argument would widen the run's scope to all repos.
 		logger.Fatalf("unexpected argument(s) %q: repository names go in --repo (e.g. --repo %s)", flag.Args(), flag.Arg(0))
 	}
 	if *all && strings.TrimSpace(*repos) != "" {
 		logger.Fatal("--all and --repo are mutually exclusive")
 	}
 	if *leaseTTL < time.Minute {
-		// time.NewTicker panics on ttl/4 <= 0, and anything sub-minute is
-		// operationally pointless (renewal jitter alone could exceed it).
+		// time.NewTicker panics on ttl/4 <= 0.
 		logger.Fatalf("--lease-ttl must be at least 1m, got %s", *leaseTTL)
 	}
 	webhookSecret := os.Getenv("GITHUB_WEBHOOK_SECRET")
 	if *webhookAddr != "" {
 		if *interval <= 0 {
-			// The sweep is not optional in webhook mode: GitHub never retries a
-			// failed or missed delivery, so without a periodic full pass a lost
-			// event means a permanently stale repo. Forcing the flag keeps that
-			// trade-off in the operator's hands instead of a hidden default.
+			// GitHub does not retry failed webhook deliveries; the periodic
+			// sweep is what bounds staleness, so --interval is required.
 			logger.Fatal("--webhook-addr requires --interval: webhook deliveries are best-effort (GitHub does not retry failures), so a periodic reconciliation sweep is what bounds staleness. 30m is a reasonable value.")
 		}
 		if strings.TrimSpace(*repos) != "" {
@@ -91,8 +86,8 @@ func main() {
 		logger.Fatalf("create workdir: %v", err)
 	}
 
-	// Acquire local resources first so config/disk errors surface before the
-	// Neo4j connect attempt, the only network dependency.
+	// Acquire local resources first so config/disk errors surface before
+	// the Neo4j connect attempt.
 	lock, err := index.LockWorkDir(absWorkDir)
 	if err != nil {
 		logger.Fatal(err)
@@ -123,34 +118,29 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Idempotent, and must run before AcquireLease: on a brand-new database
-	// the IndexerLease uniqueness constraint doesn't exist yet, so without
-	// this, two processes racing their very first MERGE on the lease row
-	// could each create one. The importer's own in-pipeline call later is
-	// harmless - this one is what makes the lease itself safe.
+	// Must run before AcquireLease: on a brand-new database the
+	// IndexerLease uniqueness constraint does not exist yet, and two
+	// processes racing their first MERGE could each create a lease row.
 	if err := client.EnsureConstraints(ctx); err != nil {
 		logger.Fatalf("ensure constraints: %v", err)
 	}
 
-	// Runs once, before any repo is touched: a graphify upgraded outside the
-	// pinned Docker image should stop the run, not silently produce a
-	// differently-shaped graph partway through a batch.
+	// Verify the graphify version before any repo is processed; a version
+	// mismatch stops the run.
 	if err := index.CheckGraphifyVersion(ctx, cfg.Graphify, logger); err != nil {
 		logger.Fatal(err)
 	}
 
-	// Also before any repo is touched: whichever git auth mode is configured
-	// must be in place before the first clone, not discovered mid-run.
+	// Git auth must be in place before the first clone.
 	ghClient, err := setupGitAuth(ctx, logger)
 	if err != nil {
 		logger.Fatal(err)
 	}
 
-	// The manifest source: static config list by default; with discovery
-	// enabled, the set of repos the GitHub App installation covers, refreshed
-	// at most every discovery.ttl and merged with any static entries
-	// (static wins by name). Installing/uninstalling the App on a repo is
-	// then how operators add/remove it - no config edit, no redeploy.
+	// The manifest source: the static config list by default; with
+	// discovery enabled, the set of repos the GitHub App installation
+	// covers, refreshed at most every discovery.ttl and merged with any
+	// static entries (static wins by name).
 	var source index.JobSource = index.NewConfigJobSource(cfg)
 	if cfg.Discovery.Enabled {
 		if ghClient == nil {
@@ -195,11 +185,9 @@ func main() {
 		logger.Fatalf("acquire writer lease: %v", err)
 	}
 	logger.Printf("writer lease acquired (owner=%s, ttl=%s)", owner, *leaseTTL)
-	// Every exit path after this point must release the lease. logger.Fatal
-	// os.Exits and skips defers, so the fatal paths below call releaseLease
-	// explicitly - otherwise any run ending in "N repositories failed" leaks
-	// the lease for a full TTL and pushes operators toward habitual
-	// --steal-lease.
+	// Every exit path after this point must release the lease.
+	// logger.Fatal skips defers, so the fatal paths below call releaseLease
+	// explicitly.
 	releaseLease := func() {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -209,18 +197,15 @@ func main() {
 	}
 	defer releaseLease()
 
-	// runCtx is what the orchestrator actually runs under. It's separate from
-	// ctx (which only the OS signal cancels) so the lease heartbeat can cut
-	// off in-flight work the moment it gives up on the lease, without that
-	// also looking like an operator-initiated shutdown.
+	// runCtx is what the orchestrator runs under, separate from ctx (which
+	// only the OS signal cancels) so the lease heartbeat can cancel
+	// in-flight work independently of a shutdown.
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 
-	// The orchestrator only renews between repos (see Orchestrator.Lease in
-	// internal/index/orchestrator.go), which leaves a gap: one repo whose
-	// graphify run alone outlives the TTL. This heartbeat renews on a fixed
-	// tick independent of repo boundaries to close that gap. Both renewal
-	// paths call the same owner-guarded RenewLease, so they never conflict.
+	// The orchestrator renews only between repos; this heartbeat renews on
+	// a fixed tick so a single long repo cannot outlive the TTL. Both paths
+	// call the same owner-guarded RenewLease.
 	heartbeat := &index.LeaseHeartbeat{
 		Renew:    func(hbCtx context.Context) error { return client.RenewLease(hbCtx, owner, *leaseTTL) },
 		Interval: *leaseTTL / 4,
@@ -283,8 +268,8 @@ func main() {
 			go func() {
 				logger.Printf("webhook listener on %s (reconciliation sweep every %s)", *webhookAddr, *interval)
 				if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					// A dead listener silently degrades webhook mode to
-					// sweep-only; fail loud and let the supervisor restart us.
+					// Exit on listener failure rather than continue in
+					// sweep-only mode.
 					webhookSrvErr <- err
 					cancelRun()
 				}
@@ -309,18 +294,15 @@ func main() {
 			sched = isched
 		}
 		runErr := orch.RunForeverDynamic(runCtx, optsFn, sched)
-		// Checked against the recorded heartbeat error, not ctx state: a
-		// confirmed lease loss must exit nonzero regardless of how RunForever
-		// itself returned. The ctx.Err() check below is a separate, older
-		// mechanism (distinguishing an operator shutdown from any other
-		// RunForever failure) and stays for that.
+		// A confirmed lease loss exits nonzero regardless of how RunForever
+		// returned; the ctx.Err() check below distinguishes an operator
+		// shutdown from other failures.
 		if fatal := exitErr(0, heartbeat.FatalErr()); fatal != nil {
 			releaseLease()
 			logger.Fatal(fatal)
 		}
-		// Before the generic runErr check: a webhook-server death cancels
-		// runCtx, which would otherwise surface as an opaque "context
-		// canceled" from RunForever.
+		// Checked before runErr: a webhook-server failure cancels runCtx and
+		// would otherwise surface as an opaque "context canceled".
 		select {
 		case err := <-webhookSrvErr:
 			releaseLease()
@@ -348,13 +330,9 @@ func main() {
 	}
 }
 
-// exitErr decides whether the process should exit nonzero after a run
-// completes. A confirmed lease-heartbeat loss always wins, even with zero
-// failed repos: RunOnce's own return only covers "stopped before finishing"
-// (ctx.Err() breaks its loop and returns a nil error), not "finished, but a
-// stale write already happened under a lease we no longer held." hbErr should
-// come from LeaseHeartbeat.FatalErr(), which is only set on a genuine
-// give-up - never inferred from context-cancellation state.
+// exitErr decides whether the process exits nonzero after a run. A
+// confirmed lease-heartbeat loss always wins, even with zero failed repos.
+// hbErr comes from LeaseHeartbeat.FatalErr().
 func exitErr(failed int, hbErr error) error {
 	if hbErr != nil {
 		return fmt.Errorf("writer lease heartbeat failed: %w", hbErr)
@@ -456,8 +434,8 @@ func setupGitAuth(ctx context.Context, logger *log.Logger) (*githubapp.Client, e
 	}
 	logger.Printf("git auth: GitHub App (installation %s)", installationID)
 	if os.Getenv("GIT_TOKEN") != "" {
-		// The entrypoint writes GIT_TOKEN into the same credential file this
-		// path overwrites; the App token wins, but flag the ambiguity.
+		// Both auth modes write the same credential file; the App token
+		// wins.
 		logger.Printf("WARNING: GIT_TOKEN is set but ignored (GitHub App auth takes precedence)")
 	}
 
@@ -469,11 +447,9 @@ func setupGitAuth(ctx context.Context, logger *log.Logger) (*githubapp.Client, e
 	}
 
 	go func() {
-		// Installation tokens last 1h. Refresh forces a mint (bypassing the
-		// client's cache - a cached token returned at minute 50 would expire
-		// at minute 60, leaving the stored credential dead until the next
-		// tick), so the credential store always holds a token with at least
-		// 10 minutes left.
+		// Installation tokens last 1h. Refresh forces a fresh mint so the
+		// credential store always holds a token with at least 10 minutes
+		// left.
 		ticker := time.NewTicker(50 * time.Minute)
 		defer ticker.Stop()
 		for {
@@ -491,12 +467,9 @@ func setupGitAuth(ctx context.Context, logger *log.Logger) (*githubapp.Client, e
 }
 
 // writeGitCredential mints a fresh installation token and writes it to the
-// git credential store in the same "https://x-access-token:TOKEN@github.com"
-// format deploy/indexer-entrypoint.sh writes for GIT_TOKEN, so GitSyncer picks
-// it up identically regardless of which auth mode produced it. The write is
-// atomic (temp file + rename) so a git fetch racing a refresh never reads a
-// truncated file, and the mode is forced to 0600 even when replacing a file
-// the entrypoint created under a looser umask. Never logs the token itself.
+// git credential store in the "https://x-access-token:TOKEN@github.com"
+// format. The write is atomic (temp file + rename) with mode 0600, and the
+// token is never logged.
 func writeGitCredential(ctx context.Context, ghClient *githubapp.Client) error {
 	token, err := ghClient.Refresh(ctx)
 	if err != nil {

@@ -393,9 +393,9 @@ LIMIT $limit
 // itself may traverse any repo.
 //
 // The traversal is restricted to shortestPathRelTypes (every real graphify/
-// extractor relation) - it deliberately excludes HAS_ENTITY, the platform's
-// repo-ownership edge, so a path can't take a nonsense 2-hop shortcut through
-// the Repository hub that owns both endpoints.
+// extractor relation); it excludes HAS_ENTITY, the repo-ownership edge, so
+// a path cannot shortcut through the Repository hub that owns both
+// endpoints.
 //
 // A name can match several entities (same symbol name in different repos),
 // and an arbitrary pick among them might not even be connected while another

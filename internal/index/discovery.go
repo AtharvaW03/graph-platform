@@ -20,8 +20,9 @@ type DiscoveredRepo struct {
 
 // DiscoveryJobSource is a JobSource whose manifest comes from a remote
 // discovery call instead of a static config list: the set of repos the
-// GitHub App is installed on IS the manifest, so installing/uninstalling the
-// App on a repo adds/removes it from the graph without touching any config.
+// GitHub App is installed on serves as the manifest, so installing or
+// uninstalling the App on a repo adds or removes it without a config
+// change.
 //
 // Policy applied to what Fetch returns:
 //   - archived repos are dropped (nothing new to index, and retirement will
@@ -32,11 +33,9 @@ type DiscoveredRepo struct {
 //     pin a non-default branch (or keep a repo the discovery source can't
 //     see) by leaving it in the YAML.
 //
-// Results are cached for TTL so webhook-triggered cycles don't hammer the
-// GitHub API, and the last successful listing is served if a refresh fails -
-// a GitHub outage must not shrink the manifest, because a shrunken manifest
-// starts retirement countdowns (the mass-retirement guard is the second net
-// behind this one). Safe for concurrent use.
+// Results are cached for TTL, and the last successful listing is served if
+// a refresh fails: a GitHub outage must not shrink the manifest, because a
+// shrunken manifest starts retirement countdowns. Safe for concurrent use.
 type DiscoveryJobSource struct {
 	fetch  func(ctx context.Context) ([]DiscoveredRepo, error)
 	static []Repository

@@ -15,41 +15,10 @@ import (
 )
 
 // GraphSchemaVersion identifies the shape of what the pipeline writes to
-// Neo4j. Bump it whenever a change means previously-indexed repos must be
-// re-imported even though their source hasn't moved: the unchanged-HEAD skip
-// only applies when a repo's recorded SchemaVersion matches, so a bump rolls
-// the migration out automatically on the next cycle.
-//
-//	v2: HAS_ENTITY ownership edges (replacing repo-membership CONTAINS),
-//	    label folded into the content hash, graphify extract --code-only.
-//	v3: graphify 0.9.13 output shape - markdown quick-scan/semantic twin
-//	    nodes now merge into one, and cross-module reference stubs now
-//	    rewire onto their definitions. Both change what a repo's nodes
-//	    look like without changing its source, so unchanged-HEAD repos
-//	    need one forced re-extract to converge on the new shape.
-//	v4: httpapi extractor hardening - typed/raw/concatenated Go route
-//	    constants now resolve, formatter-wrapped registrations are joined
-//	    and matched, and spec files get a 10MB cap with loud skips. Repos
-//	    indexed under v3 may be missing real routes, so every repo must
-//	    re-extract even with an unchanged HEAD.
-//	v5: `group.POST("", h)` (gin's register-on-the-group's-own-path idiom)
-//	    now emits the group prefix as the route instead of warning and
-//	    dropping. Repos indexed under v4 are missing all such routes.
-//	v6: empty-string constants (constants.EMPTY) resolve as the same idiom,
-//	    and `x := "/path"` locals used in route position resolve
-//	    (file-scoped). Repos indexed under v5 are missing those routes.
-//	v7: commented-out Go code is stripped before route matching - repos
-//	    indexed earlier may carry FALSE routes from commented registrations
-//	    with literal paths, which this re-extract removes.
-//	v8: comment stripping extended to every non-Go matcher language
-//	    (Python/Ruby #, JS//TS/Java/Kotlin/C#/PHP // and block comments,
-//	    VB ', F# //): sweeps false routes from commented code in those
-//	    languages too.
-//	v9: route-inventory dedup - spec/code reconciliation now canonicalizes
-//	    path-parameter syntax (:id vs {id} vs <id>), and test files
-//	    (_test.go, *.test.ts, testdata/, mocks/) no longer contribute
-//	    routes. Both shrank inflated route counts, so re-extract sweeps
-//	    the twins and test routes out.
+// Neo4j. Bump it whenever a change requires already-indexed repos to be
+// re-imported despite an unchanged HEAD: the unchanged-HEAD skip only
+// applies when a repo's recorded SchemaVersion matches, so a bump rolls the
+// migration out automatically on the next cycle.
 const GraphSchemaVersion = 9
 
 // Orchestrator drives the per-repo pipeline for a configured set of
@@ -69,15 +38,13 @@ type Orchestrator struct {
 
 	// Extractors, if non-nil, runs the configured platform extractors after
 	// graphify and merges their fragments into the unified graph.json before
-	// the importer reads it. By default an extractor error fails the whole
-	// repo closed (see AllowPartialExtractorErrors); either way, per-extractor
-	// errors are recorded on the RepoResult for triage.
+	// the importer reads it. Per-extractor errors are recorded on the
+	// RepoResult.
 	Extractors *extract.Runner
 
-	// AllowPartialExtractorErrors, when true, restores the old behavior: an
-	// extractor error is logged but the partial graph imports anyway. Default
-	// false (fail closed) - see ExtractorsConfig.AllowPartial's doc comment
-	// for why that's the safer default.
+	// AllowPartialExtractorErrors, when true, logs an extractor error and
+	// imports the partial graph anyway. Default false: an extractor error
+	// fails the repo and nothing imports.
 	AllowPartialExtractorErrors bool
 
 	// HealthChecker, if set, is pinged before each cycle in continuous mode.
@@ -91,10 +58,9 @@ type Orchestrator struct {
 	Lease LeaseRenewer
 
 	// Retirer, if set, reconciles the graph against the config at the start
-	// of every full run: a (:Repository) in Neo4j that's no longer configured
-	// gets a warning first, then its graph data deleted on a later run after
-	// retirementGrace. Without this, removed/renamed repos linger in the
-	// graph forever and surface as ghost zero-node entries in /repos.
+	// of every full run: a (:Repository) no longer configured is warned
+	// first, then its graph data deleted on a later run after
+	// retirementGrace.
 	Retirer RepoRetirer
 }
 
@@ -106,10 +72,8 @@ type RepoRetirer interface {
 }
 
 // retirementGrace is the minimum time between the "repo missing from config"
-// warning and its graph data actually being deleted. Long enough that a
-// config typo made just before an interval cycle isn't punished instantly;
-// re-adding the repo re-indexes from scratch either way, so the stake is a
-// redundant re-index, not data loss.
+// warning and its graph data being deleted, so a config mistake can be
+// corrected before anything is removed.
 const retirementGrace = time.Hour
 
 // ImportRunner is the importer-side interface. The default implementation
@@ -124,21 +88,15 @@ type HealthChecker interface {
 	VerifyConnectivity(ctx context.Context) error
 }
 
-// LeaseRenewer extends the writer lease. If Orchestrator.Lease is set,
-// RunOnce calls Renew before every repo - so a long --all run over many
-// repos can't outlive the TTL between the start of the run and whichever
-// repo is indexing when it expires. A failed renewal means another writer
-// claimed the lease, and the run stops immediately before the next repo -
-// a single-writer violation is not something to log and continue past.
+// LeaseRenewer extends the writer lease. RunOnce calls Renew before every
+// repo; a failed renewal stops the run immediately.
 type LeaseRenewer interface {
 	Renew(ctx context.Context) error
 }
 
 // errLeaseLost marks a RunOnce error as a lease renewal failure. RunForever
-// checks for it specifically: unlike other RunOnce errors (which just get
-// logged before the next scheduled cycle retries), losing the lease means
-// someone else is writing now - retrying next cycle would race them, so
-// RunForever stops the daemon instead.
+// stops the daemon on it instead of retrying: a lost lease means another
+// writer holds the database.
 var errLeaseLost = errors.New("writer lease lost")
 
 // Options modulate a single RunOnce invocation.
@@ -152,14 +110,12 @@ type Options struct {
 // RunOnce indexes every selected repository sequentially. One repo failing
 // never stops the others - failures are recorded on the result and state is
 // flushed before moving on. ctx cancellation aborts the current repo and
-// stops the loop after. RunOnce never panics; any panic in collaborators is
-// recovered, logged, and recorded on the run.
+// stops the loop after. Panics in collaborators are recovered and recorded.
 //
-// When a Lease is configured, it's renewed before every repo, not just once
-// at the top - a long --all run over many repos must not outlive the lease
-// TTL between repo 1 and repo 200. A renewal failure means another writer
-// took over; the loop stops immediately, before that next repo, and RunOnce
-// returns an error alongside whatever results were already collected.
+// When a Lease is configured it is renewed before every repo, so a long run
+// cannot outlive the lease TTL between repos. A renewal failure stops the
+// loop immediately and RunOnce returns an error alongside the results
+// collected so far.
 func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSummary, err error) {
 	summary = RunSummary{StartedAt: o.now()}
 	defer func() { summary.FinishedAt = o.now() }()
@@ -174,9 +130,8 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 		return summary, fmt.Errorf("load repositories: %w", err)
 	}
 
-	// Retirement reconciliation runs only on full runs: a --repo targeted run
-	// is a surgical operation and shouldn't delete anything as a side effect.
-	// It also writes to Neo4j, so it holds the same lease the repo loop does.
+	// Retirement reconciliation runs only on full runs, never on --repo
+	// targeted runs. It writes to Neo4j, so it renews the lease first.
 	if o.Retirer != nil && len(opts.Names) == 0 {
 		if o.Lease != nil {
 			if err := o.Lease.Renew(ctx); err != nil {
@@ -209,17 +164,10 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 	return summary, nil
 }
 
-// RunForever loops RunOnce on the configured Scheduler until ctx is canceled.
-// Cycles never overlap: the next pass only starts after the current pass
-// returns AND the Scheduler signals. A panic inside the loop is recovered
-// and the next cycle proceeds - the daemon never dies on a recoverable bug.
-//
-// Lease renewal happens inside RunOnce's per-repo loop, not here - that
-// covers the first repo of every cycle too, so a separate top-of-cycle
-// renewal would only be a redundant extra round-trip. A lost lease, though,
-// must stop the daemon rather than wait for the next cycle to retry -
-// runCycleSafely surfaces that one case and RunForever returns instead of
-// looping.
+// RunForever loops RunOnce on the configured Scheduler until ctx is
+// canceled. Cycles never overlap: the next pass starts only after the
+// current pass returns and the Scheduler signals. Panics inside the loop
+// are recovered and the next cycle proceeds; a lost lease stops the daemon.
 func (o *Orchestrator) RunForever(ctx context.Context, opts Options, sched Scheduler) error {
 	return o.RunForeverDynamic(ctx, func() Options { return opts }, sched)
 }
@@ -250,11 +198,9 @@ func (o *Orchestrator) RunForeverDynamic(ctx context.Context, optsFn func() Opti
 	}
 }
 
-// runCycleSafely runs one indexing cycle, recovering any panic so the daemon
-// never dies on a recoverable bug. Its return is non-nil only for a lost
-// lease - every other RunOnce failure (including a recovered panic) is
-// logged here and swallowed, same as before, since the next scheduled cycle
-// is the retry.
+// runCycleSafely runs one indexing cycle, recovering any panic. Its return
+// is non-nil only for a lost lease; every other failure is logged and the
+// next scheduled cycle is the retry.
 func (o *Orchestrator) runCycleSafely(ctx context.Context, opts Options) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
@@ -279,12 +225,10 @@ func (o *Orchestrator) runCycleSafely(ctx context.Context, opts Options) (err er
 }
 
 // reconcileRetired compares the (:Repository) nodes in the graph against the
-// configured manifest. A graph repo missing from the config gets a warning
-// and a persisted timestamp on first sight; on a later full run past
-// retirementGrace, its graph data is deleted and its state reset so a future
-// re-add re-indexes from scratch instead of skipping on a stale commit match.
-// All failures here are logged and swallowed - reconciliation must never
-// block the indexing run itself.
+// configured manifest. A graph repo missing from the config is warned on
+// first sight; on a later full run past retirementGrace its graph data is
+// deleted and its state reset. Failures are logged and swallowed so
+// reconciliation never blocks the indexing run.
 func (o *Orchestrator) reconcileRetired(ctx context.Context, configured []Repository) {
 	inConfig := make(map[string]bool, len(configured))
 	for _, r := range configured {
@@ -315,14 +259,10 @@ func (o *Orchestrator) reconcileRetired(ctx context.Context, configured []Reposi
 			missing = append(missing, name)
 		}
 	}
-	// Mass-retirement guard. A deliberate retirement removes one or a few
-	// repos; the indexer pointed at the wrong (or empty, or stale) config
-	// strands most of the graph at once - and in --interval mode that would
-	// cross the grace period and delete everything with no human watching.
-	// More than half the graph missing from the config is treated as a wrong
-	// config, not a mass retirement: nothing is warned or deleted. To really
-	// retire that many repos, remove them from the config in batches of less
-	// than half the graph, one grace period apart.
+	// Mass-retirement guard: more than half the graph missing from the
+	// config is treated as a wrong config file, not a retirement - nothing
+	// is warned or deleted. To retire that many repos, remove them in
+	// batches of less than half the graph, one grace period apart.
 	if len(missing) > 1 && len(missing) > len(graphRepos)/2 {
 		o.Log.Printf("ERROR: retirement reconciliation skipped: %d of %d repos in the graph are missing from the config (%s); this looks like a wrong config file, not a retirement - no data will be deleted. If intentional, retire in batches of less than half the graph.",
 			len(missing), len(graphRepos), strings.Join(missing, ", "))
@@ -350,8 +290,7 @@ func (o *Orchestrator) reconcileRetired(ctx context.Context, configured []Reposi
 			o.Log.Printf("WARNING: [%s] retirement delete failed (will retry next run): %v", name, err)
 			continue
 		}
-		// Reset state so re-adding the repo later can't skip on the old
-		// commit while the graph behind it is empty.
+		// Reset state so a future re-add re-indexes from scratch.
 		if err := o.Store.Set(RepoState{Name: name}); err != nil {
 			o.Log.Printf("WARNING: [%s] retired but state reset failed: %v", name, err)
 		}
@@ -396,7 +335,7 @@ func (o *Orchestrator) IndexOne(ctx context.Context, repo Repository, force bool
 
 func (o *Orchestrator) persistResult(name string, r RepoResult) {
 	if r.Canceled {
-		// Leave state untouched so a SIGINT doesn't pollute consecutive_fails.
+		// A canceled run does not advance state or the failure counter.
 		return
 	}
 	if err := o.Store.Set(toState(r, o.Store)); err != nil {
@@ -409,8 +348,6 @@ func (o *Orchestrator) persistResult(name string, r RepoResult) {
 // progress (Commit, Nodes) visible to IndexOne's deferred recover.
 func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force bool, prev RepoState, start time.Time, result *RepoResult) {
 	repoPath := filepath.Join(o.WorkDir, "repos", repo.Name)
-	// graphify writes inside the repo tree (graphify-out/graph.json), which
-	// survives `git reset --hard` and gives it a prior-state cache.
 
 	o.Log.Printf("[%s] sync %s @ %s", repo.Name, repo.URL, repo.Branch)
 	commit, err := o.Syncer.Sync(ctx, repo, repoPath)
@@ -448,11 +385,9 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	}
 
 	// Run platform extractors and merge their fragments into the file the
-	// importer will read. One extractor failing never blocks the others, but
-	// by default it does block the import (see AllowPartialExtractorErrors):
-	// importing a partial graph would let the sweep delete the failed
-	// extractor's last-known-good data, trading a stale-but-correct graph for
-	// a fresher-but-wrong one.
+	// importer will read. One extractor failing never blocks the others; by
+	// default it does block the import (see AllowPartialExtractorErrors), so
+	// the sweep cannot delete a failed extractor's last-known-good data.
 	importPath := graphPath
 	if o.Extractors != nil && len(o.Extractors.Extractors) > 0 {
 		o.Log.Printf("[%s] extract (%d extractors)", repo.Name, len(o.Extractors.Extractors))
@@ -530,11 +465,9 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 			repo.Name, result.SweepResidueNodes, result.SweepResidueRels)
 	}
 
-	// A mismatch or sweep residue means the graph may not actually reflect
-	// what this run just did - "imported OK" isn't trustworthy anymore. Fail
-	// the repo instead of reporting success: state doesn't advance, so the
-	// next cycle retries against last-known-good data instead of building on
-	// top of a graph that might already be wrong.
+	// A mismatch or sweep residue means the graph may not reflect what this
+	// run wrote. Fail the repo: state does not advance, and the next cycle
+	// retries against last-known-good data.
 	if result.Mismatch || result.SweepResidue {
 		var reasons []string
 		if result.Mismatch {
@@ -553,9 +486,8 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 }
 
 // recordFailure writes a Stage-tagged failure to result, unless ctx was
-// canceled - then it's marked Canceled instead so consecutive_fails isn't
-// polluted by an operator-initiated shutdown. Returns true if err is
-// non-nil, so the caller knows to bail out.
+// canceled - then it is marked Canceled so consecutive_fails is not
+// affected by a shutdown. Returns true if err is non-nil.
 func (o *Orchestrator) recordFailure(r *RepoResult, stage Stage, err error, start time.Time, ctx context.Context) bool {
 	if err == nil {
 		return false
@@ -593,9 +525,6 @@ func (o *Orchestrator) LogSummary(s RunSummary) {
 	for _, r := range s.Results {
 		switch r.Status {
 		case StatusSuccess:
-			// A mismatch or sweep residue always fails the repo now (see
-			// runPipeline), so a StatusSuccess result never carries either -
-			// nothing to annotate here.
 			swept := ""
 			if r.NodesSwept > 0 || r.EdgesSwept > 0 {
 				swept = fmt.Sprintf(", swept %d/%d", r.NodesSwept, r.EdgesSwept)

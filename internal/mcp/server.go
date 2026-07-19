@@ -45,12 +45,12 @@ func (s *Server) Run(ctx context.Context) error {
 // tools make server->client requests (no sampling/elicitation), so sessions
 // carry nothing worth validating, and every interaction is a bounded POST -
 // the SDK rejects GET/SSE with a spec-correct 405 in this mode. Returning
-// the same underlying *sdk.Server for every request is explicitly sanctioned
-// by the SDK, and QueryClient is immutable after construction, so one Server
+// the same underlying *sdk.Server for every request is supported by the
+// SDK, and QueryClient is immutable after construction, so one Server
 // serves concurrent requests safely.
 //
-// Auth is deliberately NOT applied here - the caller owns the middleware
-// stack, same as internal/api.Server.Routes.
+// Auth is not applied here; the caller owns the middleware stack, same as
+// internal/api.Server.Routes.
 func (s *Server) HTTPHandler() http.Handler {
 	return sdk.NewStreamableHTTPHandler(
 		func(*http.Request) *sdk.Server { return s.sdk },

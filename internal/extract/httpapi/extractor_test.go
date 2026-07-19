@@ -64,9 +64,8 @@ func routes() {
 	}
 }
 
-// TestGoGetFalsePositives is the regression test for the config-key bug:
-// x.Get("string") is everywhere in Go and must not become an HTTP route
-// unless the argument looks like a path.
+// TestGoGetFalsePositives: x.Get("string") is everywhere in Go and must
+// not become an HTTP route unless the argument looks like a path.
 func TestGoGetFalsePositives(t *testing.T) {
 	routes := runExtract(t, map[string]string{
 		"config.go": `package main
