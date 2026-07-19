@@ -213,29 +213,6 @@ GitHub App's webhook URL is filled in after deployment assigns the host.
 Alarms worth having: indexer task count < 1, ALB 5xx rate, `/freshness`
 stale.
 
-## Deferred work (deliberate, in rough priority order)
-
-1. **"Ask" chatbot (FR5) + cost tracker** - designed, unbuilt, to be
-   developed on the `feature/ask-chatbot` branch and merged as a
-   post-launch update. Design: `POST /ask` on query-service
-   (new `internal/ask` package), an agentic LLM loop over the same tools
-   the MCP server exposes, SSE streaming to a chat UI; system prompt
-   grounds answers in tool results with citations; bounded (max ~8 tool
-   rounds, capped tokens). Config: `LLM_API_KEY` / `LLM_MODEL` /
-   `LLM_BASE_URL` (key server-side only). Per-request token/cost logging
-   on this endpoint satisfies the cost-tracker requirement. Keep merging
-   main into the branch periodically so the eventual merge stays small.
-2. CI pipeline (build + vet + test on push; optional Neo4j service
-   container for the integration suites).
-3. Web UI component tests.
-4. Parallel repo indexing (semaphore over the RunOnce loop; the pattern
-   exists in internal/extract/runner.go) - triggered if monorepo-class
-   repos or repo count make cycles too long.
-5. Cross-repo constant resolution for route extraction, or accept the
-   documented warning.
-6. UI: documented/business filters for routes; a treemap/cluster view if
-   the services list outgrows a flat list.
-
 ## Working conventions
 
 - Comments state what the code does and any constraint it must hold -
