@@ -16,10 +16,6 @@ graph, and a web UI for engineers and non-engineers (PMs, security).
 - Security/CISO: the full HTTP surface per repo with documented-vs-inferred
   classification, SQL objects, and "which repos use library X".
 
-Functional requirements 1-4 (search, impact, API surface, dependency
-lookup) are met. FR5 (natural-language "explain how X works") is a planned
-post-launch update - see "Deferred work".
-
 ## Architecture
 
 ```
@@ -215,10 +211,6 @@ stale.
 
 ## Working conventions
 
-- Comments state what the code does and any constraint it must hold -
-  no history, no narratives, no references to past bugs or iterations.
 - Extractor output changes require a `GraphSchemaVersion` bump.
 - Prefer failing a repo over importing questionable data (see invariants).
 - Config files named `*.local.yaml` are gitignored operator configs.
-- Development happens cross-platform; on Windows, deep-path repos need
-  `git config core.longpaths true` locally (Linux containers unaffected).
