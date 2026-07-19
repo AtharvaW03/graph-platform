@@ -155,10 +155,8 @@ type InstalledRepo struct {
 }
 
 // ListInstallationRepos returns every repository this installation can
-// access, following pagination. This is the discovery primitive: the set of
-// repos the App is installed on IS the manifest, so granting/revoking the
-// App on a repo is how operators add/remove it - no config edit involved.
-// Requires only the mandatory Metadata permission.
+// access, following pagination. Requires only the mandatory Metadata
+// permission.
 func (c *Client) ListInstallationRepos(ctx context.Context) ([]InstalledRepo, error) {
 	token, err := c.InstallationToken(ctx)
 	if err != nil {
@@ -178,8 +176,7 @@ func (c *Client) ListInstallationRepos(ctx context.Context) ([]InstalledRepo, er
 		if err != nil {
 			return nil, fmt.Errorf("list installation repos page %d: %w", page, err)
 		}
-		// 10MB cap: 100 repos/page of metadata is well under 1MB; anything
-		// bigger is not GitHub.
+		// 10MB response cap per metadata page.
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 		resp.Body.Close()
 		if resp.StatusCode >= 300 {

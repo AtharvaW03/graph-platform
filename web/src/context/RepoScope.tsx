@@ -11,8 +11,7 @@ import type { RepoInfo } from "../types";
 
 // Global repository scope: which repos the whole UI queries against. Empty
 // selection means "all repos". Selection persists in localStorage so the
-// scope survives reloads and page switches - matching the scope-selector
-// convention of tools like Datadog/Grafana.
+// scope survives reloads and page switches.
 interface RepoScope {
   // available is the list of indexed repos (from GET /repos).
   available: RepoInfo[];

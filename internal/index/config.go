@@ -54,13 +54,9 @@ type ExtractorsConfig struct {
 	// MaxParallel caps concurrent extractors per repo. Zero or negative means
 	// run all configured extractors at once.
 	MaxParallel int `yaml:"max_parallel"`
-	// AllowPartial changes what happens when an enabled extractor errors for a
-	// repo. Default (false, fail-closed): the repo's whole indexing run fails,
-	// nothing imports, state doesn't advance - last-known-good graph data for
-	// that repo is left untouched and the next cycle retries. Set true to
-	// restore the old behavior (import the partial graph.json anyway, which
-	// lets the sweep delete the failed extractor's last-known-good data) if
-	// availability matters more than completeness for your deployment.
+	// AllowPartial controls what happens when an enabled extractor errors
+	// for a repo. Default false: the repo's indexing run fails and nothing
+	// imports. Set true to import the partial graph anyway.
 	AllowPartial *bool `yaml:"allow_partial"`
 }
 
@@ -109,11 +105,9 @@ type GraphifyConfig struct {
 	// processed. Empty means "log whatever's detected and continue" - useful
 	// while a fleet is still converging on one pinned version.
 	ExpectedVersion string `yaml:"expected_version"`
-	// IgnorePatterns are appended to every checkout's .graphifyignore before
-	// extraction, since graphify only reads ignore files from the corpus root
-	// and most target repos won't carry their own. Defaults to *.tfvars
-	// (environment values, occasionally secrets). Omitting the field keeps
-	// the default; an explicit empty list ([]) disables injection.
+	// IgnorePatterns are appended to every checkout's .graphifyignore
+	// before extraction. Defaults to *.tfvars. Omitting the field keeps the
+	// default; an explicit empty list ([]) disables injection.
 	IgnorePatterns []string `yaml:"ignore_patterns"`
 }
 
@@ -126,18 +120,10 @@ func DefaultConfig() Config {
 		},
 		Graphify: GraphifyConfig{
 			Command: "graphify",
-			// extract --code-only (0.9.11+) is the dedicated headless code
-			// path: local AST only, no LLM key, docs/papers skipped with a
-			// report. --force matters for two reasons: without it graphify's
-			// anti-shrink guard keeps ghost nodes when a repo legitimately
-			// shrinks and we'd import stale data, and (upstream #1795) 0.9.13's
-			// incremental `update` started preserving nodes for files newly
-			// matched by an ignore pattern still on disk - which would fight
-			// our injected .graphifyignore (*.tfvars) exclusion under `update`.
-			// `extract --force` purges deliberately-excluded files per the
-			// 0.9.13 changelog, so this invocation is immune; don't "simplify"
-			// this back to `update` without re-checking that. graph.json is a
-			// disposable per-run artifact here - the importer owns correctness.
+			// extract --code-only runs local AST extraction only (no LLM).
+			// --force is required: it purges excluded files and bypasses
+			// graphify's anti-shrink guard so a legitimately smaller repo
+			// imports correctly. The importer owns correctness of the graph.
 			Args:           []string{"extract", "{repo_path}", "--code-only", "--force"},
 			OutputFile:     "graphify-out/graph.json",
 			Timeout:        20 * time.Minute,
@@ -192,8 +178,7 @@ func (c *Config) ApplyDefaults() {
 	}
 }
 
-// Validate catches config errors here rather than as confusing failures deep
-// in the pipeline, e.g. a missing URL failing at clone time.
+// Validate checks the loaded config before any repository is touched.
 func (c *Config) Validate() error {
 	if len(c.Repositories) == 0 && !c.Discovery.Enabled {
 		return fmt.Errorf("no repositories configured (set discovery.enabled: true to source the manifest from the GitHub App installation instead)")

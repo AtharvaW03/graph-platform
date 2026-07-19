@@ -39,16 +39,14 @@ func (s *IntervalScheduler) Wait(ctx context.Context) error {
 	}
 }
 
-// WebhookScheduler fires a cycle when webhook deliveries mark repositories
-// dirty, and also enforces a periodic full reconciliation sweep. GitHub
-// webhook delivery is best-effort - failed or missed deliveries are never
-// retried - so the sweep is what puts an upper bound on staleness: it fetches
-// every configured repo and re-indexes any whose HEAD moved without a
-// delivery arriving. Webhooks are the fast path, the sweep is the guarantee.
+// WebhookScheduler fires a cycle when webhook deliveries mark
+// repositories dirty, and also enforces a periodic full reconciliation
+// sweep. GitHub webhook delivery is best-effort (failures are never
+// retried), so the sweep bounds staleness: it fetches every configured repo
+// and re-indexes any whose HEAD moved without a delivery.
 //
-// The sweep deadline is persistent across cycles: steady webhook traffic
-// postpones nothing, so retirement reconciliation and drift healing always
-// run at least every SweepEvery.
+// The sweep deadline is persistent across cycles, so steady webhook traffic
+// cannot postpone the sweep.
 //
 // Wait and NextOptions must be called from the same goroutine (the
 // orchestrator loop); PendingSet handles the cross-goroutine synchronization

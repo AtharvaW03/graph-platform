@@ -2,11 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useRepoScope } from "../context/RepoScope";
 import { Button, Card } from "../components/ui";
-import { Constellation, constellationOverflow } from "../components/Constellation";
-
-// Example searches for the ask box - concrete things people actually look
-// up, so the empty input teaches by example instead of by instruction.
-const EXAMPLES = ["payment", "order", "notification", "/v1/deposit"];
+import type { RepoInfo } from "../types";
 
 export function Home() {
   const [q, setQ] = useState("");
@@ -44,35 +40,9 @@ export function Home() {
             Search
           </Button>
         </form>
-        <div className="hero__examples">
-          <span className="small">Try:</span>
-          {EXAMPLES.map((ex) => (
-            <button
-              key={ex}
-              type="button"
-              className="chip chip--action"
-              onClick={() => navigate(`/search?q=${encodeURIComponent(ex)}`)}
-            >
-              {ex}
-            </button>
-          ))}
-        </div>
       </section>
 
-      {available.length > 0 && (
-        <Card as="section" className="org-map">
-          <div className="org-map__head">
-            <h3>The org, mapped</h3>
-            <p className="small">
-              {available.length} services · {totalNodes.toLocaleString()} code
-              elements. Each dot is a service - select one for its overview.
-              {constellationOverflow(available.length) > 0 &&
-                ` Showing the ${available.length - constellationOverflow(available.length)} largest; find the rest under Services.`}
-            </p>
-          </div>
-          <Constellation repos={available} />
-        </Card>
-      )}
+      {available.length > 0 && <ServicesPanel repos={available} totalNodes={totalNodes} />}
 
       <section className="q-section">
         <h2 className="q-section__title">What do you want to know?</h2>
@@ -116,6 +86,52 @@ export function Home() {
         </div>
       </section>
     </>
+  );
+}
+
+// ServicesPanel lists indexed services, largest first, each row with a
+// relative size bar and a link to the service overview. Shows the top 20;
+// the remainder is summarized as a count. The count text is the readable
+// value; the bar is a visual aid hidden from assistive tech.
+function ServicesPanel({ repos, totalNodes }: { repos: RepoInfo[]; totalNodes: number }) {
+  const sorted = [...repos].sort((a, b) => b.nodes - a.nodes);
+  const shown = sorted.slice(0, 20);
+  const max = shown[0]?.nodes ?? 1;
+  const rest = repos.length - shown.length;
+
+  return (
+    <Card as="section">
+      <div className="panel__head">
+        <h3>Services by size</h3>
+        <p className="small">
+          {repos.length} services · {totalNodes.toLocaleString()} code elements indexed
+        </p>
+      </div>
+      <div className="svc-grid">
+        {shown.map((r) => (
+          <Link
+            key={r.name}
+            className="svc-row"
+            to={`/repos?repo=${encodeURIComponent(r.name)}`}
+            title={`${r.name} - open overview`}
+          >
+            <span className="svc-row__name mono">{r.name}</span>
+            <span className="svc-row__bar" aria-hidden>
+              <span
+                className="svc-row__fill"
+                style={{ width: `${Math.max(2, (r.nodes / max) * 100)}%` }}
+              />
+            </span>
+            <span className="svc-row__count">{r.nodes.toLocaleString()}</span>
+          </Link>
+        ))}
+      </div>
+      {rest > 0 && (
+        <Link to="/repos" className="small svc-more">
+          +{rest} more services →
+        </Link>
+      )}
+    </Card>
   );
 }
 

@@ -11,8 +11,7 @@
 // and re-matched. Group prefixes are chained only within one file; a group
 // passed across a function boundary loses its parent prefix (the route still
 // surfaces, with a partial path). A route registration whose path cannot be
-// resolved is dropped LOUDLY (fragment warning) - a silently missing route
-// reads as false information to graph consumers.
+// resolved is dropped with a fragment warning, never silently.
 //
 // The extractor is heuristic, so every emitted edge is INFERRED.
 package httpapi
@@ -611,9 +610,8 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 	for _, pr := range pending {
 		p, ok := resolveArg(pr.file, pr.arg)
 		if !ok {
-			// A route registration whose path we couldn't resolve is a hole
-			// in the graph - missing routes read as false information to
-			// anyone querying it, so the drop must be loud, never silent.
+			// Never drop a route silently: record the file, line, method,
+			// and identifier so the gap is visible in the run's warnings.
 			frag.Warn(fmt.Sprintf("%s:%d: %s route with path identifier %q dropped: does not resolve to a string constant",
 				pr.file, pr.line, pr.method, pr.arg))
 			continue

@@ -81,11 +81,10 @@ func wipeQueryRepo(t *testing.T, c *neo4j.Client, repo string) {
 	}
 }
 
-// TestIntegration_ShortestPath_DoesNotRouteThroughRepositoryHub is bug 1's
-// repro: two entities in the same repo, no real edge between them. Before the
-// HAS_ENTITY rename, shortestPath's unrestricted traversal could hop
-// repo->a then repo->b and report a nonsense 2-hop "path" that isn't really
-// there.
+// TestIntegration_ShortestPath_DoesNotRouteThroughRepositoryHub: two
+// entities in the same repo with no real edge between them must yield no
+// path - the traversal must not hop repo->a then repo->b through the
+// Repository hub that owns both.
 func TestIntegration_ShortestPath_DoesNotRouteThroughRepositoryHub(t *testing.T) {
 	svc, c := testService(t)
 	ctx := context.Background()
@@ -115,8 +114,8 @@ func TestIntegration_ShortestPath_DoesNotRouteThroughRepositoryHub(t *testing.T)
 	}
 }
 
-// TestIntegration_ShortestPath_FindsRealPath is the regression-safety
-// counterpart: a real edge must still be found once the hub is excluded.
+// TestIntegration_ShortestPath_FindsRealPath: a real edge must still be
+// found with the hub excluded.
 func TestIntegration_ShortestPath_FindsRealPath(t *testing.T) {
 	svc, c := testService(t)
 	ctx := context.Background()
@@ -152,11 +151,10 @@ func TestIntegration_ShortestPath_FindsRealPath(t *testing.T) {
 	}
 }
 
-// TestIntegration_ShortestPath_FindsConnectedPairAmongAmbiguousNames is bug
-// 2's repro: the same name ("widget") matches in two repos, and only one of
-// them is actually connected to the target name ("helper"). The old
-// `WITH src, dst LIMIT 1` could commit to the disconnected pair and report no
-// path even though a connected pair exists.
+// TestIntegration_ShortestPath_FindsConnectedPairAmongAmbiguousNames: the
+// same name ("widget") matches in two repos and only one of them is
+// connected to the target name ("helper"); the connected pair must be
+// found rather than committing to an arbitrary disconnected pair.
 func TestIntegration_ShortestPath_FindsConnectedPairAmongAmbiguousNames(t *testing.T) {
 	svc, c := testService(t)
 	ctx := context.Background()
@@ -295,10 +293,10 @@ func TestIntegration_Search_LuceneReservedInputReturnsCleanly(t *testing.T) {
 	}
 }
 
-// TestIntegration_ShortestPath_SameSourceAndTarget is the repro for the
-// web-UI 500: asking for a path from a symbol to itself made Neo4j's
-// shortestPath throw ("start and end nodes are the same"). It must instead
-// return the node as a zero-length path - and two different spellings
+// TestIntegration_ShortestPath_SameSourceAndTarget: a path from a symbol
+// to itself must return the node as a zero-length path (Neo4j's
+// shortestPath rejects identical endpoints, so this must never reach it)
+// - and two different spellings
 // resolving to one node must return empty, not error.
 func TestIntegration_ShortestPath_SameSourceAndTarget(t *testing.T) {
 	svc, c := testService(t)

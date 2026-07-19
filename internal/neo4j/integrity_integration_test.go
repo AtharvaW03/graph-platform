@@ -57,13 +57,11 @@ func relRepoValues(t *testing.T, c *Client, srcKey, tgtKey, relType string) []st
 	return out
 }
 
-// TestIntegration_SharedSharedEdge_OwnershipDoesNotFlap is bug 3's repro: two
-// repos independently emit the same shared-to-shared edge (both endpoints
-// org-global, e.g. two SQL objects). Without repo folded into the MERGE key,
-// the second repo's import would steal ownership of the one merged edge, and
-// the first repo's next sweep (or the owner's own sweep once it drops the
-// reference) would delete it for both repos. With the fix, each repo gets its
-// own parallel edge instance, so one repo's sweep only ever touches its own.
+// TestIntegration_SharedSharedEdge_OwnershipDoesNotFlap: two repos
+// independently emit the same shared-to-shared edge (both endpoints
+// org-global, e.g. two SQL objects). Each repo must get its own parallel
+// edge instance, keyed by repo, so one repo's sweep only ever touches its
+// own.
 func TestIntegration_SharedSharedEdge_OwnershipDoesNotFlap(t *testing.T) {
 	c := testClient(t)
 	ctx := context.Background()
@@ -78,8 +76,8 @@ func TestIntegration_SharedSharedEdge_OwnershipDoesNotFlap(t *testing.T) {
 		t.Fatalf("merge repoB: %v", err)
 	}
 
-	// Both endpoints shared (sql:: prefix, platform origin) - the case bug 3
-	// targets. Both repos assert the same table-in-schema fact independently.
+	// Both endpoints shared (sql:: prefix, platform origin); both repos
+	// assert the same table-in-schema fact independently.
 	suffix := uniqueID(t)
 	schemaID := "sql::sql_schema::" + suffix
 	tableID := "sql::sql_table::" + suffix
@@ -178,13 +176,11 @@ func hasLabel(labels []string, want string) bool {
 	return false
 }
 
-// TestIntegration_KindChange_ReplacesLabelNotAccumulates is bug 4's repro:
-// re-importing the same node_key with a different inferred kind must replace
-// the code label, not add a second one alongside it. Type (not Label) drives
-// the kind here specifically because StableKey doesn't hash Type - only
-// repo+SourceFile+Label+ID - so changing Type keeps the node_key identical
-// while still changing InferLabel's result, exactly the case that used to
-// leak labels forever.
+// TestIntegration_KindChange_ReplacesLabelNotAccumulates: re-importing the
+// same node_key with a different inferred kind must replace the code label,
+// not accumulate a second one. Type (not Label) drives the kind because
+// StableKey hashes only repo+SourceFile+Label+ID, so changing Type keeps
+// node_key identical while changing InferLabel's result.
 func TestIntegration_KindChange_ReplacesLabelNotAccumulates(t *testing.T) {
 	c := testClient(t)
 	ctx := context.Background()

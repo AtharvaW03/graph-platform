@@ -58,10 +58,8 @@ func main() {
 func runHTTP(ctx context.Context, server *mcp.Server, addr string, timeout time.Duration) {
 	token := os.Getenv("MCP_AUTH_TOKEN")
 	if token == "" {
-		// Unlike query-service there is no loopback-default fallback here:
-		// the operator explicitly chose HTTP mode, whose entire purpose is
-		// shared remote access, so silently rewriting addr would surprise.
-		// Warn loudly instead.
+		// HTTP mode exists for shared remote access, so the address is
+		// served as given; warn when no auth token is set.
 		log.Printf("WARNING: MCP_AUTH_TOKEN not set - serving MCP over HTTP without authentication; anyone who can reach %s gets full graph access", addr)
 	}
 

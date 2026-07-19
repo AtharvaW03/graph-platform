@@ -109,8 +109,7 @@ export function PageHeader({
   description,
   actions,
 }: {
-  // eyebrow names the page's nav group (Find / Understand / Review) so the
-  // header itself tells you where you are in the product's structure.
+  // eyebrow names the page's nav group (Find / Understand / Review).
   eyebrow?: string;
   title: string;
   description?: string;
@@ -128,10 +127,9 @@ export function PageHeader({
   );
 }
 
-// Segmented shows every mode as a visible, clickable option - a question the
-// user answers by looking, instead of a dropdown they must open to discover.
-// Options carry plain-language labels; an optional hint holds the technical
-// term so experts can confirm what's underneath.
+// Segmented shows every mode as a visible, clickable option. Labels are
+// plain language; the optional hint carries the technical term, shown on
+// hover.
 export function Segmented<T extends string>({
   label,
   options,

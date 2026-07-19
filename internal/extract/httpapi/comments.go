@@ -8,12 +8,12 @@ import "strings"
 // integrated with the const/group state machine); every other supported
 // language goes through the generic one here, configured per extension.
 //
-// Deliberate limits, chosen to fail safe (a miss means dead code slips
-// through - the pre-existing behavior - never that live code is hidden):
+// Limits, biased to fail safe (a miss lets dead code through, never hides
+// live code):
 //   - quote state resets per line except JS template literals, the one
 //     multiline string form likely to contain comment-lookalike text;
 //   - Python/Kotlin triple-quoted strings are not tracked (a route example
-//     inside a docstring may still match, as before).
+//     inside a docstring may still match).
 type commentSyntax struct {
 	lineMarkers []string // "//", "#", "'" (VB)
 	blockOpen   string   // "" = no block comments

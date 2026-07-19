@@ -351,7 +351,7 @@
   padding: 0 var(--space-1);
 }
 
-/* Eyebrow: uppercase wayfinding mark with the graph's node-dot motif. */
+/* Eyebrow: uppercase section label with a dot marker. */
 .eyebrow {
   display: flex;
   align-items: center;
