@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"graph-platform/internal/graphify"
 	"graph-platform/internal/neo4j"
@@ -329,5 +330,57 @@ func TestIntegration_ShortestPath_SameSourceAndTarget(t *testing.T) {
 	}
 	if len(path) != 0 {
 		t.Errorf("different spellings of one node: want empty path, got %+v", path)
+	}
+}
+
+// TestIntegration_Freshness: StampRepoSync records last_synced_at (and
+// last_indexed_at when indexed) on the Repository node, and Freshness
+// returns them.
+func TestIntegration_Freshness(t *testing.T) {
+	svc, c := testService(t)
+	ctx := context.Background()
+	repo := uniqueQueryRepo(t, "fresh")
+	t.Cleanup(func() { wipeQueryRepo(t, c, repo) })
+
+	if err := c.MergeRepository(ctx, repo); err != nil {
+		t.Fatalf("merge repository: %v", err)
+	}
+	if err := c.StampRepoSync(ctx, repo, false); err != nil {
+		t.Fatalf("stamp (synced only): %v", err)
+	}
+
+	find := func() (RepoFreshness, bool) {
+		rows, err := svc.Freshness(ctx)
+		if err != nil {
+			t.Fatalf("Freshness: %v", err)
+		}
+		for _, r := range rows {
+			if r.Repo == repo {
+				return r, true
+			}
+		}
+		return RepoFreshness{}, false
+	}
+
+	row, ok := find()
+	if !ok {
+		t.Fatal("stamped repo missing from Freshness result")
+	}
+	if time.Since(row.LastSyncedAt) > time.Minute || row.LastSyncedAt.IsZero() {
+		t.Errorf("last_synced_at not recent: %v", row.LastSyncedAt)
+	}
+	if !row.LastIndexedAt.IsZero() {
+		t.Errorf("last_indexed_at should be unset after a synced-only stamp, got %v", row.LastIndexedAt)
+	}
+
+	if err := c.StampRepoSync(ctx, repo, true); err != nil {
+		t.Fatalf("stamp (indexed): %v", err)
+	}
+	row, ok = find()
+	if !ok {
+		t.Fatal("repo missing after indexed stamp")
+	}
+	if row.LastIndexedAt.IsZero() || time.Since(row.LastIndexedAt) > time.Minute {
+		t.Errorf("last_indexed_at not recent after indexed stamp: %v", row.LastIndexedAt)
 	}
 }

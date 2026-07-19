@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { formatAge } from "../lib/time";
 import "./shell.css";
 
 // Navigation grouped by task; group names match the page-header eyebrows.
@@ -40,6 +41,7 @@ export function AppShell() {
   });
   const [navOpen, setNavOpen] = useState(false);
   const [online, setOnline] = useState(false);
+  const [freshness, setFreshness] = useState<{ age: number; stale: boolean } | null>(null);
   const loc = useLocation();
 
   useEffect(() => {
@@ -66,6 +68,27 @@ export function AppShell() {
     };
     tick();
     const id = setInterval(tick, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // Freshness: how old the oldest repository check is, refreshed each minute.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const f = await api.freshness();
+        if (!cancelled && f.repositories.length > 0) {
+          setFreshness({ age: f.oldest_age_seconds, stale: f.stale });
+        }
+      } catch {
+        if (!cancelled) setFreshness(null);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 60000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -118,6 +141,12 @@ export function AppShell() {
             />
             <span>{online ? "Graph online" : "Graph offline"}</span>
           </div>
+          {freshness && (
+            <div className={`shell__fresh ${freshness.stale ? "is-stale" : ""}`}>
+              {freshness.stale ? "Data may be stale - " : "Updated "}
+              {formatAge(freshness.age)} ago
+            </div>
+          )}
         </div>
       </aside>
 

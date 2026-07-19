@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"testing"
@@ -57,6 +58,50 @@ func (f *fakeLeaseRenewer) Renew(context.Context) error {
 		return errors.New("lease stolen by another owner")
 	}
 	return nil
+}
+
+// fakeStamper records StampRepoSync calls as "name:indexed" strings.
+type fakeStamper struct{ calls []string }
+
+func (f *fakeStamper) StampRepoSync(_ context.Context, repo string, indexed bool) error {
+	f.calls = append(f.calls, fmt.Sprintf("%s:%v", repo, indexed))
+	return nil
+}
+
+// repoFailImporter fails the import stage for one named repo.
+type repoFailImporter struct{ fail string }
+
+func (r repoFailImporter) Run(_ context.Context, repo, _, _ string, _ bool) (*importer.Summary, error) {
+	if repo == r.fail {
+		return nil, errors.New("import failed")
+	}
+	return &importer.Summary{}, nil
+}
+
+// TestRunOnce_StampsFreshness: a successful repo stamps indexed=true, an
+// unchanged-HEAD skip stamps indexed=false, and a failed repo is not
+// stamped.
+func TestRunOnce_StampsFreshness(t *testing.T) {
+	orch := testOrchestrator(threeRepos(), nil)
+	st := &fakeStamper{}
+	orch.SyncStamper = st
+	orch.Importer = repoFailImporter{fail: "repo-c"}
+	if err := orch.Store.Set(RepoState{
+		Name:              "repo-b",
+		LastStatus:        StatusSuccess,
+		LastIndexedCommit: "deadbeef",
+		SchemaVersion:     GraphSchemaVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := orch.RunOnce(context.Background(), Options{}); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	want := []string{"repo-a:true", "repo-b:false"}
+	if len(st.calls) != len(want) || st.calls[0] != want[0] || st.calls[1] != want[1] {
+		t.Fatalf("stamps = %v, want %v", st.calls, want)
+	}
 }
 
 // fakeExtractor always fails - used to drive the extractor fail-closed gate.

@@ -1,4 +1,5 @@
 import type {
+  FreshnessResponse,
   CallEdge,
   DependencyEdge,
   GlueJobInfo,
@@ -84,6 +85,7 @@ export const api = {
   health: () => get<{ status: string }>("/health"),
   ready: () => get<{ status: string }>("/ready"),
   listRepos: () => get<RepoInfo[]>("/repos"),
+  freshness: () => get<FreshnessResponse>("/freshness"),
   search: (q: string, repos?: string[]) =>
     get<SearchResult[]>("/search", { q, repos: scopeParam(repos) }),
   findSymbol: (name: string, repos?: string[]) =>

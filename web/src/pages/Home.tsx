@@ -1,15 +1,15 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { api } from "../api";
 import { useRepoScope } from "../context/RepoScope";
+import { formatAge } from "../lib/time";
 import { Button, Card } from "../components/ui";
-import type { RepoInfo } from "../types";
+import type { FreshnessRepo } from "../types";
 
 export function Home() {
   const [q, setQ] = useState("");
   const navigate = useNavigate();
   const { available } = useRepoScope();
-
-  const totalNodes = available.reduce((sum, r) => sum + r.nodes, 0);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -21,11 +21,7 @@ export function Home() {
     <>
       <section className="hero">
         <p className="eyebrow">A1 Knowledge Graph</p>
-        <h1 className="hero__title">Ask the codebase.</h1>
-        <p className="hero__sub">
-          Every service, API, function, and connection across the org - mapped,
-          searchable, and always current.
-        </p>
+        <h1 className="hero__title">Search the codebase.</h1>
 
         <form onSubmit={onSubmit} className="hero__ask">
           <input
@@ -42,7 +38,7 @@ export function Home() {
         </form>
       </section>
 
-      {available.length > 0 && <ServicesPanel repos={available} totalNodes={totalNodes} />}
+      <RecentPanel serviceCount={available.length} />
 
       <section className="q-section">
         <h2 className="q-section__title">What do you want to know?</h2>
@@ -89,50 +85,67 @@ export function Home() {
   );
 }
 
-// ServicesPanel lists indexed services, largest first, each row with a
-// relative size bar and a link to the service overview. Shows the top 20;
-// the remainder is summarized as a count. The count text is the readable
-// value; the bar is a visual aid hidden from assistive tech.
-function ServicesPanel({ repos, totalNodes }: { repos: RepoInfo[]; totalNodes: number }) {
-  const sorted = [...repos].sort((a, b) => b.nodes - a.nodes);
-  const shown = sorted.slice(0, 20);
-  const max = shown[0]?.nodes ?? 1;
-  const rest = repos.length - shown.length;
+// RecentPanel lists the most recently indexed services with their age, so
+// the panel reflects current activity at any repo count. Falls back to a
+// count-and-link card when no freshness data exists yet.
+function RecentPanel({ serviceCount }: { serviceCount: number }) {
+  const [recent, setRecent] = useState<FreshnessRepo[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .freshness()
+      .then((f) => {
+        if (cancelled) return;
+        const rows = [...f.repositories]
+          .filter((r) => r.last_indexed_at)
+          .sort((a, b) => (b.last_indexed_at ?? "").localeCompare(a.last_indexed_at ?? ""));
+        setRecent(rows.slice(0, 8));
+      })
+      .catch(() => {
+        if (!cancelled) setRecent([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (serviceCount === 0) return null;
 
   return (
     <Card as="section">
       <div className="panel__head">
-        <h3>Services by size</h3>
-        <p className="small">
-          {repos.length} services · {totalNodes.toLocaleString()} code elements indexed
-        </p>
-      </div>
-      <div className="svc-grid">
-        {shown.map((r) => (
-          <Link
-            key={r.name}
-            className="svc-row"
-            to={`/repos?repo=${encodeURIComponent(r.name)}`}
-            title={`${r.name} - open overview`}
-          >
-            <span className="svc-row__name mono">{r.name}</span>
-            <span className="svc-row__bar" aria-hidden>
-              <span
-                className="svc-row__fill"
-                style={{ width: `${Math.max(2, (r.nodes / max) * 100)}%` }}
-              />
-            </span>
-            <span className="svc-row__count">{r.nodes.toLocaleString()}</span>
-          </Link>
-        ))}
-      </div>
-      {rest > 0 && (
-        <Link to="/repos" className="small svc-more">
-          +{rest} more services →
+        <h3>Recently updated</h3>
+        <Link to="/repos" className="small">
+          All {serviceCount} services →
         </Link>
+      </div>
+      {recent.length === 0 ? (
+        <p className="dim">
+          {serviceCount} services indexed. Open{" "}
+          <Link to="/repos">Services</Link> for the full list.
+        </p>
+      ) : (
+        <ul className="recent-list">
+          {recent.map((r) => (
+            <li key={r.repo}>
+              <Link className="recent-row" to={`/repos?repo=${encodeURIComponent(r.repo)}`}>
+                <span className="mono recent-row__name">{r.repo}</span>
+                <span className="recent-row__age">
+                  indexed {formatAge(ageSeconds(r.last_indexed_at))} ago
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
     </Card>
   );
+}
+
+function ageSeconds(iso?: string): number {
+  if (!iso) return 0;
+  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
 }
 
 function QuestionCard({

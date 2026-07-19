@@ -228,6 +228,7 @@ func main() {
 		Log:                         logger,
 		HealthChecker:               client,
 		Retirer:                     client,
+		SyncStamper:                 client,
 		Lease:                       clientLeaseRenewer{client: client, owner: owner, ttl: *leaseTTL},
 		Extractors:                  buildExtractorRunner(cfg, logger),
 		AllowPartialExtractorErrors: cfg.Extractors.AllowPartialEnabled(),
@@ -361,7 +362,7 @@ func webhookServer(addr string, webhook http.Handler, source index.JobSource, st
 	mux.Handle("GET /status", httpmw.WithAuth(index.NewStatusHandler(source, store, pending), statusToken))
 	return &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           httpmw.WithRequestLog(mux, logger),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

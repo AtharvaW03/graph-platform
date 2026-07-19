@@ -77,7 +77,7 @@ func runHTTP(ctx context.Context, server *mcp.Server, addr string, timeout time.
 
 	httpServer := &http.Server{
 		Addr:              addr,
-		Handler:           httpmw.WithAuth(mux, token),
+		Handler:           httpmw.WithRequestLog(httpmw.WithAuth(mux, token), nil),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		// Each MCP interaction is one bounded POST (stateless mode rejects

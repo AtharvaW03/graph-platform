@@ -62,6 +62,17 @@ type Orchestrator struct {
 	// first, then its graph data deleted on a later run after
 	// retirementGrace.
 	Retirer RepoRetirer
+
+	// SyncStamper, if set, records freshness on the repository's graph node
+	// after each successful or skipped (unchanged) repo. Failures are logged
+	// and never fail the repo.
+	SyncStamper SyncStamper
+}
+
+// SyncStamper records when a repository was last checked (and, when indexed
+// is true, re-imported). *neo4j.Client implements it.
+type SyncStamper interface {
+	StampRepoSync(ctx context.Context, repo string, indexed bool) error
 }
 
 // RepoRetirer lists and deletes per-repository graph data, backing
@@ -159,9 +170,25 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 		}
 		result := o.IndexOne(ctx, repo, opts.Force)
 		summary.Results = append(summary.Results, result)
+		o.stampSync(ctx, result)
 	}
 
 	return summary, nil
+}
+
+// stampSync records freshness on the repository's graph node: a successful
+// run stamps last_synced_at and last_indexed_at, an unchanged-HEAD skip
+// stamps last_synced_at only. Failed or canceled repos are not stamped.
+func (o *Orchestrator) stampSync(ctx context.Context, r RepoResult) {
+	if o.SyncStamper == nil || r.Canceled {
+		return
+	}
+	switch r.Status {
+	case StatusSuccess, StatusSkipped:
+		if err := o.SyncStamper.StampRepoSync(ctx, r.Name, r.Status == StatusSuccess); err != nil {
+			o.Log.Printf("[%s] WARNING: freshness stamp failed: %v", r.Name, err)
+		}
+	}
 }
 
 // RunForever loops RunOnce on the configured Scheduler until ctx is

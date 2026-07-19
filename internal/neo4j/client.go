@@ -190,6 +190,21 @@ func (c *Client) MergeRepository(ctx context.Context, repo string) error {
 	return err
 }
 
+// StampRepoSync records on the (:Repository) node when the repo was last
+// checked against its remote (last_synced_at) and, when indexed is true,
+// when its content was last imported (last_indexed_at). Backs the
+// query-service /freshness endpoint.
+func (c *Client) StampRepoSync(ctx context.Context, repo string, indexed bool) error {
+	session := c.Driver.NewSession(ctx, driver.SessionConfig{})
+	defer session.Close(ctx)
+	cypher := `MERGE (r:Repository {name: $name}) SET r.last_synced_at = datetime()`
+	if indexed {
+		cypher += `, r.last_indexed_at = datetime()`
+	}
+	_, err := session.Run(ctx, cypher, map[string]any{"name": repo})
+	return err
+}
+
 // ImportNodes imports all nodes in label-grouped UNWIND batches. commit/runID
 // are stamped on each node for the sweep; pass "" to skip stamping. rewriteAll
 // forces a full property rewrite on every node regardless of content hash -
