@@ -554,69 +554,6 @@ code {
   margin-top: var(--space-2);
 }
 
-/* Services-by-size panel (Home): one row per service with a relative size
-   bar and count. */
-.svc-grid {
-  display: grid;
-  gap: var(--space-1) var(--space-8);
-}
-@media (min-width: 760px) {
-  .svc-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-.svc-row {
-  display: grid;
-  grid-template-columns: minmax(9rem, 14rem) 1fr auto;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-2);
-  border-radius: var(--radius-md);
-  text-decoration: none;
-  color: inherit;
-  font-size: var(--text-sm);
-}
-.svc-row:hover {
-  background: var(--color-bg-subtle);
-  text-decoration: none;
-}
-.svc-row__name {
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.svc-row:hover .svc-row__name {
-  color: var(--color-brand-text);
-}
-.svc-row__bar {
-  height: 6px;
-  border-radius: var(--radius-full);
-  background: var(--color-bg-muted);
-  overflow: hidden;
-}
-.svc-row__fill {
-  display: block;
-  height: 100%;
-  border-radius: var(--radius-full);
-  background: var(--color-brand);
-  opacity: 0.85;
-}
-.svc-row:hover .svc-row__fill {
-  opacity: 1;
-}
-.svc-row__count {
-  font-variant-numeric: tabular-nums;
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  min-width: 4.5rem;
-  text-align: right;
-}
-.svc-more {
-  display: inline-block;
-  margin-top: var(--space-3);
-}
 
 /* Freshness line under the graph status. */
 .shell__fresh {
@@ -626,4 +563,49 @@ code {
 }
 .shell__fresh.is-stale {
   color: var(--color-warning);
+}
+
+/* Recently-updated list (Home): service name left, index age right. */
+.recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+@media (min-width: 760px) {
+  .recent-list {
+    grid-template-columns: 1fr 1fr;
+    column-gap: var(--space-8);
+  }
+}
+.recent-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: inherit;
+  font-size: var(--text-sm);
+}
+.recent-row:hover {
+  background: var(--color-bg-subtle);
+  text-decoration: none;
+}
+.recent-row__name {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-row:hover .recent-row__name {
+  color: var(--color-brand-text);
+}
+.recent-row__age {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
 }

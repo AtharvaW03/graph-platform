@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { formatAge } from "../lib/time";
 import "./shell.css";
 
 // Navigation grouped by task; group names match the page-header eyebrows.
@@ -186,12 +187,4 @@ export function AppShell() {
       </div>
     </div>
   );
-}
-
-// formatAge renders seconds as a short human age: "just now", "12m", "3h 20m".
-function formatAge(seconds: number): string {
-  if (seconds < 90) return "just now";
-  const m = Math.floor(seconds / 60);
-  if (m < 60) return `${m}m`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
