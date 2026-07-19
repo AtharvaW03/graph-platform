@@ -148,6 +148,7 @@ Symbol-level endpoints (`/search`, `/symbol`, `/callers`, `/callees`,
 | `GET /sql/object?schema=&name=` | SQL object + reads/writes/dependencies |
 | `GET /glue/jobs?source=&target=` | Glue jobs by source/target table |
 | `GET /hotspots?repo=&limit=` | entities ranked by incoming dependency fan-in |
+| `GET /freshness` | per-repository last-checked/last-indexed stamps and an overall stale verdict (>1h) |
 | `POST /feedback` · `GET /feedback/stats?days=` | relevance ratings + the quality-metric rollup |
 
 ## Running the full stack

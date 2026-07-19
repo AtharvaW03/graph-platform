@@ -220,3 +220,19 @@ export interface RepositoryOverview {
   important_components: ComponentInfo[];
   suggested_reading_order: ReadingStep[];
 }
+
+export interface FreshnessRepo {
+  repo: string;
+  last_synced_at: string;
+  last_indexed_at?: string;
+  age_seconds: number;
+  stale: boolean;
+}
+
+export interface FreshnessResponse {
+  generated_at: string;
+  stale_after_seconds: number;
+  oldest_age_seconds: number;
+  stale: boolean;
+  repositories: FreshnessRepo[];
+}

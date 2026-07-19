@@ -40,6 +40,7 @@ export function AppShell() {
   });
   const [navOpen, setNavOpen] = useState(false);
   const [online, setOnline] = useState(false);
+  const [freshness, setFreshness] = useState<{ age: number; stale: boolean } | null>(null);
   const loc = useLocation();
 
   useEffect(() => {
@@ -66,6 +67,27 @@ export function AppShell() {
     };
     tick();
     const id = setInterval(tick, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  // Freshness: how old the oldest repository check is, refreshed each minute.
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const f = await api.freshness();
+        if (!cancelled && f.repositories.length > 0) {
+          setFreshness({ age: f.oldest_age_seconds, stale: f.stale });
+        }
+      } catch {
+        if (!cancelled) setFreshness(null);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 60000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -118,6 +140,12 @@ export function AppShell() {
             />
             <span>{online ? "Graph online" : "Graph offline"}</span>
           </div>
+          {freshness && (
+            <div className={`shell__fresh ${freshness.stale ? "is-stale" : ""}`}>
+              {freshness.stale ? "Data may be stale - " : "Updated "}
+              {formatAge(freshness.age)} ago
+            </div>
+          )}
         </div>
       </aside>
 
@@ -158,4 +186,12 @@ export function AppShell() {
       </div>
     </div>
   );
+}
+
+// formatAge renders seconds as a short human age: "just now", "12m", "3h 20m".
+function formatAge(seconds: number): string {
+  if (seconds < 90) return "just now";
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
 }

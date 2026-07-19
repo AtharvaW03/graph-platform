@@ -70,14 +70,18 @@ func main() {
 		log.Printf("CORS enabled for origin %s", corsOrigin)
 	}
 
-	// Middleware order (outermost first): CORS answers preflights before auth
-	// runs, since preflights never carry an Authorization header.
-	handler := api.WithCORS(
-		httpmw.WithAuth(
-			api.WithRequestTimeout(server.Routes(), requestTimeout),
-			token,
+	// Middleware order (outermost first): request logging sees every request
+	// including rejected ones; CORS answers preflights before auth runs,
+	// since preflights never carry an Authorization header.
+	handler := httpmw.WithRequestLog(
+		api.WithCORS(
+			httpmw.WithAuth(
+				api.WithRequestTimeout(server.Routes(), requestTimeout),
+				token,
+			),
+			corsOrigin,
 		),
-		corsOrigin,
+		nil,
 	)
 
 	addr := net.JoinHostPort(bind, port)

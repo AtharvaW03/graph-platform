@@ -98,6 +98,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /glue/jobs", s.findGlueJobs)
 
 	mux.HandleFunc("GET /hotspots", s.findHotspots)
+	mux.HandleFunc("GET /freshness", s.freshness)
 
 	mux.HandleFunc("POST /feedback", s.submitFeedback)
 	mux.HandleFunc("GET /feedback/stats", s.feedbackStats)
@@ -152,6 +153,61 @@ func parseRepos(q url.Values) []string {
 		}
 	}
 	return out
+}
+
+// freshnessStaleAfter is the age past which a repository's last check is
+// reported stale. Matches the platform's <1h data-freshness target.
+const freshnessStaleAfter = time.Hour
+
+type freshnessRepo struct {
+	Repo          string     `json:"repo"`
+	LastSyncedAt  time.Time  `json:"last_synced_at"`
+	LastIndexedAt *time.Time `json:"last_indexed_at,omitempty"`
+	AgeSeconds    int64      `json:"age_seconds"`
+	Stale         bool       `json:"stale"`
+}
+
+type freshnessResponse struct {
+	GeneratedAt       time.Time       `json:"generated_at"`
+	StaleAfterSeconds int64           `json:"stale_after_seconds"`
+	OldestAgeSeconds  int64           `json:"oldest_age_seconds"`
+	Stale             bool            `json:"stale"`
+	Repositories      []freshnessRepo `json:"repositories"`
+}
+
+// freshness reports per-repository indexing freshness and an overall verdict
+// based on the oldest last-checked age.
+func (s *Server) freshness(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.svc.Freshness(r.Context())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	now := time.Now().UTC()
+	resp := freshnessResponse{
+		GeneratedAt:       now,
+		StaleAfterSeconds: int64(freshnessStaleAfter.Seconds()),
+		Repositories:      make([]freshnessRepo, 0, len(rows)),
+	}
+	for _, row := range rows {
+		age := int64(now.Sub(row.LastSyncedAt).Seconds())
+		fr := freshnessRepo{
+			Repo:         row.Repo,
+			LastSyncedAt: row.LastSyncedAt,
+			AgeSeconds:   age,
+			Stale:        age > int64(freshnessStaleAfter.Seconds()),
+		}
+		if !row.LastIndexedAt.IsZero() {
+			t := row.LastIndexedAt
+			fr.LastIndexedAt = &t
+		}
+		if age > resp.OldestAgeSeconds {
+			resp.OldestAgeSeconds = age
+		}
+		resp.Stale = resp.Stale || fr.Stale
+		resp.Repositories = append(resp.Repositories, fr)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) listRepos(w http.ResponseWriter, r *http.Request) {
