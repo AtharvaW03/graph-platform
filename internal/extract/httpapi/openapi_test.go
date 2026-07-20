@@ -132,7 +132,7 @@ func routes() {
 // TestTestFilesExcluded: routes registered in test files are not API surface.
 func TestTestFilesExcluded(t *testing.T) {
 	routes := runExtract(t, map[string]string{
-		"api/routes.go":      "package api\n\nfunc r() { router.GET(\"/live\", h) }\n",
+		"api/routes.go":       "package api\n\nfunc r() { router.GET(\"/live\", h) }\n",
 		"api/routes_test.go":  "package api\n\nfunc t() { router.GET(\"/test-only\", h) }\n",
 		"web/app.test.ts":     "app.get('/ts-test-only', h);\n",
 		"testdata/fixture.go": "package fixture\n\nfunc f() { router.GET(\"/fixture-only\", h) }\n",
