@@ -34,8 +34,11 @@ detached container has nothing attached to stdio - it just blocks silently.
 `MCP_AUTH_TOKEN` gates incoming MCP connections (`/health` stays open for LB
 probes); `QUERY_AUTH_TOKEN` is the *outbound* credential this process uses
 against query-service - two different boundaries, rotate them independently.
-Clients must reach this through an HTTPS front (ALB + certificate) - MCP
-clients refuse plain HTTP on non-loopback URLs.
+On a reachable (non-loopback) address the server refuses to start without
+`MCP_AUTH_TOKEN` unless `MCP_ALLOW_NO_AUTH=1` is set, so a missing secret
+fails closed rather than exposing the graph. Clients must reach this through
+an HTTPS front (ALB + certificate) - MCP clients refuse plain HTTP on
+non-loopback URLs.
 
 ## indexer
 

@@ -117,7 +117,8 @@ curl -H "Authorization: Bearer dev-token" "http://localhost:8080/overview/my-rep
 | `QUERY_SERVICE_URL` | mcp-server | `http://localhost:8080` | query-service base URL |
 | `QUERY_TIMEOUT` | mcp-server | `30s` | per-request timeout |
 | `MCP_HTTP_ADDR` | mcp-server | *(empty = stdio)* | serve MCP over HTTP on this address instead of stdio (e.g. `0.0.0.0:8090`) |
-| `MCP_AUTH_TOKEN` | mcp-server | *(empty = no auth)* | bearer token required on incoming MCP connections in HTTP mode; separate from `QUERY_AUTH_TOKEN` |
+| `MCP_AUTH_TOKEN` | mcp-server | *(required in HTTP mode on a non-loopback address)* | bearer token required on incoming MCP connections in HTTP mode; separate from `QUERY_AUTH_TOKEN` |
+| `MCP_ALLOW_NO_AUTH` | mcp-server | *(empty)* | set to `1` to allow HTTP mode with no `MCP_AUTH_TOKEN` on a reachable address; otherwise the server fails closed |
 | `GITHUB_WEBHOOK_SECRET` | indexer | *(required with `--webhook-addr`)* | HMAC secret every webhook delivery must be signed with (`X-Hub-Signature-256`); same value entered in the GitHub webhook config |
 | `INDEXER_STATUS_TOKEN` | indexer | *(empty = no auth)* | bearer token for the indexer's `/status` endpoint in webhook mode |
 | `GIT_TOKEN` | indexer | *(empty = public repos only)* | PAT for cloning private repos over HTTPS; ignored if the `GITHUB_APP_*` vars below are set |

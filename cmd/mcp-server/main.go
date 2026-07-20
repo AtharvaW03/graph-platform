@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -58,9 +60,20 @@ func main() {
 func runHTTP(ctx context.Context, server *mcp.Server, addr string, timeout time.Duration) {
 	token := os.Getenv("MCP_AUTH_TOKEN")
 	if token == "" {
-		// HTTP mode exists for shared remote access, so the address is
-		// served as given; warn when no auth token is set.
-		log.Printf("WARNING: MCP_AUTH_TOKEN not set - serving MCP over HTTP without authentication; anyone who can reach %s gets full graph access", addr)
+		// An unauthenticated HTTP endpoint serves the whole graph to anyone
+		// who can reach it. Loopback is fine (local dev); a reachable
+		// address requires an explicit acknowledgment rather than a silent
+		// warning, so a misconfigured secret fails closed instead of
+		// exposing the graph.
+		allowInsecure := os.Getenv("MCP_ALLOW_NO_AUTH") == "1" || strings.EqualFold(os.Getenv("MCP_ALLOW_NO_AUTH"), "true")
+		switch {
+		case isLoopbackAddr(addr):
+			log.Printf("WARNING: MCP_AUTH_TOKEN not set - serving MCP unauthenticated on loopback %s (local use only)", addr)
+		case allowInsecure:
+			log.Printf("WARNING: MCP_AUTH_TOKEN not set and MCP_ALLOW_NO_AUTH is set - serving MCP unauthenticated on %s; anyone who can reach it gets full graph access", addr)
+		default:
+			log.Fatalf("MCP_AUTH_TOKEN not set and %s is not loopback: refusing to serve the graph unauthenticated on a reachable address. Set MCP_AUTH_TOKEN, or set MCP_ALLOW_NO_AUTH=1 to override (only behind a trusted boundary that authenticates for you).", addr)
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -112,4 +125,24 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// isLoopbackAddr reports whether a listen address binds only the loopback
+// interface. A bare port (":8090") or 0.0.0.0 binds all interfaces and is
+// not loopback.
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
