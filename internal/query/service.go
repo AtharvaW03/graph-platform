@@ -193,20 +193,36 @@ func searchResultFromRecord(r *driver.Record) SearchResult {
 	}
 }
 
-// normalizeSymbol prepares a user-typed symbol for exact-match lookup:
-// trims whitespace, drops a trailing call-syntax suffix ("ConvertPosition()"
-// or "ConvertPosition(a, b)" -> "ConvertPosition"), and lowercases. People
-// naturally type a function name the way they'd write it in code, parens and
-// all, but graphify never stores parens in an entity's name - left in, they
-// silently zero out every exact-match query (FindSymbol, FindCallers,
-// FindCallees, BlastRadius, ShortestPath) even though the symbol and its
-// edges are real.
+// normalizeSymbol reduces a user-typed symbol to its base form: trims
+// whitespace, drops a trailing call-syntax suffix ("Convert()" or
+// "Convert(a, b)" -> "Convert"), and lowercases.
+//
+// The base form alone must NOT be used for exact matching: graphify stores
+// Function names WITH a trailing "()" (a Function node's label is
+// "GetDepositService()" - InferLabel detects functions by exactly that
+// suffix, and the entry-point queries match 'main()'), while classes, files,
+// routes, and topics are stored bare. Exact-match queries therefore compare
+// against symbolMatchList (both spellings), never this value directly.
 func normalizeSymbol(s string) string {
 	s = strings.TrimSpace(s)
 	if i := strings.IndexByte(s, '('); i > 0 {
 		s = strings.TrimSpace(s[:i])
 	}
 	return strings.ToLower(s)
+}
+
+// symbolMatchList returns the equality candidates for a user-typed symbol:
+// the normalized base and the base + "()" function spelling. Matching both
+// means a lookup works whether the node is stored bare (Class, HttpRoute,
+// File) or parens-suffixed (Function), and whatever the user typed.
+func symbolMatchList(s string) []string {
+	base := normalizeSymbol(s)
+	if base == "" || strings.HasSuffix(base, ")") {
+		// Nothing to vary: empty input, or a base that still ends in ")"
+		// (e.g. a lone "()") where appending another pair would be noise.
+		return []string{base}
+	}
+	return []string{base, base + "()"}
 }
 
 // FindSymbol returns every node whose name (or norm_name) exactly matches the
@@ -218,7 +234,7 @@ func (s *Service) FindSymbol(ctx context.Context, symbol string, repos []string)
 
 	const cypher = `
 MATCH (n:Entity)
-WHERE (n.name_lower = $s OR n.norm_name_lower = $s)
+WHERE (n.name_lower IN $names OR n.norm_name_lower IN $names)
   AND (size($repos) = 0 OR n.repo IN $repos)
 RETURN n.name           AS name,
        n.repo           AS repo,
@@ -231,7 +247,7 @@ LIMIT $limit
 `
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": normalizeSymbol(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"names": symbolMatchList(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -268,7 +284,7 @@ func (s *Service) FindCallers(ctx context.Context, symbol string, repos []string
 
 	const cypher = `
 MATCH (caller:Entity)-[r:CALLS]->(callee:Entity)
-WHERE (callee.name_lower = $s OR callee.norm_name_lower = $s)
+WHERE (callee.name_lower IN $names OR callee.norm_name_lower IN $names)
   AND (size($repos) = 0 OR callee.repo IN $repos)
 RETURN caller.name AS caller,
        caller.repo AS caller_repo,
@@ -294,7 +310,7 @@ func (s *Service) FindCallees(ctx context.Context, symbol string, repos []string
 
 	const cypher = `
 MATCH (caller:Entity)-[r:CALLS]->(callee:Entity)
-WHERE (caller.name_lower = $s OR caller.norm_name_lower = $s)
+WHERE (caller.name_lower IN $names OR caller.norm_name_lower IN $names)
   AND (size($repos) = 0 OR caller.repo IN $repos)
 WITH caller, callee, r
 ORDER BY callee.repo, callee.path, callee.line
@@ -314,7 +330,7 @@ LIMIT $limit
 
 func (s *Service) runCallEdgeQuery(ctx context.Context, cypher, symbol string, repos []string) ([]CallEdge, error) {
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": normalizeSymbol(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"names": symbolMatchList(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -366,7 +382,7 @@ func (s *Service) BlastRadius(ctx context.Context, symbol string, depth int, rep
 	// planner use a pruning BFS rather than enumerate every path.
 	cypher := fmt.Sprintf(`
 MATCH (start:Entity)
-WHERE (start.name_lower = $s OR start.norm_name_lower = $s)
+WHERE (start.name_lower IN $names OR start.norm_name_lower IN $names)
   AND (size($repos) = 0 OR start.repo IN $repos)
 MATCH p = (start)-[*1..%d]->(impacted:Entity)
 WITH impacted, min(length(p)) AS distance
@@ -381,7 +397,7 @@ LIMIT $limit
 `, depth)
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": normalizeSymbol(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"names": symbolMatchList(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -443,8 +459,8 @@ func (s *Service) ShortestPath(ctx context.Context, source, target string, repos
 	// database error.
 	cypher := fmt.Sprintf(`
 MATCH (src:Entity), (dst:Entity)
-WHERE (src.name_lower = $src OR src.norm_name_lower = $src)
-  AND (dst.name_lower = $dst OR dst.norm_name_lower = $dst)
+WHERE (src.name_lower IN $srcNames OR src.norm_name_lower IN $srcNames)
+  AND (dst.name_lower IN $dstNames OR dst.norm_name_lower IN $dstNames)
   AND (size($repos) = 0 OR (src.repo IN $repos AND dst.repo IN $repos))
   AND src <> dst
 WITH src, dst LIMIT %d
@@ -465,7 +481,7 @@ ORDER BY idx
 `, shortestPathCandidatePairs, shortestPathRelTypes, shortestPathHopsMax)
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"src": normSrc, "dst": normDst, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"srcNames": symbolMatchList(source), "dstNames": symbolMatchList(target), "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -500,13 +516,13 @@ ORDER BY idx
 func (s *Service) selfPath(ctx context.Context, symbol string, repos []string) ([]PathNode, error) {
 	const cypher = `
 MATCH (n:Entity)
-WHERE (n.name_lower = $q OR n.norm_name_lower = $q)
+WHERE (n.name_lower IN $names OR n.norm_name_lower IN $names)
   AND (size($repos) = 0 OR n.repo IN $repos)
 RETURN n.name AS name, n.repo AS repo, n.path AS path, labels(n) AS labels
 LIMIT 1
 `
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"q": normalizeSymbol(symbol), "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"names": symbolMatchList(symbol), "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}

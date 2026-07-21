@@ -1,6 +1,32 @@
 package query
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+// symbolMatchList must always offer BOTH spellings: graphify stores Function
+// names with a trailing "()" while other kinds are bare, so matching only
+// one form silently loses the other kind entirely.
+func TestSymbolMatchList(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{"GetDepositService", []string{"getdepositservice", "getdepositservice()"}},
+		{"GetDepositService()", []string{"getdepositservice", "getdepositservice()"}},
+		{"GetDepositService(a, b)", []string{"getdepositservice", "getdepositservice()"}},
+		{"  GetDepositService ()  ", []string{"getdepositservice", "getdepositservice()"}},
+		{"dbo.Orders", []string{"dbo.orders", "dbo.orders()"}},
+		{"", []string{""}},
+		{"()", []string{"()"}},
+	}
+	for _, tt := range tests {
+		if got := symbolMatchList(tt.in); !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("symbolMatchList(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
 
 func TestNormalizeSymbol(t *testing.T) {
 	tests := []struct {
