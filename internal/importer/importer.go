@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"graph-platform/internal/graphify"
+	"a1-knowledge-graph/internal/graphify"
 )
 
 // newRunID returns a token unique to one import run. Every node/edge the run

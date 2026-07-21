@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"graph-platform/internal/extract"
-	"graph-platform/internal/importer"
+	"a1-knowledge-graph/internal/extract"
+	"a1-knowledge-graph/internal/importer"
 )
 
 // GraphSchemaVersion identifies the shape of what the pipeline writes to

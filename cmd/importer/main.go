@@ -9,9 +9,9 @@ import (
 	"os"
 	"time"
 
-	"graph-platform/internal/importer"
-	"graph-platform/internal/index"
-	"graph-platform/internal/neo4j"
+	"a1-knowledge-graph/internal/importer"
+	"a1-knowledge-graph/internal/index"
+	"a1-knowledge-graph/internal/neo4j"
 )
 
 func main() {

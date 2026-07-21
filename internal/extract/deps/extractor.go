@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"graph-platform/internal/extract"
+	"a1-knowledge-graph/internal/extract"
 )
 
 // Extractor scans a repo for dependency manifests and emits a fragment of

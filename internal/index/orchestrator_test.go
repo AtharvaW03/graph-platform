@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"graph-platform/internal/extract"
-	"graph-platform/internal/importer"
+	"a1-knowledge-graph/internal/extract"
+	"a1-knowledge-graph/internal/importer"
 )
 
 // Minimal fakes for the Orchestrator's collaborators - just enough to drive

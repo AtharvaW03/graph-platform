@@ -7,11 +7,11 @@ root (they need `go.mod`/`internal` in their build context); `web` builds from
 ## query-service
 
 ```
-docker build -f deploy/Dockerfile.query-service -t graph-platform/query-service .
+docker build -f deploy/Dockerfile.query-service -t a1-knowledge-graph/query-service .
 docker run --rm -p 8080:8080 \
   -e NEO4J_PASSWORD=... -e NEO4J_URI=neo4j://host.docker.internal:7687 \
   -e QUERY_BIND=0.0.0.0 -e QUERY_AUTH_TOKEN=... \
-  graph-platform/query-service
+  a1-knowledge-graph/query-service
 ```
 
 Distroless final stage, no shell. `QUERY_BIND` must be set (or `QUERY_AUTH_TOKEN`
@@ -21,11 +21,11 @@ set, which flips the default bind to all interfaces) or the service binds to
 ## mcp-server
 
 ```
-docker build -f deploy/Dockerfile.mcp-server -t graph-platform/mcp-server .
+docker build -f deploy/Dockerfile.mcp-server -t a1-knowledge-graph/mcp-server .
 docker run --rm -p 8090:8090 \
   -e MCP_HTTP_ADDR=0.0.0.0:8090 -e MCP_AUTH_TOKEN=... \
   -e QUERY_SERVICE_URL=http://query-service:8080 -e QUERY_AUTH_TOKEN=... \
-  graph-platform/mcp-server
+  a1-knowledge-graph/mcp-server
 ```
 
 Distroless final stage, no shell. This image only makes sense with
@@ -43,13 +43,13 @@ non-loopback URLs.
 ## indexer
 
 ```
-docker build -f deploy/Dockerfile.indexer -t graph-platform/indexer .
+docker build -f deploy/Dockerfile.indexer -t a1-knowledge-graph/indexer .
 docker run --rm \
   -e NEO4J_PASSWORD=... -e NEO4J_URI=neo4j://host.docker.internal:7687 \
   -e GIT_TOKEN=... \
   -v indexer-workdir:/app/workdir \
   -v "$(pwd)/config/repos.yaml:/app/config/repos.yaml:ro" \
-  graph-platform/indexer /usr/local/bin/indexer --config config/repos.yaml --all
+  a1-knowledge-graph/indexer /usr/local/bin/indexer --config config/repos.yaml --all
 ```
 
 Final stage is `python:3.12-slim` with `git` and `graphifyy==0.9.20` (the PyPI
@@ -69,11 +69,11 @@ two replicas against one database.
 ## web
 
 ```
-docker build -f web/Dockerfile -t graph-platform/web web
+docker build -f web/Dockerfile -t a1-knowledge-graph/web web
 docker run --rm -p 8081:80 \
   -e QUERY_SERVICE_URL=http://query-service:8080 \
   -e QUERY_AUTH_TOKEN=... \
-  graph-platform/web
+  a1-knowledge-graph/web
 ```
 
 `nginx:alpine` serving the Vite build with SPA fallback, proxying `/api/*` to

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"graph-platform/internal/graphify"
-	"graph-platform/internal/neo4j"
+	"a1-knowledge-graph/internal/graphify"
+	"a1-knowledge-graph/internal/neo4j"
 
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )

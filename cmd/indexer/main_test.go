@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"graph-platform/internal/importer"
-	"graph-platform/internal/index"
+	"a1-knowledge-graph/internal/importer"
+	"a1-knowledge-graph/internal/index"
 )
 
 func TestExitErr(t *testing.T) {

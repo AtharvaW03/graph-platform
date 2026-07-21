@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	serverName    = "graph-platform"
+	serverName    = "a1-knowledge-graph"
 	serverVersion = "0.1.0"
 )
 

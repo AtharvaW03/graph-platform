@@ -3,7 +3,7 @@ package index
 import (
 	"context"
 
-	"graph-platform/internal/importer"
+	"a1-knowledge-graph/internal/importer"
 )
 
 // DefaultImportRunner adapts internal/importer.Run to the orchestrator's

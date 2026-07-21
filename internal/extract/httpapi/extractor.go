@@ -26,7 +26,7 @@ import (
 	"regexp"
 	"strings"
 
-	"graph-platform/internal/extract"
+	"a1-knowledge-graph/internal/extract"
 )
 
 type Extractor struct {

@@ -15,16 +15,16 @@ import (
 	"syscall"
 	"time"
 
-	"graph-platform/internal/extract"
-	"graph-platform/internal/extract/deps"
-	"graph-platform/internal/extract/glue"
-	"graph-platform/internal/extract/httpapi"
-	"graph-platform/internal/extract/kafka"
-	"graph-platform/internal/extract/mssql"
-	"graph-platform/internal/githubapp"
-	"graph-platform/internal/httpmw"
-	"graph-platform/internal/index"
-	"graph-platform/internal/neo4j"
+	"a1-knowledge-graph/internal/extract"
+	"a1-knowledge-graph/internal/extract/deps"
+	"a1-knowledge-graph/internal/extract/glue"
+	"a1-knowledge-graph/internal/extract/httpapi"
+	"a1-knowledge-graph/internal/extract/kafka"
+	"a1-knowledge-graph/internal/extract/mssql"
+	"a1-knowledge-graph/internal/githubapp"
+	"a1-knowledge-graph/internal/httpmw"
+	"a1-knowledge-graph/internal/index"
+	"a1-knowledge-graph/internal/neo4j"
 )
 
 // webhookDebounce is how long a webhook-triggered cycle waits after the first
