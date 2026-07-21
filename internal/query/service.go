@@ -267,7 +267,7 @@ func (s *Service) FindCallers(ctx context.Context, symbol string, repos []string
 	}
 
 	const cypher = `
-MATCH (caller:Entity)-[:CALLS]->(callee:Entity)
+MATCH (caller:Entity)-[r:CALLS]->(callee:Entity)
 WHERE (callee.name_lower = $s OR callee.norm_name_lower = $s)
   AND (size($repos) = 0 OR callee.repo IN $repos)
 RETURN caller.name AS caller,
@@ -277,7 +277,8 @@ RETURN caller.name AS caller,
        labels(caller) AS labels,
        callee.name AS callee,
        callee.repo AS callee_repo,
-       callee.path AS callee_path
+       callee.path AS callee_path,
+       coalesce(r.confidence, '') AS confidence
 ORDER BY caller.repo, caller.path, caller.line
 LIMIT $limit
 `
@@ -292,10 +293,10 @@ func (s *Service) FindCallees(ctx context.Context, symbol string, repos []string
 	}
 
 	const cypher = `
-MATCH (caller:Entity)-[:CALLS]->(callee:Entity)
+MATCH (caller:Entity)-[r:CALLS]->(callee:Entity)
 WHERE (caller.name_lower = $s OR caller.norm_name_lower = $s)
   AND (size($repos) = 0 OR caller.repo IN $repos)
-WITH caller, callee
+WITH caller, callee, r
 ORDER BY callee.repo, callee.path, callee.line
 RETURN caller.name AS caller,
        caller.repo AS caller_repo,
@@ -304,7 +305,8 @@ RETURN caller.name AS caller,
        labels(callee) AS labels,
        callee.name AS callee,
        callee.repo AS callee_repo,
-       callee.path AS callee_path
+       callee.path AS callee_path,
+       coalesce(r.confidence, '') AS confidence
 LIMIT $limit
 `
 	return s.runCallEdgeQuery(ctx, cypher, symbol, repos)
@@ -332,6 +334,7 @@ func (s *Service) runCallEdgeQuery(ctx context.Context, cypher, symbol string, r
 				CalleeRepo: asString(m["callee_repo"]),
 				CalleePath: asString(m["callee_path"]),
 				Labels:     asStringSlice(m["labels"]),
+				Confidence: asString(m["confidence"]),
 			})
 		}
 		return edges, nil
@@ -456,6 +459,7 @@ RETURN ns[i].name  AS name,
        ns[i].path  AS path,
        labels(ns[i]) AS labels,
        CASE WHEN i = 0 THEN '' ELSE type(rs[i-1]) END AS relationship,
+       CASE WHEN i = 0 THEN '' ELSE coalesce(rs[i-1].confidence, '') END AS rel_confidence,
        i AS idx
 ORDER BY idx
 `, shortestPathCandidatePairs, shortestPathRelTypes, shortestPathHopsMax)
@@ -473,11 +477,12 @@ ORDER BY idx
 		for _, r := range records {
 			m := r.AsMap()
 			path = append(path, PathNode{
-				Name:         asString(m["name"]),
-				Repo:         asString(m["repo"]),
-				Path:         asString(m["path"]),
-				Labels:       asStringSlice(m["labels"]),
-				Relationship: asString(m["relationship"]),
+				Name:          asString(m["name"]),
+				Repo:          asString(m["repo"]),
+				Path:          asString(m["path"]),
+				Labels:        asStringSlice(m["labels"]),
+				Relationship:  asString(m["relationship"]),
+				RelConfidence: asString(m["rel_confidence"]),
 			})
 		}
 		return path, nil

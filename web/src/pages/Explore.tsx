@@ -3,7 +3,7 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { useRepoScope } from "../context/RepoScope";
 import { StatusBox } from "../components/StatusBox";
-import { DataTable, LabelBadges, joinList } from "../components/DataTable";
+import { DataTable, LabelBadges, ConfidenceBadge, joinList } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
 import { Button, Card, Input, PageHeader, Segmented } from "../components/ui";
@@ -351,6 +351,7 @@ function DependenciesForm() {
               { header: "Version", render: (r) => r.version || "-" },
               { header: "Scope", render: (r) => r.scope || "-" },
               { header: "Cross-repo", render: (r) => (r.cross_repo ? "✓" : "") },
+              { header: "Confidence", render: (r) => <ConfidenceBadge confidence={r.confidence} /> },
             ]}
           />
         )}
