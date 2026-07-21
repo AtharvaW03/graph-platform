@@ -10,7 +10,7 @@ repositories:
 # Invocation settings (command/args/output_file/timeout) default from the
 # code (extract --code-only --force); set them here only to override.
 graphify:
-  expected_version: "0.9.13" # must match the graphifyy version pinned in the Docker image
+  expected_version: "0.9.20" # must match the graphifyy version pinned in the Docker image
 
 extractors:
   deps: true
