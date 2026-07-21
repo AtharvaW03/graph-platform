@@ -215,7 +215,8 @@ export function LabelBadges({ labels }: { labels: string[] }) {
 
 // Plain-language label + tone + the technical tier in a hover hint, per the
 // UI convention of keeping jargon out of the visible text. An unknown/empty
-// confidence renders nothing rather than a misleading badge.
+// confidence renders a plain "-" (table-cell placeholder), never a
+// misleading badge; inline contexts should skip rendering it instead.
 const CONFIDENCE_DISPLAY: Record<
   string,
   { label: string; tone: "success" | "warning" | "danger"; hint: string }

@@ -173,8 +173,13 @@ export function Impact() {
               <li key={`${node.repo}:${node.path}:${i}`}>
                 {node.relationship && (
                   <span className="rel-arrow">
-                    --[{node.relationship}]--&gt;{" "}
-                    <ConfidenceBadge confidence={node.rel_confidence} />
+                    --[{node.relationship}]--&gt;
+                    {node.rel_confidence && (
+                      <>
+                        {" "}
+                        <ConfidenceBadge confidence={node.rel_confidence} />
+                      </>
+                    )}
                   </span>
                 )}
                 <strong>{node.name}</strong>{" "}
