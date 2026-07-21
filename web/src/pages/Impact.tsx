@@ -3,7 +3,7 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { useRepoScope } from "../context/RepoScope";
 import { StatusBox } from "../components/StatusBox";
-import { DataTable, LabelBadges } from "../components/DataTable";
+import { DataTable, LabelBadges, ConfidenceBadge } from "../components/DataTable";
 import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
 import { Button, Card, Input, PageHeader, Segmented } from "../components/ui";
@@ -133,6 +133,7 @@ export function Impact() {
               { header: "Path", render: (r) => r.caller_path },
               { header: "Line", render: (r) => r.caller_line },
               { header: "Callee", render: (r) => r.callee },
+              { header: "Confidence", render: (r) => <ConfidenceBadge confidence={r.confidence} /> },
             ]}
           />
         )}
@@ -144,6 +145,7 @@ export function Impact() {
             columns={[
               { header: "Caller", render: (r) => r.caller },
               { header: "Callee", render: (r) => r.callee },
+              { header: "Confidence", render: (r) => <ConfidenceBadge confidence={r.confidence} /> },
               { header: "Labels", render: (r) => <LabelBadges labels={r.labels} /> },
               { header: "Repo", render: (r) => r.callee_repo },
               { header: "Path", render: (r) => r.callee_path },
@@ -170,7 +172,15 @@ export function Impact() {
             {path.data.map((node, i) => (
               <li key={`${node.repo}:${node.path}:${i}`}>
                 {node.relationship && (
-                  <span className="rel-arrow">--[{node.relationship}]--&gt;</span>
+                  <span className="rel-arrow">
+                    --[{node.relationship}]--&gt;
+                    {node.rel_confidence && (
+                      <>
+                        {" "}
+                        <ConfidenceBadge confidence={node.rel_confidence} />
+                      </>
+                    )}
+                  </span>
                 )}
                 <strong>{node.name}</strong>{" "}
                 <span className="mono">

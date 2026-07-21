@@ -23,6 +23,10 @@ type SymbolResult struct {
 
 // CallEdge is one CALLS relationship, shared by FindCallers and FindCallees.
 // In FindCallers, Labels are the caller's labels; in FindCallees, the callee's.
+// Confidence is the edge's extraction confidence (EXTRACTED / INFERRED /
+// AMBIGUOUS; empty if unlabeled) - a direct call is EXTRACTED, a call resolved
+// by graphify's heuristic second pass is INFERRED, so this tells a consumer
+// how much to trust the edge.
 type CallEdge struct {
 	Caller     string   `json:"caller"`
 	CallerRepo string   `json:"caller_repo"`
@@ -32,6 +36,7 @@ type CallEdge struct {
 	CalleeRepo string   `json:"callee_repo"`
 	CalleePath string   `json:"callee_path"`
 	Labels     []string `json:"labels"`
+	Confidence string   `json:"confidence,omitempty"`
 }
 
 // ImpactNode is one downstream node reachable from a symbol within depth N.
@@ -45,24 +50,31 @@ type ImpactNode struct {
 }
 
 // PathNode is one node along a shortest path; Relationship is the edge type
-// leading INTO this node from the previous one (empty on the first node).
+// leading INTO this node from the previous one (empty on the first node), and
+// RelConfidence is that edge's extraction confidence (EXTRACTED / INFERRED /
+// AMBIGUOUS; empty on the first node or when unlabeled).
 type PathNode struct {
-	Name         string   `json:"name"`
-	Repo         string   `json:"repo"`
-	Path         string   `json:"path"`
-	Labels       []string `json:"labels"`
-	Relationship string   `json:"relationship,omitempty"`
+	Name          string   `json:"name"`
+	Repo          string   `json:"repo"`
+	Path          string   `json:"path"`
+	Labels        []string `json:"labels"`
+	Relationship  string   `json:"relationship,omitempty"`
+	RelConfidence string   `json:"rel_confidence,omitempty"`
 }
 
 // DependencyEdge is one repo→package or repo→repo edge from the deps extractor.
+// Confidence is the edge's extraction confidence (EXTRACTED / INFERRED /
+// AMBIGUOUS; empty if unlabeled): a manifest-declared dependency is EXTRACTED,
+// while an inferred cross-repo (DEPENDS_ON_REPO) edge is typically INFERRED.
 type DependencyEdge struct {
-	Repo      string   `json:"repo"`
-	Name      string   `json:"name"`      // package or repo name
-	Labels    []string `json:"labels"`    // includes Package and (when cross-repo) Repository
-	Ecosystem string   `json:"ecosystem"` // go | npm | pypi | maven | …
-	Version   string   `json:"version,omitempty"`
-	Scope     string   `json:"scope,omitempty"`
-	Cross     bool     `json:"cross_repo"` // true if this is a DEPENDS_ON_REPO edge
+	Repo       string   `json:"repo"`
+	Name       string   `json:"name"`      // package or repo name
+	Labels     []string `json:"labels"`    // includes Package and (when cross-repo) Repository
+	Ecosystem  string   `json:"ecosystem"` // go | npm | pypi | maven | …
+	Version    string   `json:"version,omitempty"`
+	Scope      string   `json:"scope,omitempty"`
+	Cross      bool     `json:"cross_repo"` // true if this is a DEPENDS_ON_REPO edge
+	Confidence string   `json:"confidence,omitempty"`
 }
 
 // HTTPRoute is one row from the routes inventory.

@@ -44,6 +44,8 @@ export interface CallEdge {
   callee_repo: string;
   callee_path: string;
   labels: string[];
+  // EXTRACTED (explicit call) / INFERRED (heuristic) / AMBIGUOUS; empty if unlabeled.
+  confidence?: string;
 }
 
 export interface ImpactNode {
@@ -61,6 +63,8 @@ export interface PathNode {
   path: string;
   labels: string[];
   relationship?: string;
+  // Confidence of the edge leading into this node; empty on the first node.
+  rel_confidence?: string;
 }
 
 export interface DependencyEdge {
@@ -71,6 +75,8 @@ export interface DependencyEdge {
   version?: string;
   scope?: string;
   cross_repo: boolean;
+  // EXTRACTED (manifest-declared) / INFERRED (cross-repo) / AMBIGUOUS; empty if unlabeled.
+  confidence?: string;
 }
 
 export interface HTTPRoute {

@@ -212,3 +212,38 @@ export function LabelBadges({ labels }: { labels: string[] }) {
     </>
   );
 }
+
+// Plain-language label + tone + the technical tier in a hover hint, per the
+// UI convention of keeping jargon out of the visible text. An unknown/empty
+// confidence renders a plain "-" (table-cell placeholder), never a
+// misleading badge; inline contexts should skip rendering it instead.
+const CONFIDENCE_DISPLAY: Record<
+  string,
+  { label: string; tone: "success" | "warning" | "danger"; hint: string }
+> = {
+  EXTRACTED: {
+    label: "Explicit",
+    tone: "success",
+    hint: "EXTRACTED — stated directly in the source (e.g. an import or a direct call). Near-certain.",
+  },
+  INFERRED: {
+    label: "Inferred",
+    tone: "warning",
+    hint: "INFERRED — deduced heuristically (e.g. a regex match or a call-graph second pass). Treat as a lead, not a proof.",
+  },
+  AMBIGUOUS: {
+    label: "Ambiguous",
+    tone: "danger",
+    hint: "AMBIGUOUS — the extractor was unsure; low confidence.",
+  },
+};
+
+export function ConfidenceBadge({ confidence }: { confidence?: string }) {
+  const d = confidence ? CONFIDENCE_DISPLAY[confidence] : undefined;
+  if (!d) return <>-</>;
+  return (
+    <span title={d.hint}>
+      <Badge tone={d.tone}>{d.label}</Badge>
+    </span>
+  );
+}

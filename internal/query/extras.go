@@ -32,7 +32,8 @@ RETURN p.name                          AS name,
        coalesce(p.ecosystem, '')        AS ecosystem,
        coalesce(p.version, '')          AS version,
        coalesce(d.context, '')          AS scope,
-       type(d) = 'DEPENDS_ON_REPO'      AS cross
+       type(d) = 'DEPENDS_ON_REPO'      AS cross,
+       coalesce(d.confidence, '')       AS confidence
 ORDER BY ecosystem, name
 LIMIT $limit
 `
@@ -56,7 +57,8 @@ RETURN r.name                          AS name,
        coalesce(p.ecosystem, '')        AS ecosystem,
        coalesce(p.version, '')          AS version,
        coalesce(d.context, '')          AS scope,
-       type(d) = 'DEPENDS_ON_REPO'      AS cross
+       type(d) = 'DEPENDS_ON_REPO'      AS cross,
+       coalesce(d.confidence, '')       AS confidence
 ORDER BY name
 LIMIT $limit
 `
@@ -78,13 +80,14 @@ func (s *Service) runDepQuery(ctx context.Context, cypher string, params map[str
 		for _, r := range records {
 			m := r.AsMap()
 			edges = append(edges, DependencyEdge{
-				Repo:      repoBound,
-				Name:      asString(m["name"]),
-				Labels:    asStringSlice(m["labels"]),
-				Ecosystem: asString(m["ecosystem"]),
-				Version:   asString(m["version"]),
-				Scope:     asString(m["scope"]),
-				Cross:     asBool(m["cross"]),
+				Repo:       repoBound,
+				Name:       asString(m["name"]),
+				Labels:     asStringSlice(m["labels"]),
+				Ecosystem:  asString(m["ecosystem"]),
+				Version:    asString(m["version"]),
+				Scope:      asString(m["scope"]),
+				Cross:      asBool(m["cross"]),
+				Confidence: asString(m["confidence"]),
 			})
 		}
 		return edges, nil

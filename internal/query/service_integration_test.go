@@ -135,7 +135,7 @@ func TestIntegration_ShortestPath_FindsRealPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("import nodes: %v", err)
 	}
-	links := []graphify.Link{{Source: "a1", Target: "a2", Relation: "calls"}}
+	links := []graphify.Link{{Source: "a1", Target: "a2", Relation: "calls", Confidence: "EXTRACTED"}}
 	if _, _, _, err := c.ImportLinks(ctx, repo, "c1", "r1", links, idToKey, sharedKeys, false); err != nil {
 		t.Fatalf("import links: %v", err)
 	}
@@ -149,6 +149,29 @@ func TestIntegration_ShortestPath_FindsRealPath(t *testing.T) {
 	}
 	if path[1].Relationship != "CALLS" {
 		t.Errorf("relationship = %q, want CALLS", path[1].Relationship)
+	}
+	if path[0].RelConfidence != "" {
+		t.Errorf("first node carries a rel confidence %q, want empty (no inbound edge)", path[0].RelConfidence)
+	}
+	if path[1].RelConfidence != "EXTRACTED" {
+		t.Errorf("rel_confidence = %q, want EXTRACTED (stamped on the seeded edge)", path[1].RelConfidence)
+	}
+
+	// The same edge's confidence must also surface on the callers/callees
+	// views - they read it from a different query than ShortestPath does.
+	callers, err := svc.FindCallers(ctx, "calleefn", nil)
+	if err != nil {
+		t.Fatalf("FindCallers: %v", err)
+	}
+	if len(callers) != 1 || callers[0].Confidence != "EXTRACTED" {
+		t.Errorf("FindCallers confidence = %+v, want one edge with EXTRACTED", callers)
+	}
+	callees, err := svc.FindCallees(ctx, "callerfn", nil)
+	if err != nil {
+		t.Fatalf("FindCallees: %v", err)
+	}
+	if len(callees) != 1 || callees[0].Confidence != "EXTRACTED" {
+		t.Errorf("FindCallees confidence = %+v, want one edge with EXTRACTED", callees)
 	}
 }
 

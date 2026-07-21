@@ -40,7 +40,7 @@ func TestIntegration_FindDependents_CaseInsensitive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("import nodes: %v", err)
 	}
-	links := []graphify.Link{{Source: "repo::" + repo, Target: "pkg1", Relation: "depends_on"}}
+	links := []graphify.Link{{Source: "repo::" + repo, Target: "pkg1", Relation: "depends_on", Confidence: "INFERRED"}}
 	if _, _, _, err := c.ImportLinks(ctx, repo, "c1", "r1", links, idToKey, sharedKeys, false); err != nil {
 		t.Fatalf("import links: %v", err)
 	}
@@ -51,6 +51,9 @@ func TestIntegration_FindDependents_CaseInsensitive(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Name != repo {
 		t.Errorf("FindDependents(lowercase) = %+v, want one edge from %q", got, repo)
+	}
+	if len(got) == 1 && got[0].Confidence != "INFERRED" {
+		t.Errorf("FindDependents confidence = %q, want INFERRED (stamped on the seeded edge)", got[0].Confidence)
 	}
 }
 
