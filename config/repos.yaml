@@ -40,7 +40,7 @@ git:
   timeout: 10m
 
 graphify:
-  expected_version: "0.9.20" # must match the graphifyy version pinned in the Docker image
+  expected_version: "0.9.23" # must match the graphifyy version pinned in the Docker image
   # ignore_patterns: ["*.tfvars"]  # appended to every checkout's .graphifyignore; this is the default
 
 extractors:
