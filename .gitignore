@@ -8,6 +8,11 @@ config/repos.local.yaml
 # Local env files (never commit tokens/passwords)
 .env
 
+# Secrets that must never be committed - the GitHub App private key especially
+# (it grants read to every private repo the App is installed on)
+*.pem
+*.key
+
 # Built binaries when `go build` is run without -o
 /indexer
 /importer
