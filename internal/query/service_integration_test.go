@@ -227,6 +227,64 @@ func TestIntegration_ExactMatch_ToleratesTrailingParens(t *testing.T) {
 	}
 }
 
+// TestIntegration_ExactMatch_ParenSuffixedFunctionNames seeds Function nodes
+// named the way graphify ACTUALLY stores them - with a trailing "()"
+// ("GetDepositService()"; InferLabel detects functions by that exact suffix,
+// and the entry-point queries match 'main()') - and asserts every exact-match
+// query finds them from BOTH typed spellings. Regression test for a P0: a
+// previous fix stripped "()" from user input before matching on the wrong
+// assumption that stored names are bare, which made Function nodes
+// unfindable by any spelling in callers/callees/blast-radius/path.
+func TestIntegration_ExactMatch_ParenSuffixedFunctionNames(t *testing.T) {
+	svc, c := testService(t)
+	ctx := context.Background()
+	repo := uniqueQueryRepo(t, "fnparens")
+	t.Cleanup(func() { wipeQueryRepo(t, c, repo) })
+
+	if err := c.MergeRepository(ctx, repo); err != nil {
+		t.Fatalf("merge repository: %v", err)
+	}
+
+	nodes := []graphify.Node{
+		queryAstNode("d1", "depositController()", "controller.go"),
+		queryAstNode("d2", "GetDepositService()", "service.go"),
+	}
+	idToKey, sharedKeys, _, err := c.ImportNodes(ctx, repo, "c1", "r1", nodes, false)
+	if err != nil {
+		t.Fatalf("import nodes: %v", err)
+	}
+	links := []graphify.Link{{Source: "d1", Target: "d2", Relation: "calls", Confidence: "EXTRACTED"}}
+	if _, _, _, err := c.ImportLinks(ctx, repo, "c1", "r1", links, idToKey, sharedKeys, false); err != nil {
+		t.Fatalf("import links: %v", err)
+	}
+
+	for _, typed := range []string{"GetDepositService", "GetDepositService()"} {
+		if got, err := svc.FindSymbol(ctx, typed, nil); err != nil || len(got) != 1 {
+			t.Errorf("FindSymbol(%q) = %v, %v; want 1 result", typed, got, err)
+		}
+		if got, err := svc.FindCallers(ctx, typed, nil); err != nil || len(got) != 1 {
+			t.Errorf("FindCallers(%q) = %v, %v; want 1 caller", typed, got, err)
+		}
+		if got, err := svc.FindSymbol(ctx, typed, []string{repo}); err != nil || len(got) != 1 {
+			t.Errorf("FindSymbol(%q, repo-scoped) = %v, %v; want 1 result", typed, got, err)
+		}
+	}
+	for _, typed := range []string{"depositController", "depositController()"} {
+		if got, err := svc.FindCallees(ctx, typed, nil); err != nil || len(got) != 1 {
+			t.Errorf("FindCallees(%q) = %v, %v; want 1 callee", typed, got, err)
+		}
+		if got, err := svc.BlastRadius(ctx, typed, 0, nil); err != nil || len(got) != 1 {
+			t.Errorf("BlastRadius(%q) = %v, %v; want 1 reachable node", typed, got, err)
+		}
+	}
+	if path, err := svc.ShortestPath(ctx, "depositController", "GetDepositService()", nil); err != nil || len(path) != 2 {
+		t.Errorf("ShortestPath(mixed spellings) = %v, %v; want a 2-node path", path, err)
+	}
+	if self, err := svc.ShortestPath(ctx, "GetDepositService()", "getdepositservice", nil); err != nil || len(self) != 1 {
+		t.Errorf("ShortestPath(same fn, different spellings) = %v, %v; want the 1-node self-path", self, err)
+	}
+}
+
 // TestIntegration_ShortestPath_FindsConnectedPairAmongAmbiguousNames: the
 // same name ("widget") matches in two repos and only one of them is
 // connected to the target name ("helper"); the connected pair must be
