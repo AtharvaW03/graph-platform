@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"graph-platform/internal/graphify"
+	"a1-knowledge-graph/internal/graphify"
 )
 
 // typedNode is queryAstNode plus an explicit graphify.Node.Type, which is

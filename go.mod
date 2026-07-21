@@ -1,4 +1,4 @@
-module graph-platform
+module a1-knowledge-graph
 
 go 1.26.4
 

@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"graph-platform/internal/graphify"
+	"a1-knowledge-graph/internal/graphify"
 
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )

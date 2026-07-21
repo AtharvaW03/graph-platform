@@ -11,7 +11,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"graph-platform/internal/httpmw"
+	"a1-knowledge-graph/internal/httpmw"
 )
 
 // bearerTransport injects a static Authorization header on every request,

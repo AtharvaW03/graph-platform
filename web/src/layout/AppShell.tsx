@@ -35,7 +35,7 @@ const NAV_GROUPS: {
 
 export function AppShell() {
   const [theme, setTheme] = useState<"light" | "dark">(() => {
-    const stored = localStorage.getItem("graph-platform-theme");
+    const stored = localStorage.getItem("a1-knowledge-graph-theme");
     if (stored === "dark" || stored === "light") return stored;
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   });
@@ -46,7 +46,7 @@ export function AppShell() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("graph-platform-theme", theme);
+    localStorage.setItem("a1-knowledge-graph-theme", theme);
   }, [theme]);
 
   useEffect(() => {

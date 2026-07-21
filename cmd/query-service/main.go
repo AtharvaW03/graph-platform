@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"graph-platform/internal/api"
-	"graph-platform/internal/httpmw"
-	"graph-platform/internal/neo4j"
-	"graph-platform/internal/query"
+	"a1-knowledge-graph/internal/api"
+	"a1-knowledge-graph/internal/httpmw"
+	"a1-knowledge-graph/internal/neo4j"
+	"a1-knowledge-graph/internal/query"
 )
 
 // requestTimeout bounds each request end-to-end, propagating through the

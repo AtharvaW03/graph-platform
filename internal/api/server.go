@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"graph-platform/internal/query"
+	"a1-knowledge-graph/internal/query"
 )
 
 // WithRequestTimeout wraps h so every request context carries a deadline.

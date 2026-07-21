@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"graph-platform/internal/httpmw"
-	"graph-platform/internal/mcp"
+	"a1-knowledge-graph/internal/httpmw"
+	"a1-knowledge-graph/internal/mcp"
 )
 
 func main() {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"graph-platform/internal/graphify"
+	"a1-knowledge-graph/internal/graphify"
 )
 
 // fakeClient records the call sequence and the arguments the importer passed,

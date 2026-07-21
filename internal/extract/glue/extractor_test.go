@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"graph-platform/internal/extract"
+	"a1-knowledge-graph/internal/extract"
 )
 
 const fixtureTF = `resource "aws_glue_job" "daily" {

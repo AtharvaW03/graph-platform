@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"graph-platform/internal/extract"
+	"a1-knowledge-graph/internal/extract"
 )
 
 // runExtractFrag writes files into a temp repo and returns the raw fragment,
