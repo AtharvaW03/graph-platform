@@ -157,7 +157,7 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 		return summary, err
 	}
 
-	for _, repo := range repos {
+	for i, repo := range repos {
 		if ctx.Err() != nil {
 			o.Log.Printf("context canceled, stopping after %d/%d repositories", len(summary.Results), len(repos))
 			break
@@ -168,7 +168,11 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 				return summary, fmt.Errorf("%w: renewal failed before repo %q: %w", errLeaseLost, repo.Name, err)
 			}
 		}
-		result := o.IndexOne(ctx, repo, opts.Force)
+		// tag prefixes this repo's log lines with its position in the run
+		// ("3/16 auth-service"), so an operator watching a full --all pass
+		// always knows how far along it is.
+		tag := fmt.Sprintf("%d/%d %s", i+1, len(repos), repo.Name)
+		result := o.indexOne(ctx, repo, opts.Force, tag)
 		summary.Results = append(summary.Results, result)
 		o.stampSync(ctx, result)
 	}
@@ -333,6 +337,13 @@ func (o *Orchestrator) reconcileRetired(ctx context.Context, configured []Reposi
 // Panics in any stage are recovered into a StagePanic-tagged StatusFailed
 // result. State persistence failures are logged but not propagated.
 func (o *Orchestrator) IndexOne(ctx context.Context, repo Repository, force bool) RepoResult {
+	return o.indexOne(ctx, repo, force, repo.Name)
+}
+
+// indexOne is IndexOne with an explicit log tag - the position-prefixed
+// "3/16 auth-service" when driven by RunOnce's loop, or the bare repo name
+// for a direct single-repo call.
+func (o *Orchestrator) indexOne(ctx context.Context, repo Repository, force bool, tag string) RepoResult {
 	start := o.now()
 	prev, _ := o.Store.Get(repo.Name)
 
@@ -354,9 +365,9 @@ func (o *Orchestrator) IndexOne(ctx context.Context, repo Repository, force bool
 		}
 	}()
 
-	o.runPipeline(ctx, repo, force, prev, start, &result)
+	o.runPipeline(ctx, repo, force, prev, start, &result, tag)
 	o.persistResult(repo.Name, result)
-	o.logResult(result)
+	o.logResult(result, tag)
 	return result
 }
 
@@ -373,10 +384,10 @@ func (o *Orchestrator) persistResult(name string, r RepoResult) {
 // runPipeline performs the per-stage work, writing progress directly into
 // the caller-provided *RepoResult so a panic mid-stage still leaves partial
 // progress (Commit, Nodes) visible to IndexOne's deferred recover.
-func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force bool, prev RepoState, start time.Time, result *RepoResult) {
+func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force bool, prev RepoState, start time.Time, result *RepoResult, tag string) {
 	repoPath := filepath.Join(o.WorkDir, "repos", repo.Name)
 
-	o.Log.Printf("[%s] sync %s @ %s", repo.Name, repo.URL, repo.Branch)
+	o.Log.Printf("[%s] sync %s @ %s", tag, repo.URL, repo.Branch)
 	commit, err := o.Syncer.Sync(ctx, repo, repoPath)
 	if o.recordFailure(result, StageSync, err, start, ctx) {
 		return
@@ -391,7 +402,7 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	if !force && prev.LastStatus == StatusSuccess && prev.LastIndexedCommit == commit {
 		if prev.SchemaVersion != GraphSchemaVersion {
 			o.Log.Printf("[%s] graph schema changed (v%d -> v%d), re-indexing despite unchanged HEAD",
-				repo.Name, prev.SchemaVersion, GraphSchemaVersion)
+				tag, prev.SchemaVersion, GraphSchemaVersion)
 		} else {
 			result.Status = StatusSkipped
 			result.Reason = fmt.Sprintf("HEAD %s unchanged since %s", commit, prev.LastIndexedAt.Format(time.RFC3339))
@@ -400,7 +411,7 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 		}
 	}
 
-	o.Log.Printf("[%s] graphify %s", repo.Name, commit)
+	o.Log.Printf("[%s] graphify %s", tag, commit)
 	graphPath, err := o.Graphify.Generate(ctx, repoPath)
 	if o.recordFailure(result, StageGraphify, err, start, ctx) {
 		return
@@ -417,15 +428,14 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	// the sweep cannot delete a failed extractor's last-known-good data.
 	importPath := graphPath
 	if o.Extractors != nil && len(o.Extractors.Extractors) > 0 {
-		o.Log.Printf("[%s] extract (%d extractors)", repo.Name, len(o.Extractors.Extractors))
+		o.Log.Printf("[%s] extract (%d extractors)", tag, len(o.Extractors.Extractors))
 		// extract.Runner only logs a failure or a warning, never progress - on
 		// a huge repo this stage can go silent for minutes the same way
-		// graphify's subprocess can, so it gets the same still-running ticker.
-		stopTicker := startProgressTicker(progressTickInterval, func(elapsed time.Duration) {
-			o.Log.Printf("[%s] extract still running (%s elapsed)", repo.Name, elapsed)
-		})
+		// graphify's subprocess can, so it gets the same spinner treatment
+		// (animated on a terminal, a periodic still-running line when piped).
+		stopSpinner := startSpinner(o.Log.Writer(), tag+": running extractors", progressTickInterval)
 		extResult := o.Extractors.Run(ctx, repoPath, repo.Name)
-		stopTicker()
+		stopSpinner()
 		if len(extResult.Errors) > 0 {
 			result.ExtractorErrors = map[string]string{}
 			for n, e := range extResult.Errors {
@@ -442,7 +452,7 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 					return
 				}
 			}
-			o.Log.Printf("[%s] WARNING: %d extractor(s) failed, allow_partial is set - importing the partial graph anyway", repo.Name, len(extResult.Errors))
+			o.Log.Printf("[%s] WARNING: %d extractor(s) failed, allow_partial is set - importing the partial graph anyway", tag, len(extResult.Errors))
 		}
 		if len(extResult.Fragments) > 0 {
 			result.ExtractorStats = map[string]ExtractorStat{}
@@ -468,7 +478,7 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 		return
 	}
 
-	o.Log.Printf("[%s] import %s", repo.Name, importPath)
+	o.Log.Printf("[%s] import %s", tag, importPath)
 	sum, err := o.Importer.Run(ctx, repo.Name, commit, importPath, force)
 	if o.recordFailure(result, StageImport, err, start, ctx) {
 		return
@@ -482,14 +492,14 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 	result.Mismatch = sum.NodesMismatch()
 	if result.Mismatch {
 		o.Log.Printf("[%s] WARNING: node-count mismatch - imported %d, Neo4j holds %d (delta %d). Investigate node_key collisions.",
-			repo.Name, sum.NodesTotal, sum.NodesInGraph, sum.NodesTotal-sum.NodesInGraph)
+			tag, sum.NodesTotal, sum.NodesInGraph, sum.NodesTotal-sum.NodesInGraph)
 	}
 	result.SweepResidueNodes = sum.SweepResidueNodes
 	result.SweepResidueRels = sum.SweepResidueRels
 	result.SweepResidue = sum.HasSweepResidue()
 	if result.SweepResidue {
 		o.Log.Printf("[%s] ERROR: sweep residue - %d stale nodes, %d stale relationships still present after SweepStale. Sweep logic is broken or a concurrent writer raced this run.",
-			repo.Name, result.SweepResidueNodes, result.SweepResidueRels)
+			tag, result.SweepResidueNodes, result.SweepResidueRels)
 	}
 
 	// A mismatch or sweep residue means the graph may not reflect what this
@@ -542,13 +552,24 @@ func (o *Orchestrator) markCanceled(r *RepoResult, stage Stage, start time.Time)
 
 // LogSummary writes a human-readable summary block to the orchestrator's logger.
 func (o *Orchestrator) LogSummary(s RunSummary) {
+	c := newColorizer(o.Log.Writer())
 	total, success, skipped, failed := s.Counts()
 	dur := s.FinishedAt.Sub(s.StartedAt).Round(time.Millisecond)
 	if s.FinishedAt.IsZero() {
 		dur = 0
 	}
+	// Only color a count when it's non-zero (a red "failed: 0" would read as a
+	// problem where there is none).
+	failedStr := fmt.Sprintf("failed: %d", failed)
+	if failed > 0 {
+		failedStr = c.wrap(ansiRed, failedStr)
+	}
+	successStr := fmt.Sprintf("success: %d", success)
+	if success > 0 {
+		successStr = c.wrap(ansiGreen, successStr)
+	}
 	o.Log.Printf("--- indexing summary (%s elapsed) ---", dur)
-	o.Log.Printf("  total: %d  success: %d  skipped: %d  failed: %d", total, success, skipped, failed)
+	o.Log.Printf("  total: %d  %s  skipped: %d  %s", total, successStr, skipped, failedStr)
 	for _, r := range s.Results {
 		switch r.Status {
 		case StatusSuccess:
@@ -556,28 +577,29 @@ func (o *Orchestrator) LogSummary(s RunSummary) {
 			if r.NodesSwept > 0 || r.EdgesSwept > 0 {
 				swept = fmt.Sprintf(", swept %d/%d", r.NodesSwept, r.EdgesSwept)
 			}
-			o.Log.Printf("  + %s @ %s: %d nodes, %d links (%s%s)", r.Name, shortSHA(r.Commit), r.Nodes, r.Links, r.Duration.Round(time.Millisecond), swept)
+			o.Log.Printf("  %s %s @ %s: %d nodes, %d links (%s%s)", c.wrap(ansiGreen, "✓"), r.Name, shortSHA(r.Commit), r.Nodes, r.Links, r.Duration.Round(time.Millisecond), swept)
 		case StatusSkipped:
-			o.Log.Printf("  = %s @ %s: %s", r.Name, shortSHA(r.Commit), r.Reason)
+			o.Log.Printf("  %s %s @ %s: %s", c.wrap(ansiGray, "⊘"), r.Name, shortSHA(r.Commit), r.Reason)
 		case StatusFailed:
-			o.Log.Printf("  ! %s: %s failed: %s", r.Name, r.Stage, r.Error)
+			o.Log.Printf("  %s %s: %s failed: %s", c.wrap(ansiRed, "✗"), r.Name, r.Stage, r.Error)
 		}
 	}
 }
 
-func (o *Orchestrator) logResult(r RepoResult) {
+func (o *Orchestrator) logResult(r RepoResult, tag string) {
+	c := newColorizer(o.Log.Writer())
 	switch r.Status {
 	case StatusSuccess:
-		o.Log.Printf("[%s] success: %d nodes, %d links in %s (swept %d nodes / %d edges)",
-			r.Name, r.Nodes, r.Links, r.Duration.Round(time.Millisecond), r.NodesSwept, r.EdgesSwept)
+		o.Log.Printf("[%s] %s: %d nodes, %d links in %s (swept %d nodes / %d edges)",
+			tag, c.wrap(ansiGreen, "success"), r.Nodes, r.Links, r.Duration.Round(time.Millisecond), r.NodesSwept, r.EdgesSwept)
 	case StatusSkipped:
 		if r.Canceled {
-			o.Log.Printf("[%s] canceled during %s", r.Name, r.Stage)
+			o.Log.Printf("[%s] %s during %s", tag, c.wrap(ansiGray, "canceled"), r.Stage)
 		} else {
-			o.Log.Printf("[%s] skipped: %s", r.Name, r.Reason)
+			o.Log.Printf("[%s] %s: %s", tag, c.wrap(ansiGray, "skipped"), r.Reason)
 		}
 	case StatusFailed:
-		o.Log.Printf("[%s] FAILED (%s): %s", r.Name, r.Stage, r.Error)
+		o.Log.Printf("[%s] %s (%s): %s", tag, c.wrap(ansiRed, "FAILED"), r.Stage, r.Error)
 	}
 }
 

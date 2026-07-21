@@ -92,19 +92,28 @@ func (g *ExecGraphifier) Generate(ctx context.Context, repoPath string) (string,
 		stderrSink = os.Stderr
 	}
 	tail := &tailWriter{max: 4096}
-	cmd.Stdout = io.MultiWriter(stderrSink, tail)
-	cmd.Stderr = io.MultiWriter(stderrSink, tail)
 
-	// graphify can sit silent for minutes on a big repo; without this an
-	// operator watching the terminal can't tell it apart from a hang. Args
-	// carries {repo_path} already substituted, not the repo's platform name,
-	// so this derives a short label from the checkout dir instead of adding a
+	// graphify can sit silent for minutes on a big repo; without a progress
+	// indicator an operator watching the terminal can't tell it apart from a
+	// hang. On an interactive terminal, show a single animated spinner line and
+	// keep graphify's own chatter off the screen (still captured in tail for
+	// error context) so it can't corrupt the in-place redraw. Piped/captured
+	// (the daemon in production): graphify output flows to the sink as before
+	// and the spinner degrades to a periodic one-line "still running" log.
+	//
+	// Args carries {repo_path} already substituted, not the repo's platform
+	// name, so the label derives from the checkout dir rather than adding a
 	// repo-name parameter to the Graphifier interface.
+	if isTerminal(stderrSink) {
+		cmd.Stdout = tail
+		cmd.Stderr = tail
+	} else {
+		cmd.Stdout = io.MultiWriter(stderrSink, tail)
+		cmd.Stderr = io.MultiWriter(stderrSink, tail)
+	}
 	repoLabel := filepath.Base(absRepo)
-	stopTicker := startProgressTicker(progressTickInterval, func(elapsed time.Duration) {
-		fmt.Fprintf(stderrSink, "[%s] graphify still running (%s elapsed)\n", repoLabel, elapsed)
-	})
-	defer stopTicker()
+	stopSpinner := startSpinner(stderrSink, repoLabel+": extracting", progressTickInterval)
+	defer stopSpinner()
 
 	if err := cmd.Run(); err != nil {
 		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
