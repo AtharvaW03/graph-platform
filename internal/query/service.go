@@ -126,10 +126,14 @@ LIMIT $limit
 	return out.([]SearchResult), nil
 }
 
-// searchFallback is the original exact/prefix/CONTAINS scan, unchanged: it
-// matches the indexed name_lower/norm_name_lower columns (the term is
-// lowercased here), ordered by match quality (exact > prefix > contains) then
-// name length.
+// searchFallback is the original exact/prefix/CONTAINS scan: it matches the
+// indexed name_lower/norm_name_lower columns (the term is run through
+// normalizeSymbol here, same as every exact-match query below), ordered by
+// match quality (exact > prefix > contains) then name length. The fulltext
+// tier tried first already tolerates a trailing "ConvertPosition()" because
+// Lucene's analyzer tokenizes the parens away, but this fallback is the
+// safety net for when fulltext is unavailable or comes back empty, so it
+// needs the same tolerance rather than silently losing it.
 func (s *Service) searchFallback(ctx context.Context, q string, repos []string) ([]SearchResult, error) {
 	const cypher = `
 MATCH (n:Entity)
@@ -154,7 +158,7 @@ LIMIT $limit
 `
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"q": strings.ToLower(q), "limit": searchLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"q": normalizeSymbol(q), "limit": searchLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -189,6 +193,22 @@ func searchResultFromRecord(r *driver.Record) SearchResult {
 	}
 }
 
+// normalizeSymbol prepares a user-typed symbol for exact-match lookup:
+// trims whitespace, drops a trailing call-syntax suffix ("ConvertPosition()"
+// or "ConvertPosition(a, b)" -> "ConvertPosition"), and lowercases. People
+// naturally type a function name the way they'd write it in code, parens and
+// all, but graphify never stores parens in an entity's name - left in, they
+// silently zero out every exact-match query (FindSymbol, FindCallers,
+// FindCallees, BlastRadius, ShortestPath) even though the symbol and its
+// edges are real.
+func normalizeSymbol(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '('); i > 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return strings.ToLower(s)
+}
+
 // FindSymbol returns every node whose name (or norm_name) exactly matches the
 // supplied symbol. Case-insensitive; repos non-empty scopes the match.
 func (s *Service) FindSymbol(ctx context.Context, symbol string, repos []string) ([]SymbolResult, error) {
@@ -211,7 +231,7 @@ LIMIT $limit
 `
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": strings.ToLower(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"s": normalizeSymbol(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -292,7 +312,7 @@ LIMIT $limit
 
 func (s *Service) runCallEdgeQuery(ctx context.Context, cypher, symbol string, repos []string) ([]CallEdge, error) {
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": strings.ToLower(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"s": normalizeSymbol(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -358,7 +378,7 @@ LIMIT $limit
 `, depth)
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"s": strings.ToLower(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"s": normalizeSymbol(symbol), "limit": symbolLimit, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -406,10 +426,11 @@ func (s *Service) ShortestPath(ctx context.Context, source, target string, repos
 	if source == "" || target == "" {
 		return []PathNode{}, nil
 	}
+	normSrc, normDst := normalizeSymbol(source), normalizeSymbol(target)
 	// Same symbol on both ends: the path is trivially the node itself.
 	// Answered directly because Neo4j's shortestPath throws a database error
 	// when a candidate pair has src == dst.
-	if strings.EqualFold(strings.TrimSpace(source), strings.TrimSpace(target)) {
+	if normSrc == normDst {
 		return s.selfPath(ctx, source, repos)
 	}
 
@@ -440,7 +461,7 @@ ORDER BY idx
 `, shortestPathCandidatePairs, shortestPathRelTypes, shortestPathHopsMax)
 
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"src": strings.ToLower(source), "dst": strings.ToLower(target), "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"src": normSrc, "dst": normDst, "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}
@@ -480,7 +501,7 @@ RETURN n.name AS name, n.repo AS repo, n.path AS path, labels(n) AS labels
 LIMIT 1
 `
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx, cypher, map[string]any{"q": strings.ToLower(strings.TrimSpace(symbol)), "repos": orEmpty(repos)})
+		res, err := tx.Run(ctx, cypher, map[string]any{"q": normalizeSymbol(symbol), "repos": orEmpty(repos)})
 		if err != nil {
 			return nil, err
 		}

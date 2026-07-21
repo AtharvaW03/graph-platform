@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	driver "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
@@ -40,13 +41,16 @@ LIMIT $limit
 
 // FindDependents returns every repository that depends on dep. dep may be a
 // package name or, for an inferred cross-repo edge, a short repo name.
+// Case-insensitive: package names come from many ecosystems' manifests
+// verbatim (deps extractor), and NuGet/Maven-style PascalCase names would
+// silently miss an exact case-sensitive match.
 func (s *Service) FindDependents(ctx context.Context, dep string) ([]DependencyEdge, error) {
 	if dep == "" {
 		return []DependencyEdge{}, nil
 	}
 	const cypher = `
-MATCH (r:Entity)-[d:DEPENDS_ON|DEPENDS_ON_REPO]->(p:Entity {name: $dep})
-WHERE r.graphify_id STARTS WITH 'repo::'
+MATCH (r:Entity)-[d:DEPENDS_ON|DEPENDS_ON_REPO]->(p:Entity)
+WHERE r.graphify_id STARTS WITH 'repo::' AND p.name_lower = $dep
 RETURN r.name                          AS name,
        labels(r)                       AS labels,
        coalesce(p.ecosystem, '')        AS ecosystem,
@@ -56,6 +60,7 @@ RETURN r.name                          AS name,
 ORDER BY name
 LIMIT $limit
 `
+	dep = strings.ToLower(strings.TrimSpace(dep))
 	return s.runDepQuery(ctx, cypher, map[string]any{"dep": dep, "limit": depLimit}, "")
 }
 
@@ -155,7 +160,10 @@ LIMIT 500
 }
 
 // FindKafkaTopic returns one topic plus all repositories that produce to or
-// consume from it. topic="" is an error.
+// consume from it. topic="" is an error. Case-insensitive: topic names are
+// stored however the extractor found them (some repos declare topics in
+// SCREAMING_SNAKE_CASE), so an exact-case match would silently miss real,
+// indexed topics.
 func (s *Service) FindKafkaTopic(ctx context.Context, topic string) (*KafkaTopicInfo, error) {
 	if topic == "" {
 		return nil, fmt.Errorf("topic required")
@@ -165,16 +173,32 @@ func (s *Service) FindKafkaTopic(ctx context.Context, topic string) (*KafkaTopic
 	// hub nodes so we surface repo names, not arbitrary function nodes if
 	// the extractor is later extended to emit finer-grained producers.
 	//
-	// Grouped by t.name so producers/consumers collect across every node with
-	// the topic's name (the unified shared node plus any legacy duplicates).
+	// t.name is wrapped in its own collect(DISTINCT ...) alongside the
+	// producer/consumer collects, not returned bare: a bare non-aggregated
+	// column next to aggregates makes Cypher implicitly group by it, which
+	// would silently split the result (and any caller's records[0] pick)
+	// across a "legacy duplicate" or case-variant topic node instead of
+	// merging them into the one answer this function promises.
+	//
+	// The "WITH collect(t) AS matches WHERE size(matches) > 0" step matters:
+	// once every RETURN column is an aggregate, Cypher still emits one row
+	// of nulls/empties for zero matches (an aggregate over zero rows is
+	// still a row), which would silently turn "topic not found" into a
+	// present-but-empty result instead of the nil this function's callers
+	// rely on for a 404. This filters that case out before it can happen.
 	const cypher = `
-MATCH (t:KafkaTopic {name: $topic})
+MATCH (t:KafkaTopic)
+WHERE t.name_lower = $topic
+WITH collect(t) AS matches
+WHERE size(matches) > 0
+UNWIND matches AS t
 OPTIONAL MATCH (rp:Entity)-[:PRODUCES]->(t) WHERE rp.graphify_id STARTS WITH 'repo::'
 OPTIONAL MATCH (rc:Entity)-[:CONSUMES]->(t) WHERE rc.graphify_id STARTS WITH 'repo::'
-RETURN t.name                             AS topic,
+RETURN head(collect(DISTINCT t.name))     AS topic,
        collect(DISTINCT rp.name)          AS producers,
        collect(DISTINCT rc.name)          AS consumers
 `
+	topic = strings.ToLower(strings.TrimSpace(topic))
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
 		res, err := tx.Run(ctx, cypher, map[string]any{"topic": topic})
 		if err != nil {
@@ -203,7 +227,14 @@ RETURN t.name                             AS topic,
 
 // FindSQLObject returns matching SQL Server objects (by bare or fully-qualified
 // name) plus the tables they read, write, depend on, or trigger on.
+// Case-insensitive: SQL Server's default collation is itself case-insensitive
+// (SQL_Latin1_General_CP1_CI_AS and friends), so an exact-case Cypher match
+// would diverge from how the objects actually behave in the database it's
+// describing - "dbo.Orders" and "dbo.orders" are the same table to SQL
+// Server, and this lookup needs to agree.
 func (s *Service) FindSQLObject(ctx context.Context, schema, name string) ([]SQLObjectInfo, error) {
+	schema = strings.ToLower(strings.TrimSpace(schema))
+	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
 		return []SQLObjectInfo{}, nil
 	}
@@ -215,8 +246,8 @@ func (s *Service) FindSQLObject(ctx context.Context, schema, name string) ([]SQL
 MATCH (o:Entity)
 WHERE any(l IN labels(o) WHERE l IN ['SqlTable','SqlView','SqlProcedure','SqlTrigger','SqlFunction','SqlSchema'])
   AND (
-    o.name = $full
-    OR ($schema = '' AND split(coalesce(o.name, ''), '.')[size(split(coalesce(o.name, ''), '.'))-1] = $name)
+    o.name_lower = $full
+    OR ($schema = '' AND split(coalesce(o.name_lower, ''), '.')[size(split(coalesce(o.name_lower, ''), '.'))-1] = $name)
   )
 OPTIONAL MATCH (o)-[:READS_TABLE]->(rt:SqlTable)
 OPTIONAL MATCH (o)-[:WRITES_TABLE]->(wt:SqlTable)
@@ -277,7 +308,9 @@ LIMIT $limit
 }
 
 // FindGlueJobs returns Glue jobs filtered by source or destination table.
-// Pass both arguments empty to list every Glue job.
+// Pass both arguments empty to list every Glue job. Case-insensitive source/
+// target matching, same reasoning as FindSQLObject: these are frequently the
+// same SQL Server tables, whose real-world identity is case-insensitive.
 func (s *Service) FindGlueJobs(ctx context.Context, source, target string) ([]GlueJobInfo, error) {
 	const cypher = `
 MATCH (j:GlueJob)
@@ -285,8 +318,8 @@ OPTIONAL MATCH (j)-[:READS_SOURCE]->(s:Entity)
 OPTIONAL MATCH (j)-[:WRITES_DESTINATION]->(t:Entity)
 OPTIONAL MATCH (r:Repository)-[:HAS_ENTITY]->(j)
 WITH j, r, collect(DISTINCT s.name) AS sources, collect(DISTINCT t.name) AS targets
-WHERE ($source = '' OR $source IN sources)
-  AND ($target = '' OR $target IN targets)
+WHERE ($source = '' OR $source IN [x IN sources | toLower(x)])
+  AND ($target = '' OR $target IN [x IN targets | toLower(x)])
 RETURN j.name                AS name,
        coalesce(r.name, '')   AS repo,
        labels(j)              AS labels,
@@ -298,6 +331,8 @@ RETURN j.name                AS name,
 ORDER BY repo, name
 LIMIT $limit
 `
+	source = strings.ToLower(strings.TrimSpace(source))
+	target = strings.ToLower(strings.TrimSpace(target))
 	out, err := s.read(ctx, func(tx driver.ManagedTransaction) (any, error) {
 		res, err := tx.Run(ctx, cypher, map[string]any{"source": source, "target": target, "limit": glueJobLimit})
 		if err != nil {

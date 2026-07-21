@@ -152,6 +152,58 @@ func TestIntegration_ShortestPath_FindsRealPath(t *testing.T) {
 	}
 }
 
+// TestIntegration_ExactMatch_ToleratesTrailingParens: a symbol typed the way
+// people write it in code ("ConvertPosition()") must match exactly like the
+// bare name across every exact-match query - FindSymbol, FindCallers,
+// FindCallees, BlastRadius, and ShortestPath (both directions and the
+// same-symbol self-path case). Regression test for a real bug: the graph
+// never stores parens in a name, so leaving them in silently zeroed out
+// every one of these despite the underlying CALLS edges being real.
+func TestIntegration_ExactMatch_ToleratesTrailingParens(t *testing.T) {
+	svc, c := testService(t)
+	ctx := context.Background()
+	repo := uniqueQueryRepo(t, "parens")
+	t.Cleanup(func() { wipeQueryRepo(t, c, repo) })
+
+	if err := c.MergeRepository(ctx, repo); err != nil {
+		t.Fatalf("merge repository: %v", err)
+	}
+
+	nodes := []graphify.Node{
+		queryAstNode("h1", "convertPositionController", "handler.go"),
+		queryAstNode("h2", "ConvertPosition", "provider.go"),
+	}
+	idToKey, sharedKeys, _, err := c.ImportNodes(ctx, repo, "c1", "r1", nodes, false)
+	if err != nil {
+		t.Fatalf("import nodes: %v", err)
+	}
+	links := []graphify.Link{{Source: "h1", Target: "h2", Relation: "calls"}}
+	if _, _, _, err := c.ImportLinks(ctx, repo, "c1", "r1", links, idToKey, sharedKeys, false); err != nil {
+		t.Fatalf("import links: %v", err)
+	}
+
+	if got, err := svc.FindSymbol(ctx, "ConvertPosition()", nil); err != nil || len(got) != 1 {
+		t.Errorf("FindSymbol(with parens) = %v, %v; want 1 result", got, err)
+	}
+	if got, err := svc.FindCallers(ctx, "ConvertPosition()", nil); err != nil || len(got) != 1 {
+		t.Errorf("FindCallers(with parens) = %v, %v; want 1 caller", got, err)
+	}
+	if got, err := svc.FindCallees(ctx, "convertPositionController()", nil); err != nil || len(got) != 1 {
+		t.Errorf("FindCallees(with parens) = %v, %v; want 1 callee", got, err)
+	}
+	if got, err := svc.BlastRadius(ctx, "convertPositionController()", 0, nil); err != nil || len(got) != 1 {
+		t.Errorf("BlastRadius(with parens) = %v, %v; want 1 reachable node", got, err)
+	}
+	path, err := svc.ShortestPath(ctx, "convertPositionController()", "ConvertPosition()", nil)
+	if err != nil || len(path) != 2 {
+		t.Errorf("ShortestPath(with parens) = %v, %v; want a 2-node path", path, err)
+	}
+	self, err := svc.ShortestPath(ctx, "ConvertPosition()", "ConvertPosition", nil)
+	if err != nil || len(self) != 1 {
+		t.Errorf("ShortestPath(same symbol, one with parens) = %v, %v; want the 1-node self-path", self, err)
+	}
+}
+
 // TestIntegration_ShortestPath_FindsConnectedPairAmongAmbiguousNames: the
 // same name ("widget") matches in two repos and only one of them is
 // connected to the target name ("helper"); the connected pair must be

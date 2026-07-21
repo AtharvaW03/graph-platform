@@ -117,8 +117,8 @@ export function Impact() {
             mode === "path"
               ? "No path found within 15 hops - check both symbol names exist, or clear the repo scope."
               : selected.length > 0
-                ? "No results in the scoped repos - try clearing the repo scope. Function names usually end with ()."
-                : "No results - exact match only. Function names usually end with ()."
+                ? "No results in the scoped repos - try clearing the repo scope, or check the spelling (exact match only)."
+                : "No results - exact match only, so check the spelling. Variables aren't indexed, only named code elements (functions, classes, routes, tables, ...)."
           }
         />
         {active.data && <FeedbackWidget endpoint={mode === "path" ? "path" : "impact"} query={ratedQuery} />}
