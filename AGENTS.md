@@ -32,7 +32,7 @@ Neo4j ◀── query-service (REST :8080) ◀── mcp-server (stdio or HTTP :
 - `cmd/indexer` - the pipeline daemon. One-shot, interval mode, or webhook
   mode (`--webhook-addr` + `--interval` as the reconciliation sweep).
 - `cmd/query-service` - read-only REST API over the graph.
-- `cmd/mcp-server` - MCP adapter exposing ~13 query tools. Stdio by default;
+- `cmd/mcp-server` - MCP adapter exposing 14 query tools. Stdio by default;
   `MCP_HTTP_ADDR` switches to a hosted streamable-HTTP endpoint many clients
   share.
 - `cmd/importer` - manual one-off import of a static graph.json.
