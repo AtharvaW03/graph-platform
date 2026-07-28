@@ -456,13 +456,16 @@ func TestIntegration_ShortestPath_SameSourceAndTarget(t *testing.T) {
 		t.Errorf("want the node itself as a zero-length path, got %+v", path)
 	}
 
-	// Different spellings, same node: filtered by src <> dst, no error.
+	// Different spellings, same node: normalizeSymbol strips the "()" so
+	// both sides normalize to "selfsamefn", the selfPath branch answers, and
+	// the caller gets the same zero-length path as the identical-spelling
+	// case above - not an empty "no path exists" result.
 	path, err = svc.ShortestPath(ctx, "selfSameFn()", "selfsamefn", nil)
 	if err != nil {
 		t.Fatalf("ShortestPath(name, norm_name): %v", err)
 	}
-	if len(path) != 0 {
-		t.Errorf("different spellings of one node: want empty path, got %+v", path)
+	if len(path) != 1 || path[0].Name != "selfSameFn()" {
+		t.Errorf("different spellings of one node: want the node as a zero-length path, got %+v", path)
 	}
 }
 
