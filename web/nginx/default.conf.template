@@ -18,6 +18,13 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # Aggregated ratings are an operator metric, not a UI feature - nothing in
+    # the SPA reads them, so the proxy has no reason to expose them. Reading
+    # stats requires the internal token against query-service directly.
+    location = /api/feedback/stats {
+        return 403;
+    }
+
     # The feedback widget's write path: POST only (405 otherwise - the API has
     # no GET /feedback), rate-limited above a small burst. Same rewrite and
     # server-side token injection as the general block below.
