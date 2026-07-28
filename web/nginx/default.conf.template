@@ -1,3 +1,13 @@
+# POST /api/feedback is the one write path this proxy exposes, and it reaches
+# an unauthenticated audience (the UI deliberately holds no token), so it gets
+# a request-rate ceiling: each accepted request CREATEs a node in Neo4j with
+# no dedup or retention, so an unbounded caller means unbounded store growth.
+# Keyed on the client address; behind an ALB every request carries the ALB
+# node's address, collapsing this into a near-global cap - acceptable, because
+# the widget sends at most a few requests per human session and the limit
+# exists to bound database growth, not to be fair between users.
+limit_req_zone $binary_remote_addr zone=feedback:1m rate=30r/m;
+
 server {
     listen 80;
 
@@ -8,9 +18,30 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # The feedback widget's write path: POST only (405 otherwise - the API has
+    # no GET /feedback), rate-limited above a small burst. Same rewrite and
+    # server-side token injection as the general block below.
+    location = /api/feedback {
+        limit_req zone=feedback burst=10 nodelay;
+        limit_req_status 429;
+        if ($request_method != POST) {
+            return 405;
+        }
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass ${QUERY_SERVICE_URL};
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "Bearer ${QUERY_AUTH_TOKEN}";
+    }
+
     # Strips /api to match vite.config.ts's dev proxy rewrite, and injects
     # the bearer token server-side so it never reaches the browser bundle.
+    # Everything except /api/feedback is a read: GET (and HEAD) only, so the
+    # injected token cannot be ridden into any other write path the API might
+    # grow later.
     location /api/ {
+        limit_except GET {
+            deny all;
+        }
         rewrite ^/api/(.*)$ /$1 break;
         proxy_pass ${QUERY_SERVICE_URL};
         proxy_set_header Host $host;
