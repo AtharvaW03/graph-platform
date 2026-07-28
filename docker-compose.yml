@@ -1,6 +1,11 @@
 # Local stack is loopback-only by design (every published port binds
 # 127.0.0.1); ECS does not use this file, so this has no bearing on the
 # real deployment's network exposure.
+
+# Pin the compose project name so container/volume names don't inherit
+# whatever the checkout folder happens to be called.
+name: a1-knowledge-graph
+
 services:
   neo4j:
     image: neo4j:5
