@@ -54,6 +54,12 @@ referenced by five repos is one node, which is what makes cross-repo
 traversal work. Every node/edge is stamped `last_commit` at import;
 re-indexing sweeps what the new commit no longer contains.
 
+The graph stores structure, never source text: imported node properties are
+a strict allowlist (names, paths, lines, language, extractor fields), and
+the one free-text edge property (`context`, graphify-controlled) is capped
+at 64 runes at import so no extractor release can put code snippets in the
+graph. Security answers lean on this - keep it true.
+
 `GraphSchemaVersion` (internal/index/orchestrator.go) governs migrations:
 bump it whenever a change requires already-indexed repos to re-import
 despite an unchanged HEAD (extractor behavior changes included). The
@@ -154,7 +160,10 @@ Line-oriented matchers across Go/Python/JS/TS/Java/Kotlin/C#/Ruby/PHP with:
   `INDEXER_STATUS_TOKEN`): per-repo last-indexed commit, failures, pending
   re-indexes.
 - The web UI has a feedback widget posting to `POST /feedback` (per-query
-  helpful/unhelpful ratings; `GET /feedback/stats`).
+  helpful/unhelpful ratings). nginx method-restricts and rate-limits that
+  write and does not proxy `GET /feedback/stats` at all - aggregated
+  ratings are an operator metric, read directly from query-service with
+  the internal token.
 
 ## graphify (the AST extractor dependency)
 
@@ -191,6 +200,12 @@ are maintained; no external webfonts.
   test database - the suites are not isolated across packages.
 - Web: `npm run build` (includes tsc) and `npm run lint` (oxlint). No
   component tests yet.
+- CI (`.github/workflows/ci.yml`) runs on every push/PR: Go build/vet/test,
+  govulncheck, web lint+build, and a full-history gitleaks secret scan.
+  CI does not set `NEO4J_TEST_URI`, so the integration suites do NOT run
+  there - run them locally against a real Neo4j before merging changes to
+  internal/neo4j or internal/query. Dependabot raises weekly update PRs
+  (gomod, npm, docker, actions).
 - Load-test method (autocannon at the MCP endpoint) is documented in the
   README-adjacent runbooks; latest measured: search p75 21-30ms at 100 RPS
   on 14 repos / ~674k entities, flat at 300 RPS, 0 failures (budget: 5s).
