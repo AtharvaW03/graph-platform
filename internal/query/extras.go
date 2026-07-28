@@ -183,18 +183,16 @@ func (s *Service) FindKafkaTopic(ctx context.Context, topic string) (*KafkaTopic
 	// across a "legacy duplicate" or case-variant topic node instead of
 	// merging them into the one answer this function promises.
 	//
-	// The "WITH collect(t) AS matches WHERE size(matches) > 0" step matters:
-	// once every RETURN column is an aggregate, Cypher still emits one row
-	// of nulls/empties for zero matches (an aggregate over zero rows is
-	// still a row), which would silently turn "topic not found" into a
-	// present-but-empty result instead of the nil this function's callers
-	// rely on for a 404. This filters that case out before it can happen.
+	// Once every RETURN column is an aggregate, Cypher emits one row of
+	// nulls/empties for zero matches (an aggregate over zero rows is still a
+	// row) - and no mid-query WITH...WHERE guard prevents that, because the
+	// final all-aggregate RETURN re-aggregates over the empty stream and
+	// mints the phantom row anyway (verified against Neo4j 5). So "topic not
+	// found" is detected Go-side instead: a null topic column IS the
+	// zero-match row, and callers rely on nil for their 404.
 	const cypher = `
 MATCH (t:KafkaTopic)
 WHERE t.name_lower = $topic
-WITH collect(t) AS matches
-WHERE size(matches) > 0
-UNWIND matches AS t
 OPTIONAL MATCH (rp:Entity)-[:PRODUCES]->(t) WHERE rp.graphify_id STARTS WITH 'repo::'
 OPTIONAL MATCH (rc:Entity)-[:CONSUMES]->(t) WHERE rc.graphify_id STARTS WITH 'repo::'
 RETURN head(collect(DISTINCT t.name))     AS topic,
@@ -215,6 +213,10 @@ RETURN head(collect(DISTINCT t.name))     AS topic,
 			return (*KafkaTopicInfo)(nil), nil
 		}
 		m := records[0].AsMap()
+		if m["topic"] == nil {
+			// The all-aggregate zero-match row: no such topic.
+			return (*KafkaTopicInfo)(nil), nil
+		}
 		info := &KafkaTopicInfo{
 			Topic:     asString(m["topic"]),
 			Producers: filterEmpty(asStringSlice(m["producers"])),

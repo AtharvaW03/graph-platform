@@ -1,0 +1,6 @@
+# Historic false positives: "Bearer dev-token" documentation placeholders in
+# the first commit's README quickstart. Not real credentials; already absent
+# from the current tree. Full-history scans would flag them forever without
+# these fingerprints.
+8d2cd005b709341d30319a7b0d1652e93ceb7bf2:README.md:curl-auth-header:82
+8d2cd005b709341d30319a7b0d1652e93ceb7bf2:README.md:curl-auth-header:83

@@ -305,6 +305,28 @@ func rowContentHash(row map[string]any, keys []string) string {
 // provenance stamps (which always update).
 var linkHashProps = []string{"weight", "confidence", "cs", "context"}
 
+// linkContextMax caps the context property at import. Context is the one
+// edge property whose content comes from graphify's output rather than this
+// module: today it holds short classifier tokens ("call", "parameter_type",
+// "runtime", ...; longest observed 14 chars) and the deps extractor's scope
+// values, but nothing pins that upstream. The graph must store structure,
+// never source text, so a future graphify release that starts emitting code
+// snippets here gets truncated instead of imported. 64 runes is 4x the
+// longest legitimate value while staying unmistakably non-source.
+const linkContextMax = 64
+
+// capContext enforces linkContextMax without splitting a multi-byte rune.
+func capContext(s string) string {
+	if len(s) <= linkContextMax {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= linkContextMax {
+		return s
+	}
+	return string(runes[:linkContextMax])
+}
+
 // ImportLinks imports all links in relation-grouped UNWIND batches. Each edge
 // is stamped with repo (and commit/runID when set) so the sweep can scope edge
 // deletion per repo. rewriteAll forces a full property rewrite regardless of
@@ -344,7 +366,7 @@ func (c *Client) ImportLinks(ctx context.Context, repo, commit, runID string, li
 			"weight":     l.Weight,
 			"confidence": l.Confidence,
 			"cs":         l.ConfidenceScore,
-			"context":    l.Context,
+			"context":    capContext(l.Context),
 		}
 		row["hash"] = rowContentHash(row, linkHashProps)
 		if sharedKeys[srcKey] && sharedKeys[tgtKey] {
