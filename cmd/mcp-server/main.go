@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -99,9 +100,27 @@ func runHTTP(ctx context.Context, server *mcp.Server, client *mcp.QueryClient, a
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	// Per-user fair share, applied inside auth so the limiter sees the
+	// validated identity rather than a shared source address.
+	perMinute := 0
+	if v := os.Getenv("MCP_RATE_LIMIT_PER_MIN"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			log.Fatalf("invalid MCP_RATE_LIMIT_PER_MIN %q: want a non-negative integer", v)
+		}
+		perMinute = n
+	}
+	if perMinute > 0 {
+		log.Printf("per-user rate limit: %d requests/minute", perMinute)
+	}
+
 	httpServer := &http.Server{
-		Addr:              addr,
-		Handler:           httpmw.WithRequestLog(httpmw.WithUserKeyAuth(mux, token, validator), nil),
+		Addr: addr,
+		Handler: httpmw.WithRequestLog(
+			httpmw.WithUserKeyAuth(
+				httpmw.WithPerActorRateLimit(mux, perMinute),
+				token, validator,
+			), nil),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		// Each MCP interaction is one bounded POST (stateless mode rejects

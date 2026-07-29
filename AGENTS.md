@@ -175,6 +175,27 @@ Line-oriented matchers across Go/Python/JS/TS/Java/Kotlin/C#/Ruby/PHP with:
   ratings are an operator metric, read directly from query-service with
   the internal token.
 
+## Admin surface (`/admin` on query-service)
+
+Operator dashboard behind `PORTAL_ADMINS` (SSO session allowlist) or
+`ADMIN_AUTH_TOKEN`; unmounted when neither is set. Panels read
+`internal/usage` (attributed request counters plus short-lived
+`(:RepoAccess)` rows for enumeration detection), `internal/keys`, and
+`internal/control`.
+
+- **Attribution** flows mcp-server -> query-service via `X-A1KG-Actor`,
+  honored only inside the internal-token boundary (`httpmw.WithForwardedActor`
+  mounts inside `WithAuth`). Without `MCP_USER_KEYS=1` every MCP request is
+  one identity and rankings/anomalies lose their meaning.
+- **Pause** (`internal/control`) is state in Neo4j, read by the orchestrator
+  at repository boundaries only - never mid-import, or a partial graph would
+  let the sweep delete good data. A gate read error means "not paused": a
+  broken control channel must never silently freeze indexing.
+- **Every mutating admin action is audited** (`(:AdminAudit)`) with the
+  acting identity. Read panels are not - they would bury the trail.
+- Usage recording is best-effort by construction (buffered, drops on
+  overflow). Metrics must never slow or fail a query.
+
 ## graphify (the AST extractor dependency)
 
 - External pinned tool: PyPI package `graphifyy` (CLI `graphify`), invoked

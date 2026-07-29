@@ -70,6 +70,19 @@ type Orchestrator struct {
 	// after each successful or skipped (unchanged) repo. Failures are logged
 	// and never fail the repo.
 	SyncStamper SyncStamper
+
+	// PauseGate, if set, is consulted at every repository boundary. A paused
+	// platform finishes the repo in flight and then stops the cycle - never
+	// mid-import, which would leave a partial graph for the next sweep to
+	// mistake for deletions. A gate error is logged and treated as "not
+	// paused": losing the control channel must not silently freeze indexing.
+	PauseGate PauseGate
+}
+
+// PauseGate reports whether an operator has paused indexing.
+// *control.Store satisfies this.
+type PauseGate interface {
+	Paused(ctx context.Context) (bool, string, error)
 }
 
 // SyncStamper records when a repository was last checked (and, when indexed
@@ -165,6 +178,12 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 			o.Log.Printf("context canceled, stopping after %d/%d repositories", len(summary.Results), len(repos))
 			break
 		}
+		// Repository boundary: the only safe place to honor a pause.
+		if paused, why := o.pausedNow(ctx); paused {
+			summary.Paused = true
+			o.Log.Printf("indexing paused (%s), stopping after %d/%d repositories", why, len(summary.Results), len(repos))
+			break
+		}
 		if o.Lease != nil {
 			if err := o.Lease.Renew(ctx); err != nil {
 				o.Log.Printf("writer lease renewal failed before %s, stopping: %v", repo.Name, err)
@@ -181,6 +200,22 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 	}
 
 	return summary, nil
+}
+
+// pausedNow consults the PauseGate. A gate failure is logged and reported
+// as not-paused: an unreachable control channel must never be able to stop
+// indexing silently, which would look exactly like a healthy-but-stale
+// platform.
+func (o *Orchestrator) pausedNow(ctx context.Context) (bool, string) {
+	if o.PauseGate == nil {
+		return false, ""
+	}
+	paused, why, err := o.PauseGate.Paused(ctx)
+	if err != nil {
+		o.Log.Printf("WARNING: pause check failed, continuing: %v", err)
+		return false, ""
+	}
+	return paused, why
 }
 
 // stampSync records freshness on the repository's graph node: a successful

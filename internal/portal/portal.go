@@ -203,9 +203,11 @@ func (h *Handler) verify(value string) ([]byte, bool) {
 func (h *Handler) setSession(w http.ResponseWriter, id Identity) {
 	payload, _ := json.Marshal(session{Email: id.Email, Name: id.Name, Expires: h.now().Add(sessionTTL)})
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    h.sign(payload),
-		Path:     "/portal",
+		Name:  sessionCookie,
+		Value: h.sign(payload),
+		// Root path, not /portal: the admin surface reads this same session
+		// to identify administrators.
+		Path:     "/",
 		HttpOnly: true,
 		Secure:   h.secureCookies,
 		SameSite: http.SameSiteStrictMode,
@@ -230,6 +232,17 @@ func (h *Handler) currentSession(r *http.Request) (session, bool) {
 		return session{}, false
 	}
 	return s, true
+}
+
+// SessionEmail exposes the signed-in identity to other surfaces (the admin
+// authorizer). Reports false when there is no valid session, so callers
+// never have to know how sessions are encoded.
+func (h *Handler) SessionEmail(r *http.Request) (string, bool) {
+	s, ok := h.currentSession(r)
+	if !ok {
+		return "", false
+	}
+	return s.Email, true
 }
 
 // -------- OIDC flow --------
@@ -282,7 +295,9 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/portal", MaxAge: -1})
+	// Path must match the one setSession used, or the browser keeps the
+	// cookie and "sign out" silently does nothing.
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/", MaxAge: -1})
 	http.Redirect(w, r, "/portal", http.StatusFound)
 }
 

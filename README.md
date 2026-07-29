@@ -71,6 +71,10 @@ is rejected rather than silently indexing everything.
 | `MCP_USER_KEYS` | mcp-server | *(empty)* | set to `1` to also accept per-user `a1kg_...` keys (minted at `/portal`), validated through query-service |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL` | query-service | *(empty = portal off)* | OIDC app registration for the self-service key portal at `/portal`; all four together |
 | `PORTAL_SESSION_SECRET` | query-service | *(required with OIDC_*)* | signs portal session cookies (`openssl rand -hex 32`) |
+| `PORTAL_ADMINS` | query-service | *(empty)* | comma-separated email allowlist for the `/admin` dashboard (needs `OIDC_*`) |
+| `ADMIN_AUTH_TOKEN` | query-service | *(empty)* | break-glass bearer token for `/admin`; audited as `token-admin`. With neither this nor `PORTAL_ADMINS`, `/admin` is not mounted |
+| `ADMIN_ANOMALY_WINDOW`, `ADMIN_ANOMALY_THRESHOLD` | query-service | `1h`, `10` | enumeration detection: distinct repositories per identity per window |
+| `MCP_RATE_LIMIT_PER_MIN` | mcp-server | *(empty = off)* | per-user request ceiling; `429` with `Retry-After` above it |
 | `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_PATH` | indexer | *(empty = use `GIT_TOKEN`)* | GitHub App auth for cloning private repos; all three required together |
 | `GIT_TOKEN` | indexer | *(empty = public repos only)* | PAT fallback for HTTPS clones; ignored when the `GITHUB_APP_*` vars are set |
 | `GITHUB_WEBHOOK_SECRET` | indexer | *(required with `--webhook-addr`)* | HMAC secret GitHub signs webhook deliveries with |
@@ -154,6 +158,33 @@ the command above. One active key per person; a re-mint revokes the previous
 key, and every key expires at the start of the next calendar month, so
 renewing always requires a fresh SSO login - an offboarded account cannot
 renew. Revocation takes effect within a minute (validation cache).
+
+## Admin dashboard
+
+`/admin` on query-service is the operator view: indexing state, graph size
+and freshness per repository, usage rankings (top users, most-queried
+repositories, endpoints, traffic), access anomalies, API keys, and the
+audit trail. Access requires either an SSO session whose email is listed in
+`PORTAL_ADMINS`, or `ADMIN_AUTH_TOKEN` as a bearer. If neither is
+configured the surface is not mounted.
+
+Two controls are actions rather than views:
+
+- **Pause / resume indexing.** A pause takes effect at the next repository
+  boundary, never mid-import - a half-imported repository would let the
+  next sweep mistake missing data for deletions. Pause indefinitely or for
+  a fixed window (the latter lapses on its own). The state lives in Neo4j,
+  so it survives an indexer restart.
+- **Revoke a key.** Kills one person's key immediately (effective within a
+  minute, the validation cache window).
+
+Both are recorded in the audit trail with the acting identity.
+
+**Access anomalies** flag one identity touching more than
+`ADMIN_ANOMALY_THRESHOLD` distinct repositories inside
+`ADMIN_ANOMALY_WINDOW` - normal work touches a handful, a systematic sweep
+touches everything. Attribution needs per-user keys (`MCP_USER_KEYS=1`);
+without them all MCP traffic shares one identity and the signal is lost.
 
 ## Deployment
 

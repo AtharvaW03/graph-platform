@@ -116,6 +116,10 @@ type RunSummary struct {
 	StartedAt  time.Time
 	FinishedAt time.Time
 	Results    []RepoResult
+	// Paused is set when an operator pause stopped the cycle early. The
+	// repositories already processed are in Results; the rest are untouched
+	// and will be picked up when indexing resumes.
+	Paused bool
 }
 
 // Counts breaks down a RunSummary by outcome for logging.

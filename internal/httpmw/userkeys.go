@@ -103,7 +103,9 @@ func WithUserKeyAuth(h http.Handler, staticToken string, validate KeyValidator) 
 			}
 
 			if entry.valid {
-				h.ServeHTTP(w, r)
+				// Attribution for usage metrics: downstream handlers (and
+				// the outbound query-service client) read this.
+				h.ServeHTTP(w, r.WithContext(WithActor(r.Context(), entry.owner)))
 				return
 			}
 		}

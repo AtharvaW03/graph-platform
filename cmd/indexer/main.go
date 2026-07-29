@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"a1-knowledge-graph/internal/control"
 	"a1-knowledge-graph/internal/extract"
 	"a1-knowledge-graph/internal/extract/deps"
 	"a1-knowledge-graph/internal/extract/glue"
@@ -219,16 +220,20 @@ func main() {
 	go heartbeat.Run(ctx)
 
 	orch := &index.Orchestrator{
-		Source:                      source,
-		Syncer:                      index.NewGitSyncer(cfg.Git),
-		Graphify:                    index.NewExecGraphifier(cfg.Graphify, os.Stderr),
-		Importer:                    index.NewDefaultImportRunner(client),
-		Store:                       store,
-		WorkDir:                     absWorkDir,
-		Log:                         logger,
-		HealthChecker:               client,
-		Retirer:                     client,
-		SyncStamper:                 client,
+		Source:        source,
+		Syncer:        index.NewGitSyncer(cfg.Git),
+		Graphify:      index.NewExecGraphifier(cfg.Graphify, os.Stderr),
+		Importer:      index.NewDefaultImportRunner(client),
+		Store:         store,
+		WorkDir:       absWorkDir,
+		Log:           logger,
+		HealthChecker: client,
+		Retirer:       client,
+		SyncStamper:   client,
+		// Operator pause switch, set from the admin surface on
+		// query-service and shared through Neo4j. Consulted only at
+		// repository boundaries.
+		PauseGate:                   control.NewStore(client),
 		Lease:                       clientLeaseRenewer{client: client, owner: owner, ttl: *leaseTTL},
 		Extractors:                  buildExtractorRunner(cfg, logger),
 		AllowPartialExtractorErrors: cfg.Extractors.AllowPartialEnabled(),
