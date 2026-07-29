@@ -60,6 +60,18 @@ the one free-text edge property (`context`, graphify-controlled) is capped
 at 64 runes at import so no extractor release can put code snippets in the
 graph. Security answers lean on this - keep it true.
 
+**No source code is retained on disk between runs.** A working copy exists
+only while its repository is being parsed and is deleted on every pipeline
+exit, success or failure (`internal/index/checkout.go`). Change detection
+uses `git ls-remote` *before* cloning, so an unchanged repo is skipped
+without any source ever landing on disk (~118ms, vs ~14s to index). What
+persists is graphify's AST cache in `workdir/cache/<repo>/`, which holds
+ids, labels, paths and line numbers only - verified, and it is what keeps
+re-extraction incremental across the delete/re-clone cycle (measured:
+180/180 files parsed cold, 4/4 warm). `git.keep_checkout: true` disables
+the deletion for debugging and warns loudly at startup. This is a stated
+security property - do not weaken it.
+
 `GraphSchemaVersion` (internal/index/orchestrator.go) governs migrations:
 bump it whenever a change requires already-indexed repos to re-import
 despite an unchanged HEAD (extractor behavior changes included). The

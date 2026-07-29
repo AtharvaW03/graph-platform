@@ -71,6 +71,12 @@ type Orchestrator struct {
 	// and never fail the repo.
 	SyncStamper SyncStamper
 
+	// KeepCheckout disables the post-run deletion of working copies. Off by
+	// default: the platform retains no source between runs. Turn it on only
+	// to debug a failing extraction, and expect source to accumulate on the
+	// volume while it is on.
+	KeepCheckout bool
+
 	// PauseGate, if set, is consulted at every repository boundary. A paused
 	// platform finishes the repo in flight and then stops the cycle - never
 	// mid-import, which would leave a partial graph for the next sweep to
@@ -425,6 +431,22 @@ func (o *Orchestrator) persistResult(name string, r RepoResult) {
 func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force bool, prev RepoState, start time.Time, result *RepoResult, tag string) {
 	repoPath := filepath.Join(o.WorkDir, "repos", repo.Name)
 
+	// The working copy never outlives the run: whatever happens below, the
+	// source is gone before this function returns.
+	defer o.releaseCheckout(repo.Name, repoPath)
+
+	// Ask the remote for its branch tip before cloning anything. An
+	// unchanged repository is answered here, with no source ever written to
+	// disk - which is what makes a 30-minute sweep over dozens of repos
+	// cheap now that checkouts are not kept between runs.
+	if head, unchanged := o.unchangedRemoteHead(ctx, repo, force, prev); unchanged {
+		result.Commit = head
+		result.Status = StatusSkipped
+		result.Reason = fmt.Sprintf("HEAD %s unchanged since %s", head, prev.LastIndexedAt.Format(time.RFC3339))
+		result.Duration = o.now().Sub(start)
+		return
+	}
+
 	o.Log.Printf("[%s] sync %s @ %s", tag, repo.URL, repo.Branch)
 	commit, err := o.Syncer.Sync(ctx, repo, repoPath)
 	if o.recordFailure(result, StageSync, err, start, ctx) {
@@ -437,6 +459,8 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 		return
 	}
 
+	// Second-line skip check, for syncers that cannot query a remote head
+	// (the optimization above is optional; this one is the guarantee).
 	if !force && prev.LastStatus == StatusSuccess && prev.LastIndexedCommit == commit {
 		if prev.SchemaVersion != GraphSchemaVersion {
 			o.Log.Printf("[%s] graph schema changed (v%d -> v%d), re-indexing despite unchanged HEAD",
@@ -448,6 +472,10 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 			return
 		}
 	}
+
+	// Hand the extractor its cache back so a fresh checkout still extracts
+	// incrementally.
+	o.restoreCache(repo.Name, repoPath)
 
 	o.Log.Printf("[%s] graphify %s", tag, commit)
 	graphPath, err := o.Graphify.Generate(ctx, repoPath)

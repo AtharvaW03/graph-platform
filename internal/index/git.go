@@ -88,6 +88,35 @@ func (g *GitSyncer) update(ctx context.Context, repo Repository, dest string) er
 	return nil
 }
 
+// RemoteHead returns the branch tip's SHA straight from the remote, with no
+// local clone and nothing written to disk. It is what lets an unchanged
+// repository be skipped without ever materializing its source: the platform
+// keeps no working copy between runs, so the usual fetch-and-compare would
+// mean re-downloading a whole tree just to learn nothing changed.
+//
+// A remote that cannot be reached (or a branch that does not exist) returns
+// an error; callers fall back to a full sync rather than treating it as
+// "unchanged", so an unreachable remote can never silently freeze a repo at
+// an old commit.
+func (g *GitSyncer) RemoteHead(ctx context.Context, repo Repository) (string, error) {
+	ref := "refs/heads/" + repo.Branch
+	out, err := g.run(ctx, "", "git", "ls-remote", "--", repo.URL, ref)
+	if err != nil {
+		return "", fmt.Errorf("ls-remote %s: %w", repo.URL, err)
+	}
+	// Output is "<sha>\t<ref>" per matching ref; an empty result means the
+	// branch is absent, which must not read as "nothing changed".
+	line := strings.TrimSpace(out)
+	if line == "" {
+		return "", fmt.Errorf("branch %q not found on %s", repo.Branch, repo.URL)
+	}
+	sha, _, found := strings.Cut(line, "\t")
+	if !found || len(sha) < 7 {
+		return "", fmt.Errorf("unexpected ls-remote output for %s: %q", repo.URL, line)
+	}
+	return strings.TrimSpace(sha), nil
+}
+
 func (g *GitSyncer) head(ctx context.Context, dest string) (string, error) {
 	out, err := g.run(ctx, dest, "git", "rev-parse", "HEAD")
 	if err != nil {

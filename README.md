@@ -48,6 +48,7 @@ For the web UI, run `cd web && npm install && npm run dev`
 | `--interval` | `0` (one-shot) | if set, run continuously, indexing every interval (e.g. `15m`) |
 | `--webhook-addr` | *(empty)* | serve a GitHub push-webhook endpoint (e.g. `0.0.0.0:8091`); requires `--interval` and `GITHUB_WEBHOOK_SECRET` |
 | `--lease-ttl` | `15m` | writer lease duration; a crashed process's lease self-expires after this |
+| *(config)* `git.keep_checkout` | `false` | retain working copies on disk after indexing; off by default - no source is kept between runs |
 | `--steal-lease` | `false` | take the writer lease unconditionally; recovers a stuck lease |
 
 Repository names are only ever read from `--repo` or the config file — a bare

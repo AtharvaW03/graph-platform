@@ -126,6 +126,10 @@ func main() {
 		logger.Fatalf("ensure constraints: %v", err)
 	}
 
+	if cfg.Git.KeepCheckout {
+		logger.Printf("WARNING: git.keep_checkout is set - repository working copies are retained on disk after indexing. The platform's default is to keep no source code between runs.")
+	}
+
 	// Verify the graphify version before any repo is processed; a version
 	// mismatch stops the run.
 	if err := index.CheckGraphifyVersion(ctx, cfg.Graphify, logger); err != nil {
@@ -237,6 +241,7 @@ func main() {
 		Lease:                       clientLeaseRenewer{client: client, owner: owner, ttl: *leaseTTL},
 		Extractors:                  buildExtractorRunner(cfg, logger),
 		AllowPartialExtractorErrors: cfg.Extractors.AllowPartialEnabled(),
+		KeepCheckout:                cfg.Git.KeepCheckout,
 	}
 
 	opts := index.Options{
