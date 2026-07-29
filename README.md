@@ -68,6 +68,9 @@ is rejected rather than silently indexing everything.
 | `MCP_HTTP_ADDR` | mcp-server | *(empty = stdio)* | serve MCP over HTTP on this address (e.g. `0.0.0.0:8090`) instead of stdio |
 | `MCP_AUTH_TOKEN` | mcp-server | *(required in HTTP mode on a reachable address)* | bearer token for incoming MCP connections; separate from `QUERY_AUTH_TOKEN` |
 | `MCP_ALLOW_NO_AUTH` | mcp-server | *(empty)* | set to `1` to allow HTTP mode with no token on a reachable address; otherwise it fails closed |
+| `MCP_USER_KEYS` | mcp-server | *(empty)* | set to `1` to also accept per-user `a1kg_...` keys (minted at `/portal`), validated through query-service |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL` | query-service | *(empty = portal off)* | OIDC app registration for the self-service key portal at `/portal`; all four together |
+| `PORTAL_SESSION_SECRET` | query-service | *(required with OIDC_*)* | signs portal session cookies (`openssl rand -hex 32`) |
 | `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_PATH` | indexer | *(empty = use `GIT_TOKEN`)* | GitHub App auth for cloning private repos; all three required together |
 | `GIT_TOKEN` | indexer | *(empty = public repos only)* | PAT fallback for HTTPS clones; ignored when the `GITHUB_APP_*` vars are set |
 | `GITHUB_WEBHOOK_SECRET` | indexer | *(required with `--webhook-addr`)* | HMAC secret GitHub signs webhook deliveries with |
@@ -142,6 +145,15 @@ claude mcp add --transport http a1-knowledge-graph https://<host>/mcp \
 MCP clients require HTTPS for non-loopback URLs, so the hosted server sits
 behind a TLS front. On a reachable address mcp-server refuses to start without
 `MCP_AUTH_TOKEN` unless `MCP_ALLOW_NO_AUTH=1` is set.
+
+**Per-user keys.** With `MCP_USER_KEYS=1` the hosted server also accepts
+personal API keys alongside the shared token. Engineers mint their own key at
+`https://<host>/portal` (sign-in with the org identity provider - an OIDC app
+registration, see the `OIDC_*` variables), then use it as the bearer value in
+the command above. One active key per person; a re-mint revokes the previous
+key, and every key expires at the start of the next calendar month, so
+renewing always requires a fresh SSO login - an offboarded account cannot
+renew. Revocation takes effect within a minute (validation cache).
 
 ## Deployment
 

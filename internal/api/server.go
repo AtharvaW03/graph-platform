@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"a1-knowledge-graph/internal/keys"
 	"a1-knowledge-graph/internal/query"
 )
 
@@ -67,6 +68,9 @@ const readyTimeout = 2 * time.Second
 type Server struct {
 	svc   *query.Service
 	ready Readiness
+	// keys, when set via EnableKeys, mounts the internal per-user key
+	// validation endpoint used by mcp-server.
+	keys *keys.Store
 }
 
 // NewServer wires the query routes. ready is used by GET /ready; pass nil to
@@ -102,6 +106,10 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("POST /feedback", s.submitFeedback)
 	mux.HandleFunc("GET /feedback/stats", s.feedbackStats)
+
+	if s.keys != nil {
+		mux.HandleFunc("POST /keys/validate", s.validateKey)
+	}
 	return mux
 }
 

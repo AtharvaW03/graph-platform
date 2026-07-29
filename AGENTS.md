@@ -104,6 +104,16 @@ bump rolls out automatically on the next cycle.
 
 They guard different boundaries and rotate independently.
 
+Per-user API keys (`internal/keys`, `a1kg_...` prefix) layer on top when
+`MCP_USER_KEYS=1`: engineers mint their own at `/portal` (OIDC sign-in with
+the org IdP; `OIDC_*` + `PORTAL_SESSION_SECRET` on query-service), one
+active key per person, expiring at the start of every calendar month so
+renewal re-proves the org account. mcp-server validates them via
+query-service's internal `POST /keys/validate` (1-minute cache, fails
+closed). Keys are (:ApiKey) nodes - hash only, never plaintext - outside
+the indexer's sweep, like (:Feedback). The static `MCP_AUTH_TOKEN` remains
+the service-level/migration credential.
+
 ## GitHub integration
 
 - Auth is GitHub App only (org policy: no PATs). Env:

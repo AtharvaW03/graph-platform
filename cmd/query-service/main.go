@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"a1-knowledge-graph/internal/api"
 	"a1-knowledge-graph/internal/httpmw"
+	"a1-knowledge-graph/internal/keys"
 	"a1-knowledge-graph/internal/neo4j"
+	"a1-knowledge-graph/internal/portal"
 	"a1-knowledge-graph/internal/query"
 )
 
@@ -40,6 +43,10 @@ func main() {
 
 	svc := query.NewService(client)
 	server := api.NewServer(svc, client)
+	// Per-user key validation for mcp-server. Costs nothing when unused;
+	// the portal (which mints the keys) is wired below when OIDC is set.
+	keyStore := keys.NewStore(client)
+	server.EnableKeys(keyStore)
 
 	token := os.Getenv("QUERY_AUTH_TOKEN")
 
@@ -73,16 +80,43 @@ func main() {
 	// Middleware order (outermost first): request logging sees every request
 	// including rejected ones; CORS answers preflights before auth runs,
 	// since preflights never carry an Authorization header.
-	handler := httpmw.WithRequestLog(
-		api.WithCORS(
-			httpmw.WithAuth(
-				api.WithRequestTimeout(server.Routes(), requestTimeout),
-				token,
-			),
-			corsOrigin,
+	authed := api.WithCORS(
+		httpmw.WithAuth(
+			api.WithRequestTimeout(server.Routes(), requestTimeout),
+			token,
 		),
-		nil,
+		corsOrigin,
 	)
+
+	// The key portal (self-service SSO-authenticated key minting) mounts
+	// OUTSIDE the bearer-token stack: it authenticates browsers with its own
+	// OIDC session, not with QUERY_AUTH_TOKEN. Enabled only when the full
+	// OIDC client registration is configured; absent that, /portal/* falls
+	// through to the authed stack and 401s like everything else.
+	root := http.NewServeMux()
+	root.Handle("/", authed)
+	oidcCfg := portal.Config{
+		Issuer:       os.Getenv("OIDC_ISSUER"),
+		ClientID:     os.Getenv("OIDC_CLIENT_ID"),
+		ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
+		RedirectURL:  os.Getenv("OIDC_REDIRECT_URL"),
+	}
+	if oidcCfg.Enabled() {
+		sessionSecret := os.Getenv("PORTAL_SESSION_SECRET")
+		if sessionSecret == "" {
+			log.Fatal("OIDC_* set but PORTAL_SESSION_SECRET is not - the portal cannot sign sessions")
+		}
+		auth, err := portal.NewOIDC(context.Background(), oidcCfg)
+		if err != nil {
+			log.Fatalf("portal: %v", err)
+		}
+		p := portal.NewHandler(auth, keyStore, []byte(sessionSecret), strings.HasPrefix(oidcCfg.RedirectURL, "https://"))
+		root.Handle("/portal", p.Routes())
+		root.Handle("/portal/", p.Routes())
+		log.Printf("key portal enabled at /portal (issuer %s)", oidcCfg.Issuer)
+	}
+
+	handler := httpmw.WithRequestLog(root, nil)
 
 	addr := net.JoinHostPort(bind, port)
 	log.Printf("query-service listening on %s (auth: %v)", addr, token != "")
