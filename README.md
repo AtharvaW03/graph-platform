@@ -48,6 +48,7 @@ For the web UI, run `cd web && npm install && npm run dev`
 | `--interval` | `0` (one-shot) | if set, run continuously, indexing every interval (e.g. `15m`) |
 | `--webhook-addr` | *(empty)* | serve a GitHub push-webhook endpoint (e.g. `0.0.0.0:8091`); requires `--interval` and `GITHUB_WEBHOOK_SECRET` |
 | `--lease-ttl` | `15m` | writer lease duration; a crashed process's lease self-expires after this |
+| *(config)* `git.keep_checkout` | `false` | retain working copies on disk after indexing; off by default - no source is kept between runs |
 | `--steal-lease` | `false` | take the writer lease unconditionally; recovers a stuck lease |
 
 Repository names are only ever read from `--repo` or the config file — a bare
@@ -68,6 +69,13 @@ is rejected rather than silently indexing everything.
 | `MCP_HTTP_ADDR` | mcp-server | *(empty = stdio)* | serve MCP over HTTP on this address (e.g. `0.0.0.0:8090`) instead of stdio |
 | `MCP_AUTH_TOKEN` | mcp-server | *(required in HTTP mode on a reachable address)* | bearer token for incoming MCP connections; separate from `QUERY_AUTH_TOKEN` |
 | `MCP_ALLOW_NO_AUTH` | mcp-server | *(empty)* | set to `1` to allow HTTP mode with no token on a reachable address; otherwise it fails closed |
+| `MCP_USER_KEYS` | mcp-server | *(empty)* | set to `1` to also accept per-user `a1kg_...` keys (minted at `/portal`), validated through query-service |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URL` | query-service | *(empty = portal off)* | OIDC app registration for the self-service key portal at `/portal`; all four together |
+| `PORTAL_SESSION_SECRET` | query-service | *(required with OIDC_*)* | signs portal session cookies (`openssl rand -hex 32`) |
+| `PORTAL_ADMINS` | query-service | *(empty)* | comma-separated email allowlist for the `/admin` dashboard (needs `OIDC_*`) |
+| `ADMIN_AUTH_TOKEN` | query-service | *(empty)* | break-glass bearer token for `/admin`; audited as `token-admin`. With neither this nor `PORTAL_ADMINS`, `/admin` is not mounted |
+| `ADMIN_ANOMALY_WINDOW`, `ADMIN_ANOMALY_THRESHOLD` | query-service | `1h`, `10` | enumeration detection: distinct repositories per identity per window |
+| `MCP_RATE_LIMIT_PER_MIN` | mcp-server | *(empty = off)* | per-user request ceiling; `429` with `Retry-After` above it |
 | `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_PATH` | indexer | *(empty = use `GIT_TOKEN`)* | GitHub App auth for cloning private repos; all three required together |
 | `GIT_TOKEN` | indexer | *(empty = public repos only)* | PAT fallback for HTTPS clones; ignored when the `GITHUB_APP_*` vars are set |
 | `GITHUB_WEBHOOK_SECRET` | indexer | *(required with `--webhook-addr`)* | HMAC secret GitHub signs webhook deliveries with |
@@ -142,6 +150,42 @@ claude mcp add --transport http a1-knowledge-graph https://<host>/mcp \
 MCP clients require HTTPS for non-loopback URLs, so the hosted server sits
 behind a TLS front. On a reachable address mcp-server refuses to start without
 `MCP_AUTH_TOKEN` unless `MCP_ALLOW_NO_AUTH=1` is set.
+
+**Per-user keys.** With `MCP_USER_KEYS=1` the hosted server also accepts
+personal API keys alongside the shared token. Engineers mint their own key at
+`https://<host>/portal` (sign-in with the org identity provider - an OIDC app
+registration, see the `OIDC_*` variables), then use it as the bearer value in
+the command above. One active key per person; a re-mint revokes the previous
+key, and every key expires at the start of the next calendar month, so
+renewing always requires a fresh SSO login - an offboarded account cannot
+renew. Revocation takes effect within a minute (validation cache).
+
+## Admin dashboard
+
+`/admin` on query-service is the operator view: indexing state, graph size
+and freshness per repository, usage rankings (top users, most-queried
+repositories, endpoints, traffic), access anomalies, API keys, and the
+audit trail. Access requires either an SSO session whose email is listed in
+`PORTAL_ADMINS`, or `ADMIN_AUTH_TOKEN` as a bearer. If neither is
+configured the surface is not mounted.
+
+Two controls are actions rather than views:
+
+- **Pause / resume indexing.** A pause takes effect at the next repository
+  boundary, never mid-import - a half-imported repository would let the
+  next sweep mistake missing data for deletions. Pause indefinitely or for
+  a fixed window (the latter lapses on its own). The state lives in Neo4j,
+  so it survives an indexer restart.
+- **Revoke a key.** Kills one person's key immediately (effective within a
+  minute, the validation cache window).
+
+Both are recorded in the audit trail with the acting identity.
+
+**Access anomalies** flag one identity touching more than
+`ADMIN_ANOMALY_THRESHOLD` distinct repositories inside
+`ADMIN_ANOMALY_WINDOW` - normal work touches a handful, a systematic sweep
+touches everything. Attribution needs per-user keys (`MCP_USER_KEYS=1`);
+without them all MCP traffic shares one identity and the signal is lost.
 
 ## Deployment
 

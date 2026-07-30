@@ -60,6 +60,18 @@ the one free-text edge property (`context`, graphify-controlled) is capped
 at 64 runes at import so no extractor release can put code snippets in the
 graph. Security answers lean on this - keep it true.
 
+**No source code is retained on disk between runs.** A working copy exists
+only while its repository is being parsed and is deleted on every pipeline
+exit, success or failure (`internal/index/checkout.go`). Change detection
+uses `git ls-remote` *before* cloning, so an unchanged repo is skipped
+without any source ever landing on disk (~118ms, vs ~14s to index). What
+persists is graphify's AST cache in `workdir/cache/<repo>/`, which holds
+ids, labels, paths and line numbers only - verified, and it is what keeps
+re-extraction incremental across the delete/re-clone cycle (measured:
+180/180 files parsed cold, 4/4 warm). `git.keep_checkout: true` disables
+the deletion for debugging and warns loudly at startup. This is a stated
+security property - do not weaken it.
+
 `GraphSchemaVersion` (internal/index/orchestrator.go) governs migrations:
 bump it whenever a change requires already-indexed repos to re-import
 despite an unchanged HEAD (extractor behavior changes included). The
@@ -103,6 +115,16 @@ bump rolls out automatically on the next cycle.
   delivery (X-Hub-Signature-256, constant-time).
 
 They guard different boundaries and rotate independently.
+
+Per-user API keys (`internal/keys`, `a1kg_...` prefix) layer on top when
+`MCP_USER_KEYS=1`: engineers mint their own at `/portal` (OIDC sign-in with
+the org IdP; `OIDC_*` + `PORTAL_SESSION_SECRET` on query-service), one
+active key per person, expiring at the start of every calendar month so
+renewal re-proves the org account. mcp-server validates them via
+query-service's internal `POST /keys/validate` (1-minute cache, fails
+closed). Keys are (:ApiKey) nodes - hash only, never plaintext - outside
+the indexer's sweep, like (:Feedback). The static `MCP_AUTH_TOKEN` remains
+the service-level/migration credential.
 
 ## GitHub integration
 
@@ -164,6 +186,27 @@ Line-oriented matchers across Go/Python/JS/TS/Java/Kotlin/C#/Ruby/PHP with:
   write and does not proxy `GET /feedback/stats` at all - aggregated
   ratings are an operator metric, read directly from query-service with
   the internal token.
+
+## Admin surface (`/admin` on query-service)
+
+Operator dashboard behind `PORTAL_ADMINS` (SSO session allowlist) or
+`ADMIN_AUTH_TOKEN`; unmounted when neither is set. Panels read
+`internal/usage` (attributed request counters plus short-lived
+`(:RepoAccess)` rows for enumeration detection), `internal/keys`, and
+`internal/control`.
+
+- **Attribution** flows mcp-server -> query-service via `X-A1KG-Actor`,
+  honored only inside the internal-token boundary (`httpmw.WithForwardedActor`
+  mounts inside `WithAuth`). Without `MCP_USER_KEYS=1` every MCP request is
+  one identity and rankings/anomalies lose their meaning.
+- **Pause** (`internal/control`) is state in Neo4j, read by the orchestrator
+  at repository boundaries only - never mid-import, or a partial graph would
+  let the sweep delete good data. A gate read error means "not paused": a
+  broken control channel must never silently freeze indexing.
+- **Every mutating admin action is audited** (`(:AdminAudit)`) with the
+  acting identity. Read panels are not - they would bury the trail.
+- Usage recording is best-effort by construction (buffered, drops on
+  overflow). Metrics must never slow or fail a query.
 
 ## graphify (the AST extractor dependency)
 

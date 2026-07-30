@@ -25,6 +25,16 @@ server {
         return 403;
     }
 
+    # The self-service key portal. It authenticates browsers itself (OIDC
+    # session cookies), so this proxies WITHOUT injecting the internal bearer
+    # token - the portal must never be reachable with service credentials a
+    # browser didn't earn. No /api prefix strip: portal routes live at
+    # /portal on query-service directly.
+    location /portal {
+        proxy_pass ${QUERY_SERVICE_URL};
+        proxy_set_header Host $host;
+    }
+
     # The feedback widget's write path: POST only (405 otherwise - the API has
     # no GET /feedback), rate-limited above a small burst. Same rewrite and
     # server-side token injection as the general block below.

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -41,7 +42,7 @@ func main() {
 	// subprocess spawned by the MCP client, today's default), set means a
 	// hosted HTTP endpoint that many remote clients share.
 	if addr := os.Getenv("MCP_HTTP_ADDR"); addr != "" {
-		runHTTP(ctx, server, addr, timeout)
+		runHTTP(ctx, server, client, addr, timeout)
 		return
 	}
 
@@ -57,9 +58,20 @@ func main() {
 // process uses as a *client* against query-service) because the two guard
 // different boundaries - one is distributed to every engineer's machine,
 // the other never leaves the deployment.
-func runHTTP(ctx context.Context, server *mcp.Server, addr string, timeout time.Duration) {
+func runHTTP(ctx context.Context, server *mcp.Server, client *mcp.QueryClient, addr string, timeout time.Duration) {
 	token := os.Getenv("MCP_AUTH_TOKEN")
-	if token == "" {
+
+	// Per-user keys (minted by the SSO portal, validated through
+	// query-service) are accepted alongside the static token whenever
+	// MCP_USER_KEYS=1. The static token remains as the service-level
+	// credential and migration path.
+	var validator httpmw.KeyValidator
+	if v := os.Getenv("MCP_USER_KEYS"); v == "1" || strings.EqualFold(v, "true") {
+		validator = client.ValidateKey
+		log.Printf("per-user API keys enabled (validated via query-service)")
+	}
+
+	if token == "" && validator == nil {
 		// An unauthenticated HTTP endpoint serves the whole graph to anyone
 		// who can reach it. Loopback is fine (local dev); a reachable
 		// address requires an explicit acknowledgment rather than a silent
@@ -88,9 +100,27 @@ func runHTTP(ctx context.Context, server *mcp.Server, addr string, timeout time.
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	// Per-user fair share, applied inside auth so the limiter sees the
+	// validated identity rather than a shared source address.
+	perMinute := 0
+	if v := os.Getenv("MCP_RATE_LIMIT_PER_MIN"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			log.Fatalf("invalid MCP_RATE_LIMIT_PER_MIN %q: want a non-negative integer", v)
+		}
+		perMinute = n
+	}
+	if perMinute > 0 {
+		log.Printf("per-user rate limit: %d requests/minute", perMinute)
+	}
+
 	httpServer := &http.Server{
-		Addr:              addr,
-		Handler:           httpmw.WithRequestLog(httpmw.WithAuth(mux, token), nil),
+		Addr: addr,
+		Handler: httpmw.WithRequestLog(
+			httpmw.WithUserKeyAuth(
+				httpmw.WithPerActorRateLimit(mux, perMinute),
+				token, validator,
+			), nil),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		// Each MCP interaction is one bounded POST (stateless mode rejects

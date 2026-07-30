@@ -40,6 +40,11 @@ fails closed rather than exposing the graph. Clients must reach this through
 an HTTPS front (ALB + certificate) - MCP clients refuse plain HTTP on
 non-loopback URLs.
 
+With `MCP_USER_KEYS=1`, per-user `a1kg_...` keys (minted at query-service's
+`/portal` page) are accepted alongside the static token; each is validated
+through query-service's `POST /keys/validate` with a one-minute cache, and
+the middleware fails closed (503) if query-service is unreachable.
+
 ## indexer
 
 ```
@@ -52,7 +57,7 @@ docker run --rm \
   a1-knowledge-graph/indexer /usr/local/bin/indexer --config config/repos.yaml --all
 ```
 
-Final stage is `python:3.12-slim` with `git` and `graphifyy==0.9.23` (the PyPI
+Final stage is `python:3.12-slim` with `git` and `graphifyy==0.9.29` (the PyPI
 package; the CLI command is `graphify`). `deploy/indexer-entrypoint.sh` sets up
 git credentials from `GIT_TOKEN` when present, then `exec`s the container
 command - so the binary + its flags are the docker `command`, not baked into

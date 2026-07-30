@@ -1,6 +1,11 @@
 # Local stack is loopback-only by design (every published port binds
 # 127.0.0.1); ECS does not use this file, so this has no bearing on the
 # real deployment's network exposure.
+
+# Pin the compose project name so container/volume names don't inherit
+# whatever the checkout folder happens to be called.
+name: a1-knowledge-graph
+
 services:
   neo4j:
     image: neo4j:5
@@ -28,6 +33,17 @@ services:
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
       QUERY_BIND: 0.0.0.0
       QUERY_AUTH_TOKEN: ${QUERY_AUTH_TOKEN:-}
+      # Self-service key portal (all-or-nothing; see .env.example).
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URL: ${OIDC_REDIRECT_URL:-}
+      PORTAL_SESSION_SECRET: ${PORTAL_SESSION_SECRET:-}
+      # Admin dashboard at /admin.
+      PORTAL_ADMINS: ${PORTAL_ADMINS:-}
+      ADMIN_AUTH_TOKEN: ${ADMIN_AUTH_TOKEN:-}
+      ADMIN_ANOMALY_WINDOW: ${ADMIN_ANOMALY_WINDOW:-}
+      ADMIN_ANOMALY_THRESHOLD: ${ADMIN_ANOMALY_THRESHOLD:-}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -45,6 +61,8 @@ services:
     environment:
       MCP_HTTP_ADDR: 0.0.0.0:8090
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
+      MCP_USER_KEYS: ${MCP_USER_KEYS:-}
+      MCP_RATE_LIMIT_PER_MIN: ${MCP_RATE_LIMIT_PER_MIN:-}
       QUERY_SERVICE_URL: http://query-service:8080
       QUERY_AUTH_TOKEN: ${QUERY_AUTH_TOKEN:-}
     ports:

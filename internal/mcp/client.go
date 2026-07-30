@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"a1-knowledge-graph/internal/httpmw"
 )
 
 const defaultTimeout = 30 * time.Second
@@ -51,6 +53,12 @@ func (c *QueryClient) get(ctx context.Context, path string, query url.Values) (j
 	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	// Forward the end user's identity so query-service can attribute usage
+	// to a person rather than to "the MCP service". Only set when the
+	// caller's own key was validated upstream.
+	if actor := httpmw.ActorFrom(ctx); actor != "" {
+		req.Header.Set(httpmw.ActorHeader, actor)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

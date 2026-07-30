@@ -19,7 +19,10 @@ import (
 // re-imported despite an unchanged HEAD: the unchanged-HEAD skip only
 // applies when a repo's recorded SchemaVersion matches, so a bump rolls the
 // migration out automatically on the next cycle.
-const GraphSchemaVersion = 9
+// v10: graphify 0.9.29 canonicalizes node IDs to root-relative form, which
+// changes every graphify_id-derived node_key - all repos must re-import so
+// old-key nodes sweep out in one pass instead of lingering next to new ones.
+const GraphSchemaVersion = 10
 
 // Orchestrator drives the per-repo pipeline for a configured set of
 // repositories. Every step is delegated to a pluggable component (Source,
@@ -67,6 +70,25 @@ type Orchestrator struct {
 	// after each successful or skipped (unchanged) repo. Failures are logged
 	// and never fail the repo.
 	SyncStamper SyncStamper
+
+	// KeepCheckout disables the post-run deletion of working copies. Off by
+	// default: the platform retains no source between runs. Turn it on only
+	// to debug a failing extraction, and expect source to accumulate on the
+	// volume while it is on.
+	KeepCheckout bool
+
+	// PauseGate, if set, is consulted at every repository boundary. A paused
+	// platform finishes the repo in flight and then stops the cycle - never
+	// mid-import, which would leave a partial graph for the next sweep to
+	// mistake for deletions. A gate error is logged and treated as "not
+	// paused": losing the control channel must not silently freeze indexing.
+	PauseGate PauseGate
+}
+
+// PauseGate reports whether an operator has paused indexing.
+// *control.Store satisfies this.
+type PauseGate interface {
+	Paused(ctx context.Context) (bool, string, error)
 }
 
 // SyncStamper records when a repository was last checked (and, when indexed
@@ -162,6 +184,12 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 			o.Log.Printf("context canceled, stopping after %d/%d repositories", len(summary.Results), len(repos))
 			break
 		}
+		// Repository boundary: the only safe place to honor a pause.
+		if paused, why := o.pausedNow(ctx); paused {
+			summary.Paused = true
+			o.Log.Printf("indexing paused (%s), stopping after %d/%d repositories", why, len(summary.Results), len(repos))
+			break
+		}
 		if o.Lease != nil {
 			if err := o.Lease.Renew(ctx); err != nil {
 				o.Log.Printf("writer lease renewal failed before %s, stopping: %v", repo.Name, err)
@@ -178,6 +206,22 @@ func (o *Orchestrator) RunOnce(ctx context.Context, opts Options) (summary RunSu
 	}
 
 	return summary, nil
+}
+
+// pausedNow consults the PauseGate. A gate failure is logged and reported
+// as not-paused: an unreachable control channel must never be able to stop
+// indexing silently, which would look exactly like a healthy-but-stale
+// platform.
+func (o *Orchestrator) pausedNow(ctx context.Context) (bool, string) {
+	if o.PauseGate == nil {
+		return false, ""
+	}
+	paused, why, err := o.PauseGate.Paused(ctx)
+	if err != nil {
+		o.Log.Printf("WARNING: pause check failed, continuing: %v", err)
+		return false, ""
+	}
+	return paused, why
 }
 
 // stampSync records freshness on the repository's graph node: a successful
@@ -387,6 +431,22 @@ func (o *Orchestrator) persistResult(name string, r RepoResult) {
 func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force bool, prev RepoState, start time.Time, result *RepoResult, tag string) {
 	repoPath := filepath.Join(o.WorkDir, "repos", repo.Name)
 
+	// The working copy never outlives the run: whatever happens below, the
+	// source is gone before this function returns.
+	defer o.releaseCheckout(repo.Name, repoPath)
+
+	// Ask the remote for its branch tip before cloning anything. An
+	// unchanged repository is answered here, with no source ever written to
+	// disk - which is what makes a 30-minute sweep over dozens of repos
+	// cheap now that checkouts are not kept between runs.
+	if head, unchanged := o.unchangedRemoteHead(ctx, repo, force, prev); unchanged {
+		result.Commit = head
+		result.Status = StatusSkipped
+		result.Reason = fmt.Sprintf("HEAD %s unchanged since %s", head, prev.LastIndexedAt.Format(time.RFC3339))
+		result.Duration = o.now().Sub(start)
+		return
+	}
+
 	o.Log.Printf("[%s] sync %s @ %s", tag, repo.URL, repo.Branch)
 	commit, err := o.Syncer.Sync(ctx, repo, repoPath)
 	if o.recordFailure(result, StageSync, err, start, ctx) {
@@ -399,6 +459,8 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 		return
 	}
 
+	// Second-line skip check, for syncers that cannot query a remote head
+	// (the optimization above is optional; this one is the guarantee).
 	if !force && prev.LastStatus == StatusSuccess && prev.LastIndexedCommit == commit {
 		if prev.SchemaVersion != GraphSchemaVersion {
 			o.Log.Printf("[%s] graph schema changed (v%d -> v%d), re-indexing despite unchanged HEAD",
@@ -410,6 +472,10 @@ func (o *Orchestrator) runPipeline(ctx context.Context, repo Repository, force b
 			return
 		}
 	}
+
+	// Hand the extractor its cache back so a fresh checkout still extracts
+	// incrementally.
+	o.restoreCache(repo.Name, repoPath)
 
 	o.Log.Printf("[%s] graphify %s", tag, commit)
 	graphPath, err := o.Graphify.Generate(ctx, repoPath)

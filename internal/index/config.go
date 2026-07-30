@@ -91,6 +91,11 @@ func (c ExtractorsConfig) AllowPartialEnabled() bool { return boolDefault(c.Allo
 // GitConfig tunes the GitSyncer.
 type GitConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
+	// KeepCheckout leaves each repository's working copy on disk after
+	// indexing. Off by default: the platform retains no source code between
+	// runs - a checkout exists only while its repository is being parsed.
+	// Enable only to debug a failing extraction.
+	KeepCheckout bool `yaml:"keep_checkout"`
 }
 
 // GraphifyConfig tunes the ExecGraphifier. Args supports the {repo_path}
