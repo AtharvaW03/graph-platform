@@ -140,12 +140,19 @@ claude mcp add a1-knowledge-graph \
 ```
 
 **Hosted (HTTP).** For a shared, deployed server, run mcp-server with
-`MCP_HTTP_ADDR` and `MCP_AUTH_TOKEN` set, and point every client at the URL:
+`MCP_HTTP_ADDR` and `MCP_AUTH_TOKEN` set, and point every client at the URL.
+**`<host>` and `<MCP_AUTH_TOKEN>` below are placeholders to replace, not
+literal text** - pasting them as-is fails in most shells (`<...>` is
+input-redirection syntax), including with a confusing "no such file or
+directory" error:
 
 ```bash
-claude mcp add --transport http a1-knowledge-graph https://<host>/mcp \
-  --header "Authorization: Bearer <MCP_AUTH_TOKEN>"
+claude mcp add --transport http a1-knowledge-graph https://your-actual-host/mcp \
+  --header "Authorization: Bearer your-actual-token"
 ```
+
+Locally, replace `https://your-actual-host` with `http://127.0.0.1:8090`
+(the loopback exception to the HTTPS requirement below).
 
 MCP clients require HTTPS for non-loopback URLs, so the hosted server sits
 behind a TLS front. On a reachable address mcp-server refuses to start without
@@ -186,6 +193,91 @@ Both are recorded in the audit trail with the acting identity.
 `ADMIN_ANOMALY_WINDOW` - normal work touches a handful, a systematic sweep
 touches everything. Attribution needs per-user keys (`MCP_USER_KEYS=1`);
 without them all MCP traffic shares one identity and the signal is lost.
+
+### Testing the portal and admin dashboard locally
+
+Both need a working OIDC round trip, which a real org identity provider
+usually isn't available for during local development. `dev/localoidc` is a
+throwaway OIDC provider committed to this repo for exactly that - stdlib
+only (no network access needed to build it, even behind a restrictive
+proxy), never touches anything real, and is not part of any deployed image
+or `cmd/` binary. **Do not point it at anything but local testing** -
+whatever email you type into its form is who you become, with no actual
+authentication happening.
+
+Three terminals:
+
+```bash
+# 1. The stub. Prints the exact OIDC_ISSUER value to use - copy it rather
+#    than retyping, so the two never drift out of sync.
+go run ./dev/localoidc
+
+# 2. query-service, with the portal and admin dashboard enabled.
+NEO4J_PASSWORD=localpass QUERY_AUTH_TOKEN=demo-query-token QUERY_BIND=0.0.0.0 \
+OIDC_ISSUER=http://127.0.0.1:9000 OIDC_CLIENT_ID=a1kg-local OIDC_CLIENT_SECRET=anything \
+OIDC_REDIRECT_URL=http://127.0.0.1:8080/portal/callback \
+PORTAL_SESSION_SECRET=local-dev-session-secret \
+PORTAL_ADMINS=admin@local.test ADMIN_AUTH_TOKEN=local-dev-admin-token ADMIN_ANOMALY_THRESHOLD=5 \
+go run ./cmd/query-service
+
+# 3. mcp-server, if you also want to test per-user keys end to end.
+MCP_HTTP_ADDR=127.0.0.1:8090 MCP_AUTH_TOKEN=local-dev-mcp-token MCP_USER_KEYS=1 \
+QUERY_SERVICE_URL=http://127.0.0.1:8080 QUERY_AUTH_TOKEN=demo-query-token \
+go run ./cmd/mcp-server
+```
+
+Then:
+
+1. **http://127.0.0.1:8080/portal** - sign in with any email; `admin@local.test`
+   is pre-filled since that's the one `PORTAL_ADMINS` above allows onto the
+   dashboard. Mint a key, note the `claude mcp add` command it shows you.
+2. **http://127.0.0.1:8080/admin** - the operator dashboard. Sign in first at
+   `/portal` if you land here signed out; the "Sign in" link on this page
+   returns you here automatically afterward.
+
+To see a pause actually block indexing rather than just watching the
+dashboard's state flip, pause from `/admin`, then run the indexer in a
+fourth terminal and watch it stop at `0/N repositories`:
+
+```bash
+NEO4J_PASSWORD=localpass go run ./cmd/indexer --config config/repos.local.yaml --all
+```
+
+#### Troubleshooting
+
+- **`/admin` says "requires administrator sign-in" even though you're
+  signed in at `/portal`.** Check query-service's startup log for `admin
+  surface enabled at /admin (N allowlisted admin(s), ...)`. If `N` is `0`,
+  `PORTAL_ADMINS` wasn't actually set on that run (easy to drop when
+  retyping a long multi-line command) - restart with it included, and make
+  sure the email matches your sign-in exactly (case-insensitive, but it
+  must be one of the comma-separated values).
+- **Use `127.0.0.1`, not `localhost`, for the portal and admin URLs.**
+  The session cookie is issued for whatever host you signed in through
+  (matching `OIDC_REDIRECT_URL`); mixing `127.0.0.1` and `localhost`
+  across requests looks like two different sites and you'll appear
+  signed out on one but not the other. The web UI dev server is the
+  opposite convention - it binds `localhost:5173` specifically.
+- **`localoidc` fails with `bind: address already in use`.** Something
+  else (often a leftover instance of the stub itself) already holds port
+  9000. Run it on another port instead of hunting down the conflict:
+  `LOCALOIDC_ADDR=127.0.0.1:9001 go run ./dev/localoidc`, then use that
+  same port in `OIDC_ISSUER` when you start query-service.
+- **`lsof` shows nothing on the port, but the bind still fails anyway
+  (macOS).** `lsof` hides sockets owned by other users unless run with
+  `sudo`. Don't chase it - just move the stub to a different port as above.
+- **On Windows, Docker commands involving a bind-mounted path silently
+  fail or mount the wrong thing** (Git Bash rewrites `C:/...`-style
+  arguments before Docker ever sees them). Prefix the command with
+  `MSYS_NO_PATHCONV=1`.
+- **A copy-pasted command with `<angle-bracket>` placeholders fails with
+  a shell error** (e.g. `no such file or directory: host`). Those are
+  placeholders to replace with real values, not literal syntax - your
+  shell is trying to interpret `<...>` as input redirection.
+- **Restarting query-service doesn't sign anyone out.** Sessions are
+  self-contained signed cookies, not server-side state, so they survive a
+  restart as long as `PORTAL_SESSION_SECRET` is unchanged. Changing that
+  value invalidates every existing session at once.
 
 ## Deployment
 
