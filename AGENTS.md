@@ -249,6 +249,11 @@ are maintained; no external webfonts.
   there - run them locally against a real Neo4j before merging changes to
   internal/neo4j or internal/query. Dependabot raises weekly update PRs
   (gomod, npm, docker, actions).
+- `dev/localoidc` - a stdlib-only throwaway OIDC provider for exercising
+  `internal/portal`/`internal/admin` without a real IdP; README's "Testing
+  the portal and admin dashboard locally" has the full recipe. Not a `cmd/`
+  binary, not part of any deployed image, never touches anything real -
+  don't extend it toward looking more production-ready than that implies.
 - Load-test method (autocannon at the MCP endpoint) is documented in the
   README-adjacent runbooks; latest measured: search p75 21-30ms at 100 RPS
   on 14 repos / ~674k entities, flat at 300 RPS, 0 failures (budget: 5s).
