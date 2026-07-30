@@ -216,6 +216,34 @@ func TestIntegration_AnomalyDetection(t *testing.T) {
 	}
 }
 
+// The shared/unattributed bucket (ActorInternal) aggregates many real
+// people's activity behind one identity - it can trivially cross the
+// distinct-repo threshold on volume alone without being any one person's
+// behavior, so it must never be reported as an anomaly. A prior version of
+// this exclusion referenced a constant that was never actually stored as
+// an actor value, silently doing nothing - this pins the real behavior.
+func TestIntegration_AnomalyDetection_ExcludesSharedBucket(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+
+	flushNow(t, db, func(r *Recorder) {
+		for i := 0; i < 15; i++ {
+			r.Record(ActorInternal, "search", []string{repoName(i)})
+		}
+	})
+
+	rd := NewReader(db)
+	anomalies, err := rd.Anomalies(ctx, time.Hour, 10)
+	if err != nil {
+		t.Fatalf("anomalies: %v", err)
+	}
+	for _, a := range anomalies {
+		if a.Actor == ActorInternal {
+			t.Errorf("shared bucket %q flagged as an anomaly (touched %d repos) - it aggregates many people, not one", ActorInternal, a.RepoCount)
+		}
+	}
+}
+
 func TestIntegration_TrafficAndTotals(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()

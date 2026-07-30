@@ -161,8 +161,10 @@ CREATE (:AdminAudit {at: datetime($now), actor: $actor, action: $action, detail:
 
 // RecentAudit returns the newest audit entries, most recent first.
 func (s *Store) RecentAudit(ctx context.Context, limit int) ([]AuditEntry, error) {
-	if limit <= 0 || limit > auditLimit {
+	if limit <= 0 {
 		limit = 50
+	} else if limit > auditLimit {
+		limit = auditLimit
 	}
 	const cypher = `
 MATCH (a:AdminAudit)

@@ -43,7 +43,7 @@ const dashboardHTML = `<!doctype html>
   section h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .07em;
                color: var(--muted); margin: 0 0 .8rem; font-weight: 600; }
   table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-  td { padding: .3rem 0; vertical-align: top; }
+  td { padding: .35rem 0; vertical-align: top; }
   td.n { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
   .big { font-size: 1.9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
   .row { display: flex; gap: 1.75rem; flex-wrap: wrap; }
@@ -52,26 +52,36 @@ const dashboardHTML = `<!doctype html>
   .pill.good { color: var(--good); border-color: currentColor; }
   .pill.warn { color: var(--warn); border-color: currentColor; }
   .pill.bad  { color: var(--bad);  border-color: currentColor; }
+  .pill.quiet { color: var(--muted); }
   button { font: inherit; padding: .35rem .8rem; border-radius: 6px; cursor: pointer;
            border: 1px solid var(--line); background: transparent; color: inherit; }
   button.primary { border-color: var(--accent); color: var(--accent); }
   button.danger { border-color: var(--bad); color: var(--bad); }
+  button.ghost { border-color: transparent; padding: .3rem .5rem; }
   input, select { font: inherit; padding: .3rem .5rem; border-radius: 6px;
                   border: 1px solid var(--line); background: transparent; color: inherit; }
   .controls { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .6rem; }
   .bar { height: 6px; background: var(--accent); border-radius: 3px; opacity: .75; }
   code { font-family: ui-monospace, Consolas, monospace; font-size: .85em; }
-  .scroll { max-height: 17rem; overflow-y: auto; }
+  .scroll { max-height: 19rem; overflow-y: auto; }
   .empty { color: var(--muted); font-size: .875rem; padding: .4rem 0; }
   .spark { display: flex; align-items: flex-end; gap: 2px; height: 44px; margin-top: .3rem; }
   .spark div { flex: 1; background: var(--accent); opacity: .7; border-radius: 2px 2px 0 0; min-height: 2px; }
+  .key-row { padding: .5rem 0; border-bottom: 1px solid var(--line); }
+  .key-row:last-child { border-bottom: none; }
+  .key-note { font-size: .8rem; color: var(--warn); margin-top: .15rem; }
+  .summary-strip { display: flex; gap: 1.25rem; margin-bottom: .7rem; font-size: .85rem; color: var(--muted); }
+  .summary-strip b { color: var(--ink); font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
 <header>
   <h1>A1 Knowledge Graph - admin</h1>
   <span class="muted" id="who"></span>
-  <span class="muted" id="updated" style="margin-left:auto"></span>
+  <span style="margin-left:auto; display:flex; align-items:center; gap:.6rem">
+    <span class="muted" id="updated"></span>
+    <button class="ghost" id="refreshBtn" title="Refresh all panels now">Refresh</button>
+  </span>
 </header>
 <main>
   <section>
@@ -85,8 +95,8 @@ const dashboardHTML = `<!doctype html>
         <option value="480">for 8 hours</option>
       </select>
       <input id="pauseReason" placeholder="reason (optional)" style="flex:1;min-width:9rem">
-      <button class="danger" onclick="pause()">Pause</button>
-      <button class="primary" onclick="resume()">Resume</button>
+      <button class="danger" id="pauseBtn">Pause</button>
+      <button class="primary" id="resumeBtn">Resume</button>
     </div>
   </section>
 
@@ -105,25 +115,19 @@ const dashboardHTML = `<!doctype html>
     <div class="row">
       <div><div class="big" id="totalReq">-</div><div class="muted">requests</div></div>
     </div>
-    <div class="spark" id="spark"></div>
-    <div style="margin-top:.8rem"><strong class="muted">Top users</strong><table id="topUsers"></table></div>
+    <div class="spark" id="spark" title="Requests per day"></div>
   </section>
 
   <section>
     <h2>Most-queried repositories</h2>
     <table id="topRepos"></table>
-    <div style="margin-top:.9rem"><strong class="muted">Endpoints</strong><table id="topEndpoints"></table></div>
+    <div style="margin-top:.9rem"><strong class="muted">By feature</strong><table id="topEndpoints"></table></div>
   </section>
 
-  <section>
-    <h2>Access anomalies</h2>
-    <div class="muted" id="anomalyHint"></div>
-    <div id="anomalies"><div class="empty">loading...</div></div>
-  </section>
-
-  <section>
+  <section style="grid-column: span 2">
     <h2>API keys</h2>
-    <div class="scroll"><table id="keys"></table></div>
+    <div class="summary-strip" id="keysSummary"></div>
+    <div class="scroll" id="keys"><div class="empty">loading...</div></div>
   </section>
 
   <section style="grid-column: 1 / -1">
@@ -136,6 +140,15 @@ const dashboardHTML = `<!doctype html>
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c =>
   ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+// Friendlier display names for the identities that aren't a real person -
+// the stored values stay stable (used as DB keys, log/audit content), only
+// the label shown here changes.
+function actorLabel(a) {
+  if (a === "internal") return "Shared / API access";
+  if (a === "token-admin") return "Admin token";
+  return a;
+}
 
 async function api(path, opts) {
   const res = await fetch(path, Object.assign({headers: {"Accept": "application/json"}}, opts || {}));
@@ -162,34 +175,38 @@ function ago(sec) {
   return Math.round(sec / 3600) + "h";
 }
 
+// One repo-name -> freshness lookup, shared by the Graph panel and the
+// Most-queried-repositories ranking, so popularity and staleness read
+// together instead of living in two disconnected panels.
+let freshnessByRepo = {};
+
+function freshnessPill(name) {
+  const f = freshnessByRepo[name];
+  if (!f) return "";
+  return '<span class="pill ' + (f.stale ? "warn" : "good") + '" style="margin-left:.4rem">' + ago(f.age_seconds) + '</span>';
+}
+
 async function loadOverview() {
   const d = await api("/admin/api/overview");
   $("totalNodes").textContent = d.total_nodes.toLocaleString();
   $("repoCount").textContent = (d.repos || []).length;
   $("staleCount").textContent = d.stale_repos;
 
-  const ageBy = {};
-  (d.freshness || []).forEach(f => ageBy[f.repo] = f);
-  rows($("repos"), d.repos, r => {
-    const f = ageBy[r.name];
-    const pill = f ? '<span class="pill ' + (f.stale ? "warn" : "good") + '">' + ago(f.age_seconds) + '</span>' : "";
-    return '<tr><td>' + esc(r.name) + '</td><td class="n">' + r.nodes.toLocaleString() +
-           '</td><td class="n">' + pill + '</td></tr>';
-  });
+  freshnessByRepo = {};
+  (d.freshness || []).forEach(f => freshnessByRepo[f.repo] = f);
+  rows($("repos"), d.repos, r =>
+    '<tr><td>' + esc(r.name) + '</td><td class="n">' + r.nodes.toLocaleString() +
+    '</td><td class="n">' + freshnessPill(r.name) + '</td></tr>');
 
   const st = d.indexing || {};
   const paused = st.paused;
   $("indexing").innerHTML =
     '<div class="big">' + (paused ? '<span class="pill bad">paused</span>' : '<span class="pill good">running</span>') + '</div>' +
     (paused
-      ? '<div class="muted" style="margin-top:.4rem">by ' + esc(st.actor || "?") +
+      ? '<div class="muted" style="margin-top:.4rem">by ' + esc(actorLabel(st.actor || "?")) +
         (st.paused_until ? ' until ' + esc(new Date(st.paused_until).toLocaleString()) : ' (indefinitely)') +
         (st.reason ? '<br>reason: ' + esc(st.reason) : '') + '</div>'
       : '<div class="muted" style="margin-top:.4rem">indexing on schedule</div>');
-
-  rows($("audit"), d.recent_audit, a =>
-    '<tr><td class="n">' + esc(new Date(a.at).toLocaleString()) + '</td><td>' + esc(a.actor) +
-    '</td><td><code>' + esc(a.action) + '</code></td><td class="muted">' + esc(a.detail || "") + '</td></tr>');
 
   $("updated").textContent = "updated " + new Date().toLocaleTimeString();
 }
@@ -198,50 +215,78 @@ async function loadUsage() {
   const d = await api("/admin/api/usage?days=30");
   $("usageWindow").textContent = "last " + d.days + " days";
   $("totalReq").textContent = (d.total_requests || 0).toLocaleString();
-  ranked($("topUsers"), d.top_users || []);
-  ranked($("topRepos"), d.top_repos || []);
+
+  const max = Math.max(1, ...(d.top_repos || []).map(i => i.count));
+  rows($("topRepos"), d.top_repos || [], i =>
+    '<tr><td>' + esc(i.name) + freshnessPill(i.name) + '<div class="bar" style="width:' +
+    Math.round(i.count / max * 100) + '%"></div></td><td class="n">' + i.count + '</td></tr>');
   ranked($("topEndpoints"), d.top_endpoints || []);
 
   const t = d.traffic || [];
-  const max = Math.max(1, ...t.map(x => x.count));
+  const tmax = Math.max(1, ...t.map(x => x.count));
   $("spark").innerHTML = t.map(x =>
-    '<div style="height:' + Math.max(2, Math.round(x.count / max * 44)) + 'px" title="' +
+    '<div style="height:' + Math.max(2, Math.round(x.count / tmax * 44)) + 'px" title="' +
     esc(x.day) + ': ' + x.count + '"></div>').join("");
 }
 
+// Access notes come from the same enumeration signal as before, but shown
+// only where there is something to do about it: next to the Revoke button
+// on the one key it's relevant to, not as a standing list of flagged
+// people. anomalyByOwner is populated before loadKeys renders.
+let anomalyByOwner = {};
+
 async function loadAnomalies() {
-  const d = await api("/admin/api/anomalies");
-  $("anomalyHint").textContent =
-    "more than " + d.threshold + " repositories touched by one identity within " + d.window_minutes + " minutes";
-  const list = d.anomalies || [];
-  if (!list.length) {
-    $("anomalies").innerHTML = '<div class="empty">nothing unusual</div>';
-    return;
+  try {
+    const d = await api("/admin/api/anomalies");
+    anomalyByOwner = {};
+    (d.anomalies || []).forEach(a => anomalyByOwner[a.actor] = a);
+  } catch (e) {
+    anomalyByOwner = {};
   }
-  $("anomalies").innerHTML = list.map(a =>
-    '<div style="margin-top:.6rem"><span class="pill bad">' + a.repo_count + ' repos</span> ' +
-    esc(a.actor) + '<div class="muted">' + a.requests + ' requests, ' +
-    esc(new Date(a.first_seen).toLocaleTimeString()) + ' - ' +
-    esc(new Date(a.last_seen).toLocaleTimeString()) + '</div>' +
-    '<div class="muted"><code>' + a.repos.slice(0, 12).map(esc).join(", ") +
-    (a.repos.length > 12 ? ", +" + (a.repos.length - 12) + " more" : "") + '</code></div>' +
-    '<button class="danger" style="margin-top:.3rem" onclick="revoke(\'' + esc(a.actor) + '\')">Revoke key</button></div>').join("");
+}
+
+function keyNote(owner) {
+  const a = anomalyByOwner[owner];
+  if (!a) return "";
+  return '<div class="key-note" title="' + esc(a.repos.slice(0, 20).join(", ")) + '">' +
+    'Touched ' + a.repo_count + ' repositories recently (' + a.requests + ' requests) - worth a look before renewing access.</div>';
 }
 
 async function loadKeys() {
   const d = await api("/admin/api/keys");
   const now = Date.now();
-  rows($("keys"), d.keys, k => {
+  const list = d.keys || [];
+
+  let active = 0, expired = 0, revoked = 0, neverUsed = 0;
+  list.forEach(k => {
+    if (k.revoked_at) revoked++;
+    else if (new Date(k.expires_at).getTime() < now) expired++;
+    else active++;
+    if (!k.last_used_at) neverUsed++;
+  });
+  $("keysSummary").innerHTML =
+    '<span><b>' + active + '</b> active</span>' +
+    '<span><b>' + expired + '</b> expired</span>' +
+    '<span><b>' + revoked + '</b> revoked</span>' +
+    (neverUsed ? '<span><b>' + neverUsed + '</b> never used</span>' : '');
+
+  if (!list.length) {
+    $("keys").innerHTML = '<div class="empty">no keys minted yet</div>';
+    return;
+  }
+  $("keys").innerHTML = list.map(k => {
     const expired = new Date(k.expires_at).getTime() < now;
-    const state = k.revoked_at ? '<span class="pill">revoked</span>'
+    const state = k.revoked_at ? '<span class="pill quiet">revoked</span>'
                 : expired ? '<span class="pill warn">expired</span>'
                 : '<span class="pill good">active</span>';
-    const used = k.last_used_at ? new Date(k.last_used_at).toLocaleDateString() : "never";
-    return '<tr><td>' + esc(k.owner) + '<div class="muted">used ' + used + '</div></td>' +
-      '<td class="n">' + state + '</td><td class="n">' +
-      (k.revoked_at || expired ? "" :
-        '<button class="danger" onclick="revoke(\'' + esc(k.owner) + '\')">Revoke</button>') + '</td></tr>';
-  });
+    const used = k.last_used_at ? new Date(k.last_used_at).toLocaleDateString() : "never used";
+    const canRevoke = !k.revoked_at && !expired;
+    return '<div class="key-row"><div style="display:flex;justify-content:space-between;align-items:center;gap:.75rem">' +
+      '<div>' + esc(k.owner) + '<div class="muted">' + used + '</div></div>' +
+      '<div style="display:flex;align-items:center;gap:.6rem">' + state +
+      (canRevoke ? '<button class="danger" data-action="revoke" data-owner="' + esc(k.owner) + '">Revoke</button>' : '') +
+      '</div></div>' + keyNote(k.owner) + '</div>';
+  }).join("");
 }
 
 async function revoke(owner) {
@@ -253,6 +298,15 @@ async function revoke(owner) {
   });
   await Promise.all([loadKeys(), loadOverview()]);
 }
+
+// Event delegation with data-* attributes: the value is read as a plain
+// string via dataset, never re-parsed as JS/HTML source the way an inline
+// onclick="fn('...')" attribute would be - so it can't be broken out of
+// regardless of what characters an owner/email contains.
+$("keys").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-action='revoke']");
+  if (btn) revoke(btn.dataset.owner);
+});
 
 async function pause() {
   const minutes = parseInt($("pauseFor").value, 10) || 0;
@@ -272,12 +326,25 @@ async function resume() {
   loadOverview();
 }
 
-function refresh() {
-  loadOverview().catch(e => $("indexing").innerHTML = '<div class="empty">' + esc(e.message) + '</div>');
-  loadUsage().catch(() => {});
-  loadAnomalies().catch(() => {});
-  loadKeys().catch(() => {});
+$("pauseBtn").addEventListener("click", pause);
+$("resumeBtn").addEventListener("click", resume);
+
+async function loadAudit() {
+  const d = await api("/admin/api/audit?limit=100");
+  rows($("audit"), d.audit, a =>
+    '<tr><td class="n">' + esc(new Date(a.at).toLocaleString()) + '</td><td>' + esc(actorLabel(a.actor)) +
+    '</td><td><code>' + esc(a.action) + '</code></td><td class="muted">' + esc(a.detail || "") + '</td></tr>');
 }
+
+async function refresh() {
+  try {
+    await loadAnomalies(); // populates anomalyByOwner before keys render
+    await Promise.all([loadOverview(), loadUsage(), loadKeys(), loadAudit()]);
+  } catch (e) {
+    $("indexing").innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
+}
+$("refreshBtn").addEventListener("click", refresh);
 refresh();
 setInterval(refresh, 30000);
 </script>

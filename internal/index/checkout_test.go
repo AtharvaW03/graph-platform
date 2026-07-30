@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"a1-knowledge-graph/internal/importer"
 )
 
 // headSyncer is a Syncer that also answers remote-head queries, so the
@@ -107,6 +109,32 @@ func TestCheckout_DeletedAfterFailedRun(t *testing.T) {
 	repoPath := filepath.Join(o.WorkDir, "repos", "repo-a")
 	if _, err := os.Stat(repoPath); !os.IsNotExist(err) {
 		t.Error("working copy survived a failed run - the easiest way for source to accumulate unnoticed")
+	}
+}
+
+// panicImportRunner panics instead of erroring, to prove the working copy
+// is released even when a stage panics rather than returning an error -
+// the same "no source retained on any pipeline exit" property, exercised
+// through the path that skips runPipeline's normal early-return logic
+// entirely and unwinds via defer instead.
+type panicImportRunner struct{}
+
+func (panicImportRunner) Run(context.Context, string, string, string, bool) (*importer.Summary, error) {
+	panic("import stage panicked")
+}
+
+func TestCheckout_DeletedWhenPipelinePanics(t *testing.T) {
+	s := &headSyncer{remoteHead: "abc123"}
+	o := checkoutOrchestrator(t, s)
+	o.Importer = panicImportRunner{}
+
+	res := o.IndexOne(context.Background(), Repository{Name: "repo-a", URL: "file:///a", Branch: "main"}, false)
+	if res.Status != StatusFailed || res.Stage != StagePanic {
+		t.Fatalf("status=%v stage=%v, want Failed/StagePanic", res.Status, res.Stage)
+	}
+	repoPath := filepath.Join(o.WorkDir, "repos", "repo-a")
+	if _, err := os.Stat(repoPath); !os.IsNotExist(err) {
+		t.Error("working copy survived a panic mid-pipeline - releaseCheckout's defer must fire on every unwind, not just normal returns")
 	}
 }
 
