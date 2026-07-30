@@ -117,9 +117,15 @@ func (r *Reader) Anomalies(ctx context.Context, window time.Duration, threshold 
 	if threshold <= 0 {
 		threshold = 10
 	}
+	// actor <> $sharedActor excludes the catch-all bucket every unattributed
+	// caller shares (web UI, direct script access): it aggregates many real
+	// people's activity, so it can cross any repo-count threshold on volume
+	// alone without being one person's behavior - a false positive, not a
+	// signal. A real bug here previously excluded a constant that was never
+	// actually stored as an actor value, so this exclusion was a no-op.
 	const cypher = `
 MATCH (a:RepoAccess)
-WHERE a.at >= datetime($since) AND a.actor <> $webActor
+WHERE a.at >= datetime($since) AND a.actor <> $sharedActor
 WITH a.actor AS actor, collect(DISTINCT a.repo) AS repos, count(a) AS requests,
      min(a.at) AS first_seen, max(a.at) AS last_seen
 WHERE size(repos) >= $threshold
@@ -129,9 +135,9 @@ ORDER BY size(repos) DESC
 LIMIT 50`
 	out := make([]Anomaly, 0, 8)
 	err := r.read(ctx, cypher, map[string]any{
-		"since":     r.now().UTC().Add(-window).Format(time.RFC3339),
-		"threshold": threshold,
-		"webActor":  ActorWeb,
+		"since":       r.now().UTC().Add(-window).Format(time.RFC3339),
+		"threshold":   threshold,
+		"sharedActor": ActorInternal,
 	}, func(m map[string]any) {
 		repos := asStrings(m["repos"])
 		out = append(out, Anomaly{

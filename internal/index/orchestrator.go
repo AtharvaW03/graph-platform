@@ -387,11 +387,17 @@ func (o *Orchestrator) IndexOne(ctx context.Context, repo Repository, force bool
 // indexOne is IndexOne with an explicit log tag - the position-prefixed
 // "3/16 auth-service" when driven by RunOnce's loop, or the bare repo name
 // for a direct single-repo call.
-func (o *Orchestrator) indexOne(ctx context.Context, repo Repository, force bool, tag string) RepoResult {
+// result is a named return: a panic recovered by the deferred func below
+// only reaches the caller if the return value is named. Without this, a
+// panicking stage would persist the correct failure to the state store
+// (persistResult inside the defer sees it) but hand RunOnce's loop back an
+// empty zero-value RepoResult - the panic would vanish from every summary,
+// log line, and result the caller ever sees.
+func (o *Orchestrator) indexOne(ctx context.Context, repo Repository, force bool, tag string) (result RepoResult) {
 	start := o.now()
 	prev, _ := o.Store.Get(repo.Name)
 
-	result := RepoResult{
+	result = RepoResult{
 		Name:       repo.Name,
 		URL:        repo.URL,
 		Branch:     repo.Branch,

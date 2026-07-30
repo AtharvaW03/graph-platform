@@ -23,23 +23,16 @@ import (
 
 // Deps are the collaborators the admin surface reads and drives.
 type Deps struct {
-	Usage    *usage.Reader
-	Keys     *keys.Store
-	Control  *control.Store
-	Graph    GraphStats
-	Indexing IndexingStatus
+	Usage   *usage.Reader
+	Keys    *keys.Store
+	Control *control.Store
+	Graph   GraphStats
 }
 
 // GraphStats exposes graph size and freshness for the overview panel.
 type GraphStats interface {
 	ListRepositories(ctx context.Context) ([]RepoSize, error)
 	Freshness(ctx context.Context) ([]RepoFreshness, error)
-}
-
-// IndexingStatus exposes the indexer's own view (last commit, failures).
-// Optional: nil renders the panel as unavailable rather than failing.
-type IndexingStatus interface {
-	Snapshot(ctx context.Context) (any, error)
 }
 
 // RepoSize is one repository's entity count.
@@ -132,14 +125,12 @@ func (h *Handler) guard(next actorHandler) http.HandlerFunc {
 // -------- read panels --------
 
 type overviewResponse struct {
-	GeneratedAt  time.Time            `json:"generated_at"`
-	Repos        []RepoSize           `json:"repos"`
-	TotalNodes   int                  `json:"total_nodes"`
-	Freshness    []RepoFreshness      `json:"freshness"`
-	StaleRepos   int                  `json:"stale_repos"`
-	Indexing     control.State        `json:"indexing"`
-	IndexerState any                  `json:"indexer_state,omitempty"`
-	Audit        []control.AuditEntry `json:"recent_audit"`
+	GeneratedAt time.Time       `json:"generated_at"`
+	Repos       []RepoSize      `json:"repos"`
+	TotalNodes  int             `json:"total_nodes"`
+	Freshness   []RepoFreshness `json:"freshness"`
+	StaleRepos  int             `json:"stale_repos"`
+	Indexing    control.State   `json:"indexing"`
 }
 
 func (h *Handler) overview(w http.ResponseWriter, r *http.Request, _ string) {
@@ -175,14 +166,6 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request, _ string) {
 			return
 		}
 		out.Indexing = st
-		if audit, err := h.deps.Control.RecentAudit(ctx, 20); err == nil {
-			out.Audit = audit
-		}
-	}
-	if h.deps.Indexing != nil {
-		if snap, err := h.deps.Indexing.Snapshot(ctx); err == nil {
-			out.IndexerState = snap
-		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

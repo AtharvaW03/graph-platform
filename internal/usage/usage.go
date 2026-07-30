@@ -29,12 +29,11 @@ import (
 )
 
 const (
-	// ActorWeb is the attribution for requests arriving without any user
-	// identity - the web UI proxies with the service token and no browser
-	// session, so those genuinely are anonymous.
-	ActorWeb = "web-ui"
-	// ActorInternal is the attribution for direct service-token calls that
-	// carry no forwarded actor (scripts, probes, curl by an operator).
+	// ActorInternal is the attribution for requests carrying no forwarded
+	// actor: the web UI (no per-browser identity yet - the proxy injects
+	// the shared service token, nothing per-user), and direct service-token
+	// calls (scripts, probes, curl by an operator). Both are indistinguishable
+	// today; if the web UI gets its own SSO session, split this back out.
 	ActorInternal = "internal"
 
 	flushInterval  = 5 * time.Second
