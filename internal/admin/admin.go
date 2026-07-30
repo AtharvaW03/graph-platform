@@ -399,5 +399,5 @@ const signInPage = `<!doctype html><html><head><meta charset="utf-8">
 a{color:inherit}</style></head><body>
 <h1>Admin</h1>
 <p>This page requires an administrator sign-in.</p>
-<p><a href="/portal/login">Sign in</a></p>
+<p><a href="/portal/login?return_to=/admin">Sign in</a></p>
 </body></html>`
