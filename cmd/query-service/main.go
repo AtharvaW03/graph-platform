@@ -93,12 +93,21 @@ func main() {
 	// since preflights never carry an Authorization header.
 	// Inside auth: only authenticated traffic is attributed and recorded,
 	// and only an authenticated caller can assert a forwarded actor.
+	//
+	// WithUsageRecording sits directly around server.Routes() - not outside
+	// WithRequestTimeout - because it reads r.PathValue("repo") for
+	// path-scoped routes (/overview/{repo}, /dependencies/{repo}), and
+	// PathValue is only populated on the exact *http.Request object the
+	// pattern-matching mux received. WithRequestTimeout calls
+	// r.WithContext(...), which returns a NEW *http.Request; anything
+	// reading PathValue from an *outer* layer's r would see it forever
+	// unset, since the mux mutates the inner copy, not the original.
 	authed := api.WithCORS(
 		httpmw.WithAuth(
 			httpmw.WithForwardedActor(
-				api.WithUsageRecording(
-					api.WithRequestTimeout(server.Routes(), requestTimeout),
-					usageRecorder,
+				api.WithRequestTimeout(
+					api.WithUsageRecording(server.Routes(), usageRecorder),
+					requestTimeout,
 				),
 			),
 			token,
