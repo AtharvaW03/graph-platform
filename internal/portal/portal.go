@@ -254,9 +254,15 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := hex.EncodeToString(b[:])
+	// returnTo lets a caller (the admin surface's sign-in link, in
+	// particular) land back where the user started instead of always at
+	// /portal. Restricted to a fixed allowlist rather than trusting the
+	// query value verbatim - an unchecked redirect target here would be an
+	// open-redirect through this login flow.
+	payload, _ := json.Marshal(loginState{State: state, ReturnTo: sanitizeReturnTo(r.URL.Query().Get("return_to"))})
 	http.SetCookie(w, &http.Cookie{
 		Name:     stateCookie,
-		Value:    h.sign([]byte(state)),
+		Value:    h.sign(payload),
 		Path:     "/portal",
 		HttpOnly: true,
 		Secure:   h.secureCookies,
@@ -266,6 +272,25 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, h.auth.AuthCodeURL(state), http.StatusFound)
 }
 
+// loginState is the state cookie's payload: the random value verified
+// against the OIDC provider's echoed `state` parameter, plus where to send
+// the user once sign-in completes.
+type loginState struct {
+	State    string `json:"s"`
+	ReturnTo string `json:"r"`
+}
+
+// sanitizeReturnTo only allows known internal destinations. This endpoint
+// completes third-party sign-in, so an unvalidated redirect target here
+// would let an attacker-crafted /portal/login?return_to=... link bounce a
+// freshly authenticated user to an attacker-controlled page.
+func sanitizeReturnTo(v string) string {
+	if v == "/admin" || strings.HasPrefix(v, "/admin/") {
+		return v
+	}
+	return "/portal"
+}
+
 func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie(stateCookie)
 	if err != nil {
@@ -273,7 +298,12 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload, ok := h.verify(c.Value)
-	if !ok || r.URL.Query().Get("state") != string(payload) {
+	if !ok {
+		http.Error(w, "state mismatch - restart login", http.StatusBadRequest)
+		return
+	}
+	var ls loginState
+	if err := json.Unmarshal(payload, &ls); err != nil || r.URL.Query().Get("state") != ls.State {
 		http.Error(w, "state mismatch - restart login", http.StatusBadRequest)
 		return
 	}
@@ -288,10 +318,15 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sign-in failed", http.StatusUnauthorized)
 		return
 	}
-	// Clear the state cookie, set the session, land on the key page.
+	// Clear the state cookie, set the session, and land back where the
+	// flow started (default /portal).
 	http.SetCookie(w, &http.Cookie{Name: stateCookie, Path: "/portal", MaxAge: -1})
 	h.setSession(w, id)
-	http.Redirect(w, r, "/portal", http.StatusFound)
+	dest := ls.ReturnTo
+	if dest == "" {
+		dest = "/portal"
+	}
+	http.Redirect(w, r, dest, http.StatusFound)
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
