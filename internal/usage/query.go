@@ -169,6 +169,51 @@ LIMIT 50`
 	return out, err
 }
 
+// RepoActivity is the inverse of ActorActivity: who queries one
+// repository, and how much. Backs the per-repository drill-down, which is
+// how an operator answers "who relies on this" before touching it.
+func (r *Reader) RepoActivity(ctx context.Context, repo string, days int) ([]Count, error) {
+	days = boundWindow(days)
+	const cypher = `
+MATCH (u:UsageStat)
+WHERE u.day >= date($from) AND u.repo = $repo
+RETURN u.actor AS name, sum(u.count) AS n
+ORDER BY n DESC
+LIMIT 50`
+	out := make([]Count, 0, 16)
+	err := r.read(ctx, cypher, map[string]any{"from": r.fromDay(days), "repo": repo}, func(m map[string]any) {
+		out = append(out, Count{Name: asString(m["name"]), Count: asInt(m["n"])})
+	})
+	return out, err
+}
+
+// ActorTotal is one actor's request count over the window, across every
+// repository and endpoint.
+func (r *Reader) ActorTotal(ctx context.Context, actor string, days int) (int, error) {
+	days = boundWindow(days)
+	const cypher = `
+MATCH (u:UsageStat) WHERE u.day >= date($from) AND u.actor = $actor
+RETURN sum(u.count) AS n`
+	total := 0
+	err := r.read(ctx, cypher, map[string]any{"from": r.fromDay(days), "actor": actor}, func(m map[string]any) {
+		total = asInt(m["n"])
+	})
+	return total, err
+}
+
+// RepoTotal is one repository's request count over the window.
+func (r *Reader) RepoTotal(ctx context.Context, repo string, days int) (int, error) {
+	days = boundWindow(days)
+	const cypher = `
+MATCH (u:UsageStat) WHERE u.day >= date($from) AND u.repo = $repo
+RETURN sum(u.count) AS n`
+	total := 0
+	err := r.read(ctx, cypher, map[string]any{"from": r.fromDay(days), "repo": repo}, func(m map[string]any) {
+		total = asInt(m["n"])
+	})
+	return total, err
+}
+
 func (r *Reader) fromDay(days int) string {
 	return r.now().UTC().AddDate(0, 0, -(days - 1)).Format("2006-01-02")
 }
