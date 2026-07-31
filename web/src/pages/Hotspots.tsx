@@ -1,10 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { type FormEvent } from "react";
 import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { useRepoScope } from "../context/RepoScope";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
-import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
 import { Button, Card, PageHeader } from "../components/ui";
 import type { HotspotNode } from "../types";
@@ -14,13 +13,11 @@ import type { HotspotNode } from "../types";
 // additionally caches the org-wide result for a few minutes, so repeated
 // requests are cheap.
 export function Hotspots() {
-  const [ratedQuery, setRatedQuery] = useState("");
   const { selected, setSelected } = useRepoScope();
   const { data, error, loading, run } = useAsync<HotspotNode[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    setRatedQuery(selected.length > 0 ? selected.join(",") : "org-wide");
     run(() => api.findHotspots(selected));
   };
 
@@ -54,7 +51,6 @@ export function Hotspots() {
           empty={data?.length === 0}
           emptyText="No dependency edges indexed yet - run the indexer first."
         />
-        {data && <FeedbackWidget endpoint="hotspots" query={ratedQuery} />}
         {data && data.length > 0 && (
           <DataTable
             rows={data}

@@ -4,7 +4,6 @@ import { useAsync } from "../hooks/useAsync";
 import { useRepoScope } from "../context/RepoScope";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges, ConfidenceBadge, joinList } from "../components/DataTable";
-import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
 import { Button, Card, Input, PageHeader, Segmented } from "../components/ui";
 import type {
@@ -53,13 +52,11 @@ export function Explore() {
 function RoutesForm() {
   const [method, setMethod] = useState("");
   const [path, setPath] = useState("");
-  const [ratedQuery, setRatedQuery] = useState("");
   const { selected, setSelected } = useRepoScope();
   const { data, error, loading, run } = useAsync<HTTPRoute[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    setRatedQuery([method.trim(), path.trim()].filter(Boolean).join(" ") || "all routes");
     run(() => api.findRoutes(method.trim() || undefined, path.trim() || undefined, selected));
   };
 
@@ -88,7 +85,6 @@ function RoutesForm() {
               : "No routes matched - try clearing a filter."
           }
         />
-        {data && <FeedbackWidget endpoint="routes" query={ratedQuery} />}
         {data && data.length > 0 && (
           <DataTable
             rows={data}
@@ -112,13 +108,11 @@ function RoutesForm() {
 
 function KafkaForm() {
   const [topic, setTopic] = useState("");
-  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<KafkaTopicInfo>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!topic.trim()) return;
-    setRatedQuery(topic.trim());
     run(() => api.findKafkaTopic(topic.trim()));
   };
 
@@ -141,7 +135,6 @@ function KafkaForm() {
       </form>
       <div style={{ marginTop: "var(--space-6)" }}>
         <StatusBox loading={loading} error={error} />
-        {data && <FeedbackWidget endpoint="kafka" query={ratedQuery} />}
         {data && (
           <dl className="kv">
             <dt>Topic</dt>
@@ -160,13 +153,11 @@ function KafkaForm() {
 function SqlForm() {
   const [schema, setSchema] = useState("");
   const [name, setName] = useState("");
-  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<SQLObjectInfo[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    setRatedQuery(schema.trim() ? `${schema.trim()}.${name.trim()}` : name.trim());
     run(() => api.findSQLObject(schema.trim() || undefined, name.trim()));
   };
 
@@ -190,7 +181,6 @@ function SqlForm() {
       </form>
       <div style={{ marginTop: "var(--space-6)" }}>
         <StatusBox loading={loading} error={error} empty={data?.length === 0} />
-        {data && <FeedbackWidget endpoint="sql" query={ratedQuery} />}
         {data && data.length > 0 && (
           <DataTable
             rows={data}
@@ -216,12 +206,10 @@ function SqlForm() {
 function GlueForm() {
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
-  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<GlueJobInfo[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    setRatedQuery([source.trim(), target.trim()].filter(Boolean).join(" -> ") || "all glue jobs");
     run(() => api.findGlueJobs(source.trim() || undefined, target.trim() || undefined));
   };
 
@@ -239,7 +227,6 @@ function GlueForm() {
       </form>
       <div style={{ marginTop: "var(--space-6)" }}>
         <StatusBox loading={loading} error={error} empty={data?.length === 0} />
-        {data && <FeedbackWidget endpoint="glue" query={ratedQuery} />}
         {data && data.length > 0 && (
           <DataTable
             rows={data}
@@ -267,16 +254,13 @@ function DependenciesForm() {
   const [repo, setRepo] = useState<string[]>([]);
   const [scope, setScope] = useState("");
   const [dep, setDep] = useState("");
-  const [ratedQuery, setRatedQuery] = useState("");
   const { data, error, loading, run } = useAsync<DependencyEdge[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (direction === "dependencies" && repo[0]) {
-      setRatedQuery(`dependencies of ${repo[0]}`);
       run(() => api.findDependencies(repo[0], scope.trim() || undefined));
     } else if (direction === "dependents" && dep.trim()) {
-      setRatedQuery(`dependents of ${dep.trim()}`);
       run(() => api.findDependents(dep.trim()));
     }
   };
@@ -339,7 +323,6 @@ function DependenciesForm() {
 
       <div style={{ marginTop: "var(--space-6)" }}>
         <StatusBox loading={loading} error={error} empty={data?.length === 0} />
-        {data && <FeedbackWidget endpoint="dependencies" query={ratedQuery} />}
         {data && data.length > 0 && (
           <DataTable
             rows={data}

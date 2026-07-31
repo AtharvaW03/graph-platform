@@ -4,7 +4,6 @@ import { useAsync } from "../hooks/useAsync";
 import { useRepoScope } from "../context/RepoScope";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, joinList } from "../components/DataTable";
-import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
 import { Badge, Button, Card, PageHeader, Segmented, Stat } from "../components/ui";
 import type { HTTPRoute } from "../types";
@@ -17,13 +16,11 @@ import type { HTTPRoute } from "../types";
 // are fields FindRoutes already returns.
 export function Security() {
   const [undocumentedOnly, setUndocumentedOnly] = useState(false);
-  const [ratedQuery, setRatedQuery] = useState("");
   const { selected, setSelected } = useRepoScope();
   const { data, error, loading, run } = useAsync<HTTPRoute[]>();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    setRatedQuery(selected.length > 0 ? selected.join(",") : "org-wide");
     run(() => api.findRoutes(undefined, undefined, selected));
   };
 
@@ -72,7 +69,6 @@ export function Security() {
           empty={data?.length === 0}
           emptyText="No routes indexed yet - run the indexer first."
         />
-        {data && <FeedbackWidget endpoint="security" query={ratedQuery} />}
 
         {data && data.length > 0 && (
           <>

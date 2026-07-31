@@ -4,7 +4,6 @@ import { useAsync } from "../hooks/useAsync";
 import { useRepoScope } from "../context/RepoScope";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges, ConfidenceBadge } from "../components/DataTable";
-import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
 import { Button, Card, Input, PageHeader, Segmented } from "../components/ui";
 import type { CallEdge, ImpactNode, PathNode } from "../types";
@@ -25,7 +24,6 @@ export function Impact() {
   const [symbol, setSymbol] = useState("");
   const [target, setTarget] = useState("");
   const [depth, setDepth] = useState(3);
-  const [ratedQuery, setRatedQuery] = useState("");
   const { selected, setSelected } = useRepoScope();
 
   const callers = useAsync<CallEdge[]>();
@@ -39,12 +37,10 @@ export function Impact() {
     e.preventDefault();
     if (mode === "path") {
       if (!symbol.trim() || !target.trim()) return;
-      setRatedQuery(`${symbol.trim()} -> ${target.trim()}`);
       path.run(() => api.shortestPath(symbol.trim(), target.trim(), selected));
       return;
     }
     if (!symbol.trim()) return;
-    setRatedQuery(`${mode}: ${symbol.trim()}`);
     if (mode === "callers") callers.run(() => api.findCallers(symbol.trim(), selected));
     else if (mode === "callees") callees.run(() => api.findCallees(symbol.trim(), selected));
     else blast.run(() => api.blastRadius(symbol.trim(), depth, selected));
@@ -121,7 +117,6 @@ export function Impact() {
                 : "No results - exact match only, so check the spelling. Variables aren't indexed, only named code elements (functions, classes, routes, tables, ...)."
           }
         />
-        {active.data && <FeedbackWidget endpoint={mode === "path" ? "path" : "impact"} query={ratedQuery} />}
 
         {mode === "callers" && callers.data && callers.data.length > 0 && (
           <DataTable

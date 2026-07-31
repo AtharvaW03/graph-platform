@@ -75,7 +75,7 @@ func recordableEndpoint(path string) (string, bool) {
 	}
 	first, _, _ := strings.Cut(trimmed, "/")
 	switch first {
-	case "health", "ready", "portal", "admin", "keys", "feedback":
+	case "health", "ready", "portal", "admin", "keys":
 		return "", false
 	}
 	// Second segment is the subject (a symbol name, a repo) - never part of

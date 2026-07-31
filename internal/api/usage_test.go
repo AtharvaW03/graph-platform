@@ -66,7 +66,7 @@ func TestUsageRecording_SkipsInfrastructurePaths(t *testing.T) {
 	rec := &fakeRecorder{}
 	h := WithUsageRecording(handlerWithStatus(http.StatusOK), rec)
 
-	for _, path := range []string{"/health", "/ready", "/portal", "/portal/keys", "/admin/usage", "/keys/validate", "/feedback/stats"} {
+	for _, path := range []string{"/health", "/ready", "/portal", "/portal/keys", "/admin/usage", "/keys/validate"} {
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
 	}
 	if len(rec.samples) != 0 {
