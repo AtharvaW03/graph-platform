@@ -94,6 +94,8 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /admin/api/anomalies", h.guard(h.anomalies))
 	mux.HandleFunc("GET /admin/api/keys", h.guard(h.listKeys))
 	mux.HandleFunc("GET /admin/api/audit", h.guard(h.auditTrail))
+	mux.HandleFunc("GET /admin/api/repos/{name}", h.guard(h.repoDetailHandler))
+	mux.HandleFunc("GET /admin/api/actors/{actor}", h.guard(h.actorDetailHandler))
 	mux.HandleFunc("POST /admin/api/keys/revoke", h.guard(h.revokeKey))
 	mux.HandleFunc("POST /admin/api/indexing/pause", h.guard(h.pauseIndexing))
 	mux.HandleFunc("POST /admin/api/indexing/resume", h.guard(h.resumeIndexing))
