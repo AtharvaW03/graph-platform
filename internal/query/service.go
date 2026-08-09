@@ -61,24 +61,65 @@ func (s *Service) read(ctx context.Context, fn func(tx driver.ManagedTransaction
 	return sess.ExecuteRead(ctx, fn, driver.WithTxTimeout(txTimeout))
 }
 
-// Search returns nodes matching q, ranked by relevance. It tries the
-// entity_search fulltext index first (whole-token/stem matching, scored by
-// Lucene relevance) and only falls back to the exact/prefix/CONTAINS scan
-// below when the fulltext tier comes back empty or errors - a fulltext hit on
-// a bare mid-identifier substring (Lucene tokenizes on word boundaries, so it
-// won't match a partial token) is exactly the case the fallback still
-// catches. repos, when non-empty, scopes to those repos - shared nodes carry
+// Search returns nodes matching q, ranked by relevance. It queries the
+// entity_search fulltext index (whole-token/stem matching, scored by Lucene
+// relevance) and the exact/prefix/CONTAINS scan below, then merges them,
+// fulltext hits first.
+//
+// Both tiers run because they answer different questions and neither
+// subsumes the other: Lucene tokenizes on word boundaries, so a search for a
+// bare mid-identifier substring ("ltp") matches a node that happens to carry
+// it as a whole token (a repo hub named "ltp-probe") while missing every
+// symbol that merely contains it (formatLtp, renderLtp). Short-circuiting on
+// a non-empty fulltext tier let one incidental token hit hide all of those -
+// the caller saw a plausible-looking single result and no indication that
+// substring matches had been suppressed, which is worse than either tier
+// alone. repos, when non-empty, scopes to those repos - shared nodes carry
 // no repo and drop out of scoped results.
 func (s *Service) Search(ctx context.Context, q string, repos []string) ([]SearchResult, error) {
 	if q == "" {
 		return []SearchResult{}, nil
 	}
-	if results, err := s.searchFulltext(ctx, q, repos); err != nil {
-		log.Printf("search: fulltext tier failed, using fallback: %v", err)
-	} else if len(results) > 0 {
-		return results, nil
+	fulltext, err := s.searchFulltext(ctx, q, repos)
+	if err != nil {
+		log.Printf("search: fulltext tier failed, using fallback alone: %v", err)
 	}
-	return s.searchFallback(ctx, q, repos)
+	// A full page of fulltext hits is already more than the caller asked to
+	// see; the substring tier could not add anything within the limit.
+	if len(fulltext) >= searchLimit {
+		return fulltext, nil
+	}
+	fallback, err := s.searchFallback(ctx, q, repos)
+	if err != nil {
+		// Partial results beat none when only one tier is broken.
+		if len(fulltext) > 0 {
+			log.Printf("search: fallback tier failed, using fulltext alone: %v", err)
+			return fulltext, nil
+		}
+		return nil, err
+	}
+	return mergeSearchResults(fulltext, fallback), nil
+}
+
+// mergeSearchResults concatenates the tiers in order, dropping nodes already
+// contributed by an earlier tier (the two overlap whenever a term is both a
+// whole token and a substring) and capping at searchLimit.
+func mergeSearchResults(tiers ...[]SearchResult) []SearchResult {
+	out := make([]SearchResult, 0, searchLimit)
+	seen := make(map[string]struct{}, searchLimit)
+	for _, tier := range tiers {
+		for _, r := range tier {
+			if _, dup := seen[r.NodeKey]; dup {
+				continue
+			}
+			seen[r.NodeKey] = struct{}{}
+			out = append(out, r)
+			if len(out) >= searchLimit {
+				return out
+			}
+		}
+	}
+	return out
 }
 
 // searchFulltext queries the entity_search fulltext index (name, norm_name,
@@ -212,17 +253,29 @@ func normalizeSymbol(s string) string {
 }
 
 // symbolMatchList returns the equality candidates for a user-typed symbol:
-// the normalized base and the base + "()" function spelling. Matching both
-// means a lookup works whether the node is stored bare (Class, HttpRoute,
-// File) or parens-suffixed (Function), and whatever the user typed.
+// the normalized base, the base + "()" function spelling, and both of those
+// again with a leading "." receiver marker. Matching all four means a lookup
+// works whether the node is stored bare (Class, HttpRoute, File) or
+// parens-suffixed (Function), and whatever the user typed.
+//
+// The leading-dot forms matter for languages where graphify emits methods
+// receiver-qualified with an empty receiver - Swift and Kotlin members come
+// through as ".formatLtp()", not "formatLtp()". Without these variants every
+// exact-match query (FindSymbol, callers, callees, blast radius, shortest
+// path) silently skipped every Swift and Kotlin method: a cross-platform
+// lookup returned only the languages that store names bare, which reads as
+// "this symbol exists on web but not mobile" rather than as a miss.
 func symbolMatchList(s string) []string {
-	base := normalizeSymbol(s)
-	if base == "" || strings.HasSuffix(base, ")") {
-		// Nothing to vary: empty input, or a base that still ends in ")"
-		// (e.g. a lone "()") where appending another pair would be noise.
+	base := strings.TrimPrefix(normalizeSymbol(s), ".")
+	if base == "" {
 		return []string{base}
 	}
-	return []string{base, base + "()"}
+	if strings.HasSuffix(base, ")") {
+		// A base that still ends in ")" (e.g. a lone "()") - appending
+		// another pair would be noise, but the receiver form still applies.
+		return []string{base, "." + base}
+	}
+	return []string{base, base + "()", "." + base, "." + base + "()"}
 }
 
 // FindSymbol returns every node whose name (or norm_name) exactly matches the

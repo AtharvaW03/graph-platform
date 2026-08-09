@@ -123,7 +123,7 @@ active key per person, expiring at the start of every calendar month so
 renewal re-proves the org account. mcp-server validates them via
 query-service's internal `POST /keys/validate` (1-minute cache, fails
 closed). Keys are (:ApiKey) nodes - hash only, never plaintext - outside
-the indexer's sweep, like (:Feedback). The static `MCP_AUTH_TOKEN` remains
+the indexer's sweep. The static `MCP_AUTH_TOKEN` remains
 the service-level/migration credential.
 
 ## GitHub integration
@@ -181,11 +181,14 @@ Line-oriented matchers across Go/Python/JS/TS/Java/Kotlin/C#/Ruby/PHP with:
 - Indexer webhook mode also serves `GET /status` (bearer
   `INDEXER_STATUS_TOKEN`): per-repo last-indexed commit, failures, pending
   re-indexes.
-- The web UI has a feedback widget posting to `POST /feedback` (per-query
-  helpful/unhelpful ratings). nginx method-restricts and rate-limits that
-  write and does not proxy `GET /feedback/stats` at all - aggregated
-  ratings are an operator metric, read directly from query-service with
-  the internal token.
+- The query API is entirely read-only; nginx enforces GET/HEAD on `/api/`
+  so the injected service token cannot be ridden into any write path a
+  future change might add. (A per-query helpful/unhelpful feedback widget
+  existed and was removed: opt-in ratings were not going to see enough use
+  to be a signal, and it was both the API's only write path and the only
+  place a user's search text was persisted. Actual usage volume in
+  `internal/usage` is the better adoption measure and costs the user
+  nothing.)
 
 ## Admin surface (`/admin` on query-service)
 

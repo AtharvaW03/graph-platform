@@ -5,7 +5,6 @@ import { useAsync } from "../hooks/useAsync";
 import { useRepoScope } from "../context/RepoScope";
 import { StatusBox } from "../components/StatusBox";
 import { DataTable, LabelBadges } from "../components/DataTable";
-import { FeedbackWidget } from "../components/FeedbackWidget";
 import { RepoPicker } from "../components/RepoPicker";
 import { Button, Card, Input, PageHeader, Segmented } from "../components/ui";
 import type { SearchResult, SymbolResult } from "../types";
@@ -18,7 +17,6 @@ export function Search() {
   const [mode, setMode] = useState<Mode>(
     params.get("mode") === "symbol" ? "symbol" : "fuzzy",
   );
-  const [ratedQuery, setRatedQuery] = useState("");
   const { selected, setSelected } = useRepoScope();
 
   const fuzzy = useAsync<SearchResult[]>();
@@ -26,7 +24,6 @@ export function Search() {
   const active = mode === "fuzzy" ? fuzzy : symbol;
 
   const runQuery = (m: Mode, query: string) => {
-    setRatedQuery(query);
     if (m === "fuzzy") fuzzy.run(() => api.search(query, selected));
     else symbol.run(() => api.findSymbol(query, selected));
   };
@@ -114,7 +111,6 @@ export function Search() {
                 : "No exact match - names are case-insensitive but must match in full. Function names usually end with ()."
           }
         />
-        {active.data && <FeedbackWidget endpoint={mode === "fuzzy" ? "search" : "symbol"} query={ratedQuery} />}
 
         {mode === "fuzzy" && fuzzy.data && fuzzy.data.length > 0 && (
           <DataTable

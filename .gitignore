@@ -2,8 +2,11 @@
 workdir/
 graphify-out/
 
-# Local override of the committed repos.yaml
-config/repos.local.yaml
+# Local operator configs. AGENTS.md documents "*.local.yaml" as the
+# convention, so match the whole pattern rather than one filename - an
+# operator config named anything else (repos.docker.local.yaml, a
+# per-team manifest) is just as likely to carry internal repo URLs.
+config/*.local.yaml
 
 # Local env files (never commit tokens/passwords)
 .env

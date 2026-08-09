@@ -4,7 +4,6 @@ import { api } from "../api";
 import { useAsync } from "../hooks/useAsync";
 import { useRepoScope } from "../context/RepoScope";
 import { StatusBox } from "../components/StatusBox";
-import { FeedbackWidget } from "../components/FeedbackWidget";
 import { Badge, Button, Card, PageHeader, Stat } from "../components/ui";
 import type { RepositoryOverview } from "../types";
 
@@ -107,7 +106,6 @@ export function Repos() {
             <>
               <StatusBox loading={overview.loading} error={overview.error} />
               {overview.data && <OverviewBody ov={overview.data} />}
-              {overview.data && <FeedbackWidget endpoint="overview" query={selected} />}
             </>
           )}
         </Card>

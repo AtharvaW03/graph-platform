@@ -5,9 +5,9 @@
 // the org account still exists; a disabled leaver's account can't renew).
 //
 // Keys are stored as (:ApiKey) nodes in Neo4j - deliberately NOT :Entity and
-// carrying no repo, so the indexer's mark-and-sweep never touches them (same
-// reasoning as :Feedback). Only the SHA-256 hash of a key is stored; the
-// plaintext exists once, in the mint response.
+// carrying no repo, so the indexer's mark-and-sweep never touches them. Only
+// the SHA-256 hash of a key is stored; the plaintext exists once, in the
+// mint response.
 package keys
 
 import (

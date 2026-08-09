@@ -5,21 +5,27 @@ import (
 	"testing"
 )
 
-// symbolMatchList must always offer BOTH spellings: graphify stores Function
-// names with a trailing "()" while other kinds are bare, so matching only
-// one form silently loses the other kind entirely.
+// symbolMatchList must always offer every spelling: graphify stores Function
+// names with a trailing "()" while other kinds are bare, and stores Swift and
+// Kotlin members receiver-qualified (".formatLtp()"), so matching only one
+// form silently loses the other kinds entirely.
 func TestSymbolMatchList(t *testing.T) {
 	tests := []struct {
 		in   string
 		want []string
 	}{
-		{"GetDepositService", []string{"getdepositservice", "getdepositservice()"}},
-		{"GetDepositService()", []string{"getdepositservice", "getdepositservice()"}},
-		{"GetDepositService(a, b)", []string{"getdepositservice", "getdepositservice()"}},
-		{"  GetDepositService ()  ", []string{"getdepositservice", "getdepositservice()"}},
-		{"dbo.Orders", []string{"dbo.orders", "dbo.orders()"}},
+		{"GetDepositService", []string{"getdepositservice", "getdepositservice()", ".getdepositservice", ".getdepositservice()"}},
+		{"GetDepositService()", []string{"getdepositservice", "getdepositservice()", ".getdepositservice", ".getdepositservice()"}},
+		{"GetDepositService(a, b)", []string{"getdepositservice", "getdepositservice()", ".getdepositservice", ".getdepositservice()"}},
+		{"  GetDepositService ()  ", []string{"getdepositservice", "getdepositservice()", ".getdepositservice", ".getdepositservice()"}},
+		// Internal dots are part of the name (SQL schema qualifier); only a
+		// leading receiver dot is stripped.
+		{"dbo.Orders", []string{"dbo.orders", "dbo.orders()", ".dbo.orders", ".dbo.orders()"}},
+		// A user who types the stored receiver form gets the same set as one
+		// who types the bare name - neither spelling loses the other.
+		{".formatLtp()", []string{"formatltp", "formatltp()", ".formatltp", ".formatltp()"}},
 		{"", []string{""}},
-		{"()", []string{"()"}},
+		{"()", []string{"()", ".()"}},
 	}
 	for _, tt := range tests {
 		if got := symbolMatchList(tt.in); !reflect.DeepEqual(got, tt.want) {

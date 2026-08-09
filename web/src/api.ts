@@ -58,25 +58,6 @@ async function get<T>(
   return res.json() as Promise<T>;
 }
 
-async function post(path: string, body: unknown): Promise<void> {
-  const res = await fetch(API_BASE + path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new ApiError(res.status, text || res.statusText);
-  }
-}
-
-export interface FeedbackInput {
-  endpoint: string;
-  query: string;
-  helpful: boolean;
-  note?: string;
-}
-
 export const api = {
   // /health and /ready are unauthenticated (see internal/api/server.go), so
   // neither needs the token the rest of this client deliberately doesn't
@@ -125,5 +106,4 @@ export const api = {
     get<GlueJobInfo[]>("/glue/jobs", { source, target }),
   findHotspots: (repos?: string[], limit?: number) =>
     get<HotspotNode[]>("/hotspots", { repos: scopeParam(repos), limit }),
-  sendFeedback: (f: FeedbackInput) => post("/feedback", f),
 };

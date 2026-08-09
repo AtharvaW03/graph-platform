@@ -88,13 +88,10 @@ envsubst-templates mechanism (`/etc/nginx/templates/default.conf.template`)
 and injected into the proxied `Authorization` header - it never reaches the
 browser bundle, build-time or otherwise.
 
-The proxy is not a blind pass-through: reads are GET/HEAD-only (403
-otherwise), `/api/feedback` - the one write the UI needs - is POST-only and
-rate-limited (30r/m, burst 10, 429 on rejection), and `/api/feedback/stats`
-is not proxied at all (403; aggregated ratings are an operator metric, read
-directly from query-service with the internal token). This keeps the
-injected token from being ridden into anything beyond what the SPA actually
-uses.
+The proxy is not a blind pass-through: `/api/` is GET/HEAD-only (403
+otherwise), which keeps the injected token from being ridden into any write
+path the API might grow later. The query API is read-only, so there is no
+exception to that rule.
 
 ## Full stack
 

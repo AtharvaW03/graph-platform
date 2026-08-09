@@ -104,9 +104,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /hotspots", s.findHotspots)
 	mux.HandleFunc("GET /freshness", s.freshness)
 
-	mux.HandleFunc("POST /feedback", s.submitFeedback)
-	mux.HandleFunc("GET /feedback/stats", s.feedbackStats)
-
 	if s.keys != nil {
 		mux.HandleFunc("POST /keys/validate", s.validateKey)
 	}
@@ -396,45 +393,6 @@ func (s *Server) findHotspots(w http.ResponseWriter, r *http.Request) {
 		limit = parsed
 	}
 	out, err := s.svc.FindHotspots(r.Context(), parseRepos(q), limit)
-	if err != nil {
-		serverError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// submitFeedback records one thumbs up/down; the only write endpoint on an
-// otherwise read-only API. Body is size-capped and validated downstream.
-func (s *Server) submitFeedback(w http.ResponseWriter, r *http.Request) {
-	var f query.Feedback
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&f); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid feedback body: "+err.Error())
-		return
-	}
-	if strings.TrimSpace(f.Endpoint) == "" {
-		writeErr(w, http.StatusBadRequest, "endpoint required")
-		return
-	}
-	if err := s.svc.SubmitFeedback(r.Context(), f); err != nil {
-		serverError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) feedbackStats(w http.ResponseWriter, r *http.Request) {
-	days := 30
-	if d := r.URL.Query().Get("days"); d != "" {
-		parsed, err := strconv.Atoi(d)
-		if err != nil || parsed <= 0 {
-			writeErr(w, http.StatusBadRequest, "days must be a positive integer")
-			return
-		}
-		days = parsed
-	}
-	out, err := s.svc.GetFeedbackStats(r.Context(), days)
 	if err != nil {
 		serverError(w, err)
 		return
