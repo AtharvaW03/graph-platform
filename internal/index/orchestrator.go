@@ -22,7 +22,9 @@ import (
 // v10: graphify 0.9.29 canonicalizes node IDs to root-relative form, which
 // changes every graphify_id-derived node_key - all repos must re-import so
 // old-key nodes sweep out in one pass instead of lingering next to new ones.
-const GraphSchemaVersion = 10
+// v11: graphify 0.9.30-0.9.44 moves node keys again and changes the edge
+// set (fabricated call edges dropped, previously-missed ones extracted).
+const GraphSchemaVersion = 11
 
 // Orchestrator drives the per-repo pipeline for a configured set of
 // repositories. Every step is delegated to a pluggable component (Source,
