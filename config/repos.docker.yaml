@@ -17,6 +17,7 @@ extractors:
   http_api: true
   kafka: true
   mssql: true
+  postgres: true
   glue: true
 
 org:

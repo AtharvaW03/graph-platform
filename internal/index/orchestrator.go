@@ -24,6 +24,8 @@ import (
 // old-key nodes sweep out in one pass instead of lingering next to new ones.
 // v11: graphify 0.9.30-0.9.44 moves node keys again and changes the edge
 // set (fabricated call edges dropped, previously-missed ones extracted).
+// Also the new postgres extractor re-keys Postgres .sql objects from dbo to
+// public and adds the ones the T-SQL regexes could not see.
 const GraphSchemaVersion = 11
 
 // Orchestrator drives the per-repo pipeline for a configured set of

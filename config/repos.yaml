@@ -48,8 +48,16 @@ extractors:
   http_api: true
   kafka: true
   mssql: true
+  postgres: true
   glue: true
   max_parallel: 0 # 0 = all in parallel
+  # mssql and postgres both scan .sql files and route each one by the dialect
+  # its syntax reveals, so exactly one of them claims any given file. Most
+  # plain DDL reveals nothing either way; sql_default_dialect decides who
+  # gets those. Leave it at mssql unless the org is Postgres-only - it sets
+  # the schema an unqualified object lands in (dbo vs public), which is part
+  # of the node key.
+  sql_default_dialect: mssql
 
 org:
   prefixes:

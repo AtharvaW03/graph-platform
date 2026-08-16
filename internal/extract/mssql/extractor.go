@@ -6,6 +6,12 @@
 // It is regex-based, not a T-SQL parser: good for inventory and dependency
 // graphs, not query analysis. Dependency edges are INFERRED; structural
 // object-to-schema edges are EXTRACTED.
+//
+// This extractor and the postgres one both walk every .sql file, so
+// sqldialect.Detect routes each file to exactly one of them - otherwise both
+// would match a plain CREATE TABLE and disagree about the default schema
+// (dbo here, public there), which is part of the node key. Files with no
+// dialect markers either way stay here.
 package mssql
 
 import (
@@ -19,10 +25,16 @@ import (
 	"strings"
 
 	"a1-knowledge-graph/internal/extract"
+	"a1-knowledge-graph/internal/extract/sqldialect"
 )
 
 type Extractor struct {
 	MaxFileBytes int64
+
+	// DefaultDialect claims .sql files whose contents match neither dialect's
+	// syntax. Zero value (Unknown) keeps them here, which is the historical
+	// behavior; a Postgres-only org sets it to Postgres to hand them over.
+	DefaultDialect sqldialect.Dialect
 }
 
 func New() *Extractor { return &Extractor{MaxFileBytes: 8 * 1024 * 1024} }
@@ -135,6 +147,12 @@ func (e *Extractor) Extract(ctx context.Context, repoPath, repoName string) (*ex
 		body, rerr := os.ReadFile(path)
 		if rerr != nil {
 			frag.Warn(fmt.Sprintf("%s: %v", rel, rerr))
+			return nil
+		}
+		// Dialect routing: hand PostgreSQL files to the postgres extractor,
+		// which keys them to the public schema and understands the syntax
+		// these regexes silently miss.
+		if sqldialect.Owner(string(body), e.DefaultDialect) != sqldialect.MSSQL {
 			return nil
 		}
 		stmts := splitObjects(string(body), rel)

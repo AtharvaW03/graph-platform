@@ -38,7 +38,7 @@ Neo4j ◀── query-service (REST :8080) ◀── mcp-server (stdio or HTTP :
 - `cmd/importer` - manual one-off import of a static graph.json.
 - `cmd/repogen` - one-off manifest generator from the GitHub org API.
 - `internal/extract/*` - platform extractors (deps, httpapi, kafka, mssql,
-  glue) that enrich graphify's AST graph.
+  postgres, glue) that enrich graphify's AST graph.
 - `web/` - React/Vite SPA served by nginx, which proxies `/api/*` to
   query-service and injects the auth token server-side (the browser never
   holds a token).
@@ -160,6 +160,48 @@ Line-oriented matchers across Go/Python/JS/TS/Java/Kotlin/C#/Ruby/PHP with:
   not implemented) - that drift is signal, not noise.
 - Known limitation: constants imported from another repo/module do not
   resolve (per-repo scan); such routes are dropped with a warning.
+
+## SQL extraction (mssql + postgres) - dialect routing
+
+Two extractors, one node namespace. Both walk every `.sql` file and emit the
+same `sql_*` node types under `sql::<kind>::<schema>.<name>`, so the SQL
+query surfaces (`find_sql_object`, repo overview, the object browser) are
+dialect-blind and need no changes when a new dialect arrives. `sql::` is a
+shared-ID prefix, so a table referenced by five repos is one org-global node.
+
+`internal/extract/sqldialect` decides who owns each file, and **exactly one
+extractor must claim it**. Both claiming means two nodes for one physical
+table - they disagree about the default schema (`dbo` vs `public`), and that
+schema is part of the node key. Neither claiming loses the file silently.
+
+- Detection is marker scoring, not parsing: syntax one engine cannot parse
+  (dollar-quoted bodies, `LANGUAGE plpgsql`, `CREATE MATERIALIZED VIEW` vs
+  the `GO` batch separator, bracket-quoted identifiers, `NVARCHAR`) is
+  weighted above merely idiomatic syntax. Detected dialect always beats the
+  configured default.
+- Most committed DDL is dialect-neutral and scores nothing either way.
+  `extractors.sql_default_dialect` (`mssql` by default) claims those. A
+  Postgres-only org must set it to `postgres`, or every plain schema file is
+  keyed to `dbo`. Changing it re-keys objects, so it needs a
+  `GraphSchemaVersion` bump.
+- The postgres extractor covers what the T-SQL regexes structurally cannot:
+  `CREATE OR REPLACE`, materialized views, dollar-quoted plpgsql bodies,
+  `EXECUTE FUNCTION` trigger targets, `PERFORM`/`CALL`, inline `REFERENCES`
+  with no column list, and `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`
+  (the normal migration shape, and a documented non-goal on the mssql side).
+- Postgres triggers are not schema-qualified, so a trigger is keyed to its
+  table's schema rather than the default - otherwise it splits from the
+  table it fires on.
+- CTE names and set-returning functions (`unnest`, `generate_series`) sit in
+  `FROM` position but are not tables; both are suppressed. Comments are
+  stripped everywhere including *inside* plpgsql bodies, so commented-out
+  SQL cannot reach the graph.
+- Neither extractor connects to a database. graphify ships live
+  introspection (`--postgres <DSN>`, the `graphifyy[postgres]` extra) - do
+  not adopt it: it would put production database credentials in the indexer
+  and the result is not repo-owned, so the sweep could not manage it.
+  graphify's own `.sql` file extractor (`graphifyy[sql]`) stays uninstalled
+  for the same duplication reason as always.
 
 ## Freshness
 

@@ -22,6 +22,7 @@ import (
 	"a1-knowledge-graph/internal/extract/httpapi"
 	"a1-knowledge-graph/internal/extract/kafka"
 	"a1-knowledge-graph/internal/extract/mssql"
+	"a1-knowledge-graph/internal/extract/postgres"
 	"a1-knowledge-graph/internal/githubapp"
 	"a1-knowledge-graph/internal/httpmw"
 	"a1-knowledge-graph/internal/index"
@@ -515,8 +516,8 @@ func writeGitCredential(ctx context.Context, ghClient *githubapp.Client) error {
 }
 
 // buildExtractorRunner constructs the extract.Runner from the platform's
-// domain extractors (deps, http_api, kafka, mssql, glue), each toggleable via
-// cfg.Extractors. Returns nil if all are disabled.
+// domain extractors (deps, http_api, kafka, mssql, postgres, glue), each
+// toggleable via cfg.Extractors. Returns nil if all are disabled.
 func buildExtractorRunner(cfg *index.Config, logger *log.Logger) *extract.Runner {
 	var exs []extract.Extractor
 	if cfg.Extractors.DepsEnabled() {
@@ -528,8 +529,19 @@ func buildExtractorRunner(cfg *index.Config, logger *log.Logger) *extract.Runner
 	if cfg.Extractors.KafkaEnabled() {
 		exs = append(exs, kafka.New())
 	}
+	// Both SQL extractors walk every .sql file and route by detected dialect,
+	// so they need the same tie-breaker or a dialect-neutral file would be
+	// claimed by both (duplicate nodes) or neither (silent data loss).
+	sqlDefault := cfg.Extractors.DefaultSQLDialect()
 	if cfg.Extractors.MSSQLEnabled() {
-		exs = append(exs, mssql.New())
+		ex := mssql.New()
+		ex.DefaultDialect = sqlDefault
+		exs = append(exs, ex)
+	}
+	if cfg.Extractors.PostgresEnabled() {
+		ex := postgres.New()
+		ex.DefaultDialect = sqlDefault
+		exs = append(exs, ex)
 	}
 	if cfg.Extractors.GlueEnabled() {
 		exs = append(exs, glue.New())
