@@ -1,5 +1,5 @@
 # Build context: repo root. docker build -f deploy/Dockerfile.indexer .
-FROM golang:1.26.5-alpine AS builder
+FROM golang:1.26.6-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/indexer ./cmd/indexer
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates openssh-client \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir "graphifyy[terraform]==0.9.29"
+RUN pip install --no-cache-dir "graphifyy[terraform]==0.9.44"
 COPY --from=builder /out/indexer /usr/local/bin/indexer
 COPY deploy/indexer-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

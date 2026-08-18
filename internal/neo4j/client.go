@@ -74,7 +74,14 @@ var metadataProps = []string{
 	"method", "handler", "source", "classification", "documented", "tags", // httpapi
 	"script", "schedule", "sources", "dests", "expression", // glue
 	"is_repository", "discovered_as", // deps repo hubs
-	"schema", "object_name", // mssql
+	"schema", "object_name", // mssql + postgres
+	// A materialized view is stored, refreshable data rather than a query
+	// alias, so it behaves differently downstream - but both collapse to the
+	// SqlView label. This boolean is what makes that collapse reversible.
+	// Set only on a real CREATE MATERIALIZED VIEW, so it is never
+	// half-populated the way a per-object dialect tag would be (objects
+	// forward-declared from a reference have no defining statement to read).
+	"materialized", // postgres
 }
 
 type Client struct {

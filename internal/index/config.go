@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"a1-knowledge-graph/internal/extract/sqldialect"
 )
 
 // validRepoName restricts Repository.Name to characters safe as a filesystem
@@ -50,7 +52,16 @@ type ExtractorsConfig struct {
 	HTTPAPI *bool `yaml:"http_api"`
 	Kafka   *bool `yaml:"kafka"`
 	MSSQL   *bool `yaml:"mssql"`
-	Glue    *bool `yaml:"glue"`
+	// Postgres and MSSQL both scan .sql files and route by detected dialect,
+	// so enabling one without the other does not double-count anything - it
+	// just leaves that dialect's files unextracted.
+	Postgres *bool `yaml:"postgres"`
+	Glue     *bool `yaml:"glue"`
+	// SQLDefaultDialect decides who owns a .sql file whose contents match
+	// neither dialect's syntax - which is most plain DDL. "mssql" (the
+	// default) or "postgres". Set it to postgres in a Postgres-only org, or
+	// every dialect-neutral schema file is keyed to the dbo schema.
+	SQLDefaultDialect string `yaml:"sql_default_dialect"`
 	// MaxParallel caps concurrent extractors per repo. Zero or negative means
 	// run all configured extractors at once.
 	MaxParallel int `yaml:"max_parallel"`
@@ -77,11 +88,19 @@ func boolDefault(v *bool, def bool) bool {
 }
 
 // DepsEnabled reports whether the deps extractor should run.
-func (c ExtractorsConfig) DepsEnabled() bool    { return boolDefault(c.Deps, true) }
-func (c ExtractorsConfig) HTTPAPIEnabled() bool { return boolDefault(c.HTTPAPI, true) }
-func (c ExtractorsConfig) KafkaEnabled() bool   { return boolDefault(c.Kafka, true) }
-func (c ExtractorsConfig) MSSQLEnabled() bool   { return boolDefault(c.MSSQL, true) }
-func (c ExtractorsConfig) GlueEnabled() bool    { return boolDefault(c.Glue, true) }
+func (c ExtractorsConfig) DepsEnabled() bool     { return boolDefault(c.Deps, true) }
+func (c ExtractorsConfig) HTTPAPIEnabled() bool  { return boolDefault(c.HTTPAPI, true) }
+func (c ExtractorsConfig) KafkaEnabled() bool    { return boolDefault(c.Kafka, true) }
+func (c ExtractorsConfig) MSSQLEnabled() bool    { return boolDefault(c.MSSQL, true) }
+func (c ExtractorsConfig) PostgresEnabled() bool { return boolDefault(c.Postgres, true) }
+func (c ExtractorsConfig) GlueEnabled() bool     { return boolDefault(c.Glue, true) }
+
+// DefaultSQLDialect resolves SQLDefaultDialect. Validate has already rejected
+// an unparseable value, so the error is dropped here.
+func (c ExtractorsConfig) DefaultSQLDialect() sqldialect.Dialect {
+	d, _ := sqldialect.Parse(c.SQLDefaultDialect)
+	return d
+}
 
 // AllowPartialEnabled reports whether an extractor error should be tolerated
 // (import the partial graph anyway) rather than failing the repo closed.
@@ -190,6 +209,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Discovery.Enabled && c.Discovery.TTL < time.Minute {
 		return fmt.Errorf("discovery.ttl must be at least 1m, got %s", c.Discovery.TTL)
+	}
+	if _, err := sqldialect.Parse(c.Extractors.SQLDefaultDialect); err != nil {
+		return fmt.Errorf("extractors.sql_default_dialect: %w", err)
 	}
 	seen := map[string]bool{}
 	for i, r := range c.Repositories {
